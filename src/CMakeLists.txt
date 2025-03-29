@@ -1,12 +1,27 @@
 
 set(firmware_sources
     main.c
+    timer.c
     syscalls.c
 )
 
 add_executable(firmware
     ${firmware_sources}
 )
+
+# Comment to use internal oscillator
+# 
+target_compile_definitions(
+  firmware PRIVATE
+  USE_XOSC
+)
+
+# Uncomment to compiled code instead of ROM
+# 
+# target_compile_definitions(
+#     driverlib_cc13x2_cc26x2 PUBLIC
+#     DRIVERLIB_NOROM
+# )
 
 target_link_libraries(firmware
     driverlib_cc13x2_cc26x2
