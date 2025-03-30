@@ -39,10 +39,17 @@ void uart_init(uart_t uart, const uart_device_t* dev);
 void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks);
 
 void uart_put_char(uart_t uart, uint8_t data);
+uint8_t uart_get_char(uart_t uart);
+
 bool uart_tx_fifo_full(uart_t uart);
+bool uart_rx_fifo_available(uart_t uart);
 
 void uart_enable_tx_irq(uart_t uart);
+void uart_enable_rx_irq(uart_t uart);
+
 void uart_disable_tx_irq(uart_t uart);
+void uart_disable_rx_irq(uart_t uart);
+
 bool uart_tx_irq_enabled(uart_t uart);
 
 void uart_print(uart_t uart, const char *str);

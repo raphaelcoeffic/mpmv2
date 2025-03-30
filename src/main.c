@@ -75,6 +75,21 @@ static inline bool _serial_tx_buffer_pull(uint8_t* data)
   return true; 
 }
 
+static inline bool _serial_rx_buffer_available()
+{
+  return (rx_tail != rx_head);
+}
+
+static inline uint8_t _serial_rx_buffer_read()
+{
+  // end of buffer
+  if (rx_tail == rx_head) return 0;
+
+  uint8_t data = rx_buf[rx_tail];
+  rx_tail = (rx_tail + 1) & (RX_BUFFER_SIZE - 1);
+  return data;
+}
+
 static void _serial_rx_irq(uint8_t data)
 {
   // check if buffer is full
@@ -112,27 +127,29 @@ static void serial_init()
   uart_enable_irqs(UART0, &uart0_cb);
 }
 
-static inline bool serial_available()
+static inline bool serial_read(uint8_t* data)
 {
-  return (rx_tail != rx_head);
-}
+  if (_serial_rx_buffer_available()) {
+    *data = _serial_rx_buffer_read();
+    return true;
+  }
 
-static inline uint8_t serial_read()
-{
-  if (!serial_available()) return 0;
-  uint8_t data = rx_buf[rx_tail];
-  rx_tail = (rx_tail + 1) & (RX_BUFFER_SIZE - 1);
-  return data;
+  if (uart_rx_fifo_available(UART0)) {
+    *data = uart_get_char(UART0);
+    return true;
+  }
+
+  return false;
 }
 
 static inline bool serial_write(uint8_t data)
-{ 
+{
   if (!uart_tx_irq_enabled(UART0) && !uart_tx_fifo_full(UART0)) {
     uart_put_char(UART0, data);
     return true;
   }
 
-  _serial_tx_buffer_push(data);  
+  _serial_tx_buffer_push(data);
   uart_enable_tx_irq(UART0);
 
   return true;
@@ -169,7 +186,7 @@ int main(void)
     if (millis() - ms >= 500) {
       ms += 500;
       GPIO_toggleDio(LED_GREEN);
-      serial_print("Hello world, let's fill that UART FIFO!\n");
+      serial_print("Hello world, let's fill that ugly UART FIFO!\n");
     }
 
     uint32_t now_us = micros();

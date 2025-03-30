@@ -142,10 +142,22 @@ bool uart_tx_fifo_full(uart_t uart)
   return !UARTSpaceAvail(_uart_base[uart]);
 }
 
+bool uart_rx_fifo_available(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  return UARTCharsAvail(_uart_base[uart]);
+}
+
 void uart_put_char(uart_t uart, uint8_t data)
 {
   ASSERT(uart < MAX_UART);
   UARTCharPutNonBlocking(_uart_base[uart], data);
+}
+
+uint8_t uart_get_char(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  return UARTCharGetNonBlocking(_uart_base[uart]);
 }
 
 void uart_enable_tx_irq(uart_t uart)
@@ -155,11 +167,25 @@ void uart_enable_tx_irq(uart_t uart)
   UARTIntEnable(base, UART_INT_TX);
 }
 
+void uart_enable_rx_irq(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  uint32_t base = _uart_base[uart];
+  UARTIntEnable(base, UART_INT_RX);
+}
+
 void uart_disable_tx_irq(uart_t uart)
 {
   ASSERT(uart < MAX_UART);
   uint32_t base = _uart_base[uart];
   UARTIntDisable(base, UART_INT_TX);
+}
+
+void uart_disable_rx_irq(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  uint32_t base = _uart_base[uart];
+  UARTIntDisable(base, UART_INT_RX);
 }
 
 bool uart_tx_irq_enabled(uart_t uart)
