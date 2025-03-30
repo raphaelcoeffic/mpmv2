@@ -2,6 +2,7 @@
 set(firmware_sources
     main.c
     timer.c
+    uart.c
     syscalls.c
 )
 
@@ -11,10 +12,7 @@ add_executable(firmware
 
 # Comment to use internal oscillator
 # 
-target_compile_definitions(
-  firmware PRIVATE
-  USE_XOSC
-)
+target_compile_definitions(firmware PRIVATE USE_XOSC)
 
 # Uncomment to compiled code instead of ROM
 # 

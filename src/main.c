@@ -6,19 +6,20 @@
 #include <driverlib/uart.h>
 
 #include "timer.h"
+#include "uart.h"
 
 // CC2652R1-LAUNCHXL
 #define SERIAL_RX_IOD IOID_2
 #define SERIAL_TX_IOD IOID_3
-
-#define LED1_IOD IOID_7
-#define LED2_IOD IOID_6
+#define LED_GREEN IOID_7
+#define LED_RED IOID_6
 
 #define SERIAL_BAUDRATE 115200
 
 #define POWER_DOMAINS (PRCM_DOMAIN_PERIPH | PRCM_DOMAIN_SERIAL)
 
-void board_init() {
+static void board_init()
+{
   CPUcpsid();
 
 #if defined(USE_XOSC)
@@ -34,59 +35,147 @@ void board_init() {
   }
 
   PRCMPeripheralRunEnable(PRCM_PERIPH_GPIO);
-  PRCMPeripheralRunEnable(PRCM_PERIPH_UART0);
   PRCMLoadSet();
-
-  // LEDs
-  IOCPinTypeGpioOutput(LED1_IOD);
-  IOCPinTypeGpioOutput(LED2_IOD);
-  GPIO_clearDio(LED1_IOD);
-  GPIO_clearDio(LED2_IOD);
-
-  // Serial
-  IOCPinTypeUart(UART0_BASE, SERIAL_RX_IOD, SERIAL_TX_IOD, IOID_UNUSED,
-                 IOID_UNUSED);
-
-  UARTDisable(UART0_BASE);
-  UARTConfigSetExpClk(UART0_BASE, SysCtrlClockGet(), SERIAL_BAUDRATE,
-                      UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
-                          UART_CONFIG_PAR_NONE);
-  UARTEnable(UART0_BASE);
 
   // Enable interrupts
   CPUcpsie();
 }
 
-void uart_print(const char *str) {
-  while (*str) {
-    UARTCharPut(UART0_BASE, *str);
-    str++;
+// must be a power of 2
+#define RX_BUFFER_SIZE 128
+#define TX_BUFFER_SIZE 128
+
+static uint8_t rx_buf[RX_BUFFER_SIZE];
+static volatile uint32_t rx_head;
+static volatile uint32_t rx_tail;
+
+static uint8_t tx_buf[TX_BUFFER_SIZE];
+static volatile uint32_t tx_head;
+static volatile uint32_t tx_tail;
+
+static inline bool _serial_tx_buffer_push(uint8_t data)
+{
+  // check if buffer is full
+  if (((tx_head + 1) & (TX_BUFFER_SIZE - 1)) == tx_tail) {
+    return false;
   }
+
+  tx_buf[tx_head] = data;
+  tx_head = (tx_head + 1) & (TX_BUFFER_SIZE - 1);
+  return true;
 }
 
-int main(void) {
-  // Init chip and peripherals
+static inline bool _serial_tx_buffer_pull(uint8_t* data)
+{
+  // end of buffer
+  if (tx_tail == tx_head) return false;
+
+  *data = tx_buf[tx_tail];
+  tx_tail = (tx_tail + 1) & (TX_BUFFER_SIZE - 1);
+  return true; 
+}
+
+static void _serial_rx_irq(uint8_t data)
+{
+  // check if buffer is full
+  if (((rx_head + 1) & (RX_BUFFER_SIZE - 1)) == rx_tail) {
+    // overflow !!!
+    return;
+  }
+
+  rx_buf[rx_head] = data;
+  rx_head = (rx_head + 1) & (RX_BUFFER_SIZE - 1);
+}
+
+static uint8_t _serial_tx_irq(uint8_t* data)
+{
+  return _serial_tx_buffer_pull(data);
+}
+
+static void serial_init()
+{
+  uart_device_t uart0 = {
+    .mode = UART_8N1,
+    .baud_rate = SERIAL_BAUDRATE,
+    .rx = SERIAL_RX_IOD,
+    .tx = SERIAL_TX_IOD,
+    .cts = IOID_UNUSED,
+    .rts = IOID_UNUSED,
+  };
+  uart_init(UART0, &uart0);
+
+  uart_callbacks_t uart0_cb = {
+    .received = _serial_rx_irq,
+    .send = _serial_tx_irq,
+    .error = 0,
+  };
+  uart_enable_irqs(UART0, &uart0_cb);
+}
+
+static inline bool serial_available()
+{
+  return (rx_tail != rx_head);
+}
+
+static inline uint8_t serial_read()
+{
+  if (!serial_available()) return 0;
+  uint8_t data = rx_buf[rx_tail];
+  rx_tail = (rx_tail + 1) & (RX_BUFFER_SIZE - 1);
+  return data;
+}
+
+static inline bool serial_write(uint8_t data)
+{ 
+  if (!uart_tx_irq_enabled(UART0) && !uart_tx_fifo_full(UART0)) {
+    uart_put_char(UART0, data);
+    return true;
+  }
+
+  _serial_tx_buffer_push(data);  
+  uart_enable_tx_irq(UART0);
+
+  return true;
+}
+
+static bool serial_print(const char* str)
+{
+  while (*str) {
+    if (!serial_write(*str)) return false;
+    ++str;
+  }
+  return true;
+}
+
+static void leds_init()
+{
+  IOCPinTypeGpioOutput(LED_GREEN);
+  IOCPinTypeGpioOutput(LED_RED);
+  GPIO_clearDio(LED_GREEN);
+  GPIO_clearDio(LED_RED);
+}
+
+int main(void)
+{
   board_init();
-
-  // Start timer
   timer_init();
+  serial_init();
+  leds_init();
 
-  uint32_t ms = 0;
-  uint32_t us = 0;
+  uint32_t ms = millis();
+  uint32_t us = micros();
 
-  while (1) {
-    uint32_t now_ms = millis();
-    uint32_t now_us = micros();
-
-    if (now_ms - ms >= 500) {
-      ms = now_ms;
-      GPIO_toggleDio(LED1_IOD);
-      uart_print("#\n");
+  while (true) {
+    if (millis() - ms >= 500) {
+      ms += 500;
+      GPIO_toggleDio(LED_GREEN);
+      serial_print("Hello world, let's fill that UART FIFO!\n");
     }
 
-    if (now_us - us >= 20000) {
-      us = now_us;
-      GPIO_toggleDio(LED2_IOD);
+    uint32_t now_us = micros();
+    if (micros() - us >= 500) {
+      us += 500;
+      GPIO_toggleDio(LED_RED);
     }
   }
 }

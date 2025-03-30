@@ -1,6 +1,8 @@
 #include <driverlib/timer.h>
 #include <driverlib/prcm.h>
 
+#include "timer.h"
+
 static volatile uint32_t _ms_ticks = 0;
 
 static void timer0_int_handler() {
