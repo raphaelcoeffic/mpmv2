@@ -8,11 +8,13 @@
 #include "timer.h"
 #include "uart.h"
 
-// CC2652R1-LAUNCHXL
 #define SERIAL_RX_IOD IOID_2
 #define SERIAL_TX_IOD IOID_3
-#define LED_GREEN IOID_7
-#define LED_RED IOID_6
+
+#if defined(BOARD_CC2652R1_LAUNCHXL)
+  #define LED_GREEN IOID_7
+  #define LED_RED IOID_6
+#endif
 
 #define SERIAL_BAUDRATE 115200
 
@@ -166,18 +168,25 @@ static bool serial_print(const char* str)
 
 static void leds_init()
 {
+#if defined(LED_GREEN)
   IOCPinTypeGpioOutput(LED_GREEN);
-  IOCPinTypeGpioOutput(LED_RED);
   GPIO_clearDio(LED_GREEN);
+#endif
+
+#if defined(LED_RED)
+  IOCPinTypeGpioOutput(LED_RED);
   GPIO_clearDio(LED_RED);
+#endif
 }
 
 int main(void)
 {
   board_init();
-  timer_init();
   serial_init();
+  timer_init();
   leds_init();
+
+  serial_print("Boot completed\n");
 
   uint32_t ms = millis();
   uint32_t us = micros();
@@ -185,14 +194,20 @@ int main(void)
   while (true) {
     if (millis() - ms >= 500) {
       ms += 500;
+
+#if defined(LED_GREEN)
       GPIO_toggleDio(LED_GREEN);
+#endif
+
       serial_print("Hello world, let's fill that ugly UART FIFO!\n");
     }
 
+#if defined(LED_RED)
     uint32_t now_us = micros();
     if (micros() - us >= 500) {
       us += 500;
       GPIO_toggleDio(LED_RED);
     }
+#endif
   }
 }

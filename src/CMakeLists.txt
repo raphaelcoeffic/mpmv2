@@ -12,14 +12,25 @@ add_executable(firmware
 
 # Comment to use internal oscillator
 # 
+# Please note: USE_XOSC is required to use the CC2652RB's HPOSC
+#
 target_compile_definitions(firmware PRIVATE USE_XOSC)
 
-# Uncomment to compiled code instead of ROM
-# 
+# Uncomment to use compiled code instead of ROM
+#
 # target_compile_definitions(
 #     driverlib_cc13x2_cc26x2 PUBLIC
 #     DRIVERLIB_NOROM
 # )
+
+# Comment to remove CCFG from firmware
+#
+target_sources(firmware PRIVATE ccfg.c)
+
+# Comment if the target MCU is NOT CC2652RB
+#
+target_compile_definitions(firmware PRIVATE CC2652RB)
+
 
 target_link_libraries(firmware
     driverlib_cc13x2_cc26x2

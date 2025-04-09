@@ -53,7 +53,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
 if(NOT TARGET toolchain_gcc)
-    add_library(toolchain_gcc INTERFACE IMPORTED)
+    add_library(toolchain_gcc INTERFACE)
     target_compile_options(
         toolchain_gcc
         INTERFACE
@@ -80,7 +80,7 @@ if(NOT TARGET toolchain_gcc)
         -Wl,--gc-sections
     )
 
-    add_library(toolchain_gcc_m4f INTERFACE IMPORTED)
+    add_library(toolchain_gcc_m4f INTERFACE)
     target_compile_options(toolchain_gcc_m4f INTERFACE -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16)
     target_link_options(toolchain_gcc_m4f INTERFACE -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16)
     target_link_libraries(toolchain_gcc_m4f INTERFACE toolchain_gcc)

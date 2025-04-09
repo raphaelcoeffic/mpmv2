@@ -8,7 +8,6 @@ set(driverlib_sources
 
 set(startup_file
     startup_files/startup_gcc.c
-    startup_files/ccfg.c
 )
 
 add_library(
