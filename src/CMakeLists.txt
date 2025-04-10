@@ -3,6 +3,8 @@ set(firmware_sources
     main.c
     timer.c
     uart.c
+    spi.c
+    led_rgb.c
     syscalls.c
 )
 
@@ -31,6 +33,11 @@ target_sources(firmware PRIVATE ccfg.c)
 #
 target_compile_definitions(firmware PRIVATE CC2652RB)
 
+# Board setting
+# target_compile_definitions(firmware
+#     PRIVATE
+#     BOARD_CC2652R1_LAUNCHXL
+# )
 
 target_link_libraries(firmware
     driverlib_cc13x2_cc26x2

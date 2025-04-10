@@ -7,13 +7,32 @@
 
 #include "timer.h"
 #include "uart.h"
-
-#define SERIAL_RX_IOD IOID_2
-#define SERIAL_TX_IOD IOID_3
+#include "led_rgb.h"
 
 #if defined(BOARD_CC2652R1_LAUNCHXL)
-  #define LED_GREEN IOID_7
-  #define LED_RED IOID_6
+  #define SERIAL_RX_IOD IOID_2
+  #define SERIAL_TX_IOD IOID_3
+  #define LED_GREEN     IOID_7
+  #define LED_RED       IOID_6
+#else
+  // *****************
+  // * MPM v2 pinout *
+  // *****************
+  // 
+  // DIO_3  <-> USB TX
+  // DIO_2  <-> SPORT RX / USB RX
+  // DIO_21 <-> SPORT TX
+  // DIO_23 <-> SPORT RX INV
+  // DIO_24 <-> SPORT TX INV
+  // 
+  // DIO_22 <-> CPPM
+  // 
+  #define SERIAL_RX_IOD IOID_2
+  #define SERIAL_TX_IOD IOID_3
+  #define LED_DIN       IOID_18
+  #define LED_SPI       SPI1
+  // timing test
+  #define LED_GREEN     IOID_7
 #endif
 
 #define SERIAL_BAUDRATE 115200
@@ -168,46 +187,45 @@ static bool serial_print(const char* str)
 
 static void leds_init()
 {
-#if defined(LED_GREEN)
+#if defined(BOARD_CC2652R1_LAUNCHXL)
   IOCPinTypeGpioOutput(LED_GREEN);
-  GPIO_clearDio(LED_GREEN);
-#endif
-
-#if defined(LED_RED)
   IOCPinTypeGpioOutput(LED_RED);
+  GPIO_clearDio(LED_GREEN);
   GPIO_clearDio(LED_RED);
+#else
+  // IOCPinTypeGpioOutput(LED_GREEN);
+  // GPIO_clearDio(LED_GREEN);
+  led_rgb_init(LED_SPI, LED_DIN);
 #endif
 }
 
 int main(void)
 {
   board_init();
-  serial_init();
   timer_init();
+  serial_init();
   leds_init();
 
   serial_print("Boot completed\n");
 
-  uint32_t ms = millis();
-  uint32_t us = micros();
+  // uint32_t next_ms = millis() + 500;
+  uint32_t next_tick = get_ticks() + us2ticks(500);
 
   while (true) {
-    if (millis() - ms >= 500) {
-      ms += 500;
+    // if (millis_after(next_ms)) {
+    //   next_ms += 500;
+    //   serial_print("Hello world, let's fill that ugly UART FIFO!\n");
+    // }
 
-#if defined(LED_GREEN)
+    if (ticks_after(next_tick)) {
+      next_tick += us2ticks(500);
+#if defined(BOARD_CC2652R1_LAUNCHXL)
       GPIO_toggleDio(LED_GREEN);
+#else
+      // GPIO_setDio(LED_GREEN);
+      led_rgb_set_color(LED_SPI, LED_COLOR(0x12, 0x34, 0x56));
+      // GPIO_clearDio(LED_GREEN);
 #endif
-
-      serial_print("Hello world, let's fill that ugly UART FIFO!\n");
     }
-
-#if defined(LED_RED)
-    uint32_t now_us = micros();
-    if (micros() - us >= 500) {
-      us += 500;
-      GPIO_toggleDio(LED_RED);
-    }
-#endif
   }
 }
