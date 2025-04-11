@@ -1,11 +1,12 @@
 
 set(firmware_sources
+    board.c
+    led_rgb.c
     main.c
+    spi.c
+    syscalls.c
     timer.c
     uart.c
-    spi.c
-    led_rgb.c
-    syscalls.c
 )
 
 add_executable(firmware

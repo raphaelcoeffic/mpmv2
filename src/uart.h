@@ -28,28 +28,51 @@ typedef struct {
   uint32_t rts;
 } uart_device_t;
 
-typedef struct {
-  void (*received)(uint8_t byte);
-  void (*error)(uart_error_t error);
-  uint8_t (*send)(uint8_t* data);
-} uart_callbacks_t;
-
+// Initialise UART without any IRQ or DMA
 void uart_init(uart_t uart, const uart_device_t* dev);
 
-void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks);
+// Blocking UART write
+void uart_print(uart_t uart, const char *str);
 
+// Write into UART internal FIFO (non-blocking)
 void uart_put_char(uart_t uart, uint8_t data);
+
+// Write into UART internal FIFO
+void uart_put_char_blocking(uart_t uart, uint8_t data);
+
+// Read from UART internal FIFO (non-blocking)
 uint8_t uart_get_char(uart_t uart);
 
+// Read from UART internal FIFO
+uint8_t uart_get_char_blocking(uart_t uart);
+
+// UART internal FIFO status
 bool uart_tx_fifo_full(uart_t uart);
 bool uart_rx_fifo_available(uart_t uart);
 
-void uart_enable_tx_irq(uart_t uart);
-void uart_enable_rx_irq(uart_t uart);
+//
+// UART IRQ methods
+// 
 
-void uart_disable_tx_irq(uart_t uart);
+typedef struct {
+  void (*frame_received)();
+  void (*error)(uart_error_t error);
+} uart_callbacks_t;
+
+// Initialise IRQ mode
+void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks);
+
+// RX IRQ methods
+void uart_enable_rx_irq(uart_t uart, uint8_t* buffer, uint32_t size);
 void uart_disable_rx_irq(uart_t uart);
 
+void uart_reset_rx_len(uart_t uart);
+uint32_t uart_get_rx_len(uart_t uart);
+
+// TX IRQ methods
+void uart_enable_tx_irq(uart_t uart, uint8_t* buffer, uint32_t size);
+void uart_disable_tx_irq(uart_t uart);
 bool uart_tx_irq_enabled(uart_t uart);
 
-void uart_print(uart_t uart, const char *str);
+bool uart_tx_irq(uart_t uart, const uint8_t* data, uint32_t len);
+bool uart_print_irq(uart_t uart, const char* str);
