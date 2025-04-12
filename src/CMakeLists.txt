@@ -1,6 +1,7 @@
 
 set(firmware_sources
     board.c
+    dma.c
     led_rgb.c
     main.c
     spi.c

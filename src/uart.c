@@ -3,6 +3,7 @@
 #include <driverlib/prcm.h>
 #include <driverlib/debug.h>
 #include <driverlib/sys_ctrl.h>
+#include <driverlib/udma.h>
 
 #include <string.h>
 
@@ -21,6 +22,11 @@
 // Error IRQs
 #define UART_ERRORS (UART_INT_OE | UART_INT_BE | UART_INT_PE | UART_INT_FE)
 
+#define MAX_DMA_XFER_SIZE(size)  \
+  ((size) > UDMA_XFER_SIZE_MAX ? UDMA_XFER_SIZE_MAX : (size))
+
+#define DMA_CHANNEL_NUM(mask) ((uint32_t)__builtin_ctz(mask))
+
 typedef struct {
   uint8_t *buffer;
   uint32_t size;
@@ -38,6 +44,7 @@ typedef struct {
   uart_callbacks_t callbacks;
   uart_rx_buffer_t rx_buf;
   uart_tx_buffer_t tx_buf;
+  uint32_t tx_dma_channel;
 } uart_state_t;
 
 static uart_state_t _uart_state[MAX_UART];
@@ -51,6 +58,11 @@ static const uint32_t _uart_pwr_domain[MAX_UART] = {
 static const uint32_t _uart_base[MAX_UART] = {
     UART0_BASE,
     UART1_BASE,
+};
+
+static const uint8_t _uart_tx_dma_channel[MAX_UART] = {
+  UDMA_CHAN_UART0_TX,
+  UDMA_CHAN_UART1_TX,
 };
 
 static void _init_pwr_domain(uart_t uart) {
@@ -190,6 +202,8 @@ static inline bool _tx_buffer_read(uart_tx_buffer_t* buf, uint8_t* data)
   return true; 
 }
 
+static void _dma_done_irq(uart_t uart);
+
 static void _uart_irq(uart_t uart)
 {
   uint32_t base = _uart_base[uart];
@@ -226,6 +240,10 @@ static void _uart_irq(uart_t uart)
         break;
       }
     }
+  }
+
+  if (uDMAIntStatus(UDMA0_BASE) & st->tx_dma_channel) {
+    _dma_done_irq(uart);
   }
 }
 
@@ -336,3 +354,77 @@ bool uart_print_irq(uart_t uart, const char* str)
   return uart_tx_irq(uart, (const uint8_t*)str, len);
 }
 
+// TX DMA methods
+//
+
+static void _start_tx_dma_xfer(uint32_t uart, uint32_t dma_channel,
+                               void *buffer, uint32_t len) {
+
+  uint32_t ctrl = UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE | UDMA_ARB_4;
+  uDMAChannelControlSet(UDMA0_BASE, dma_channel, ctrl);
+
+  uint32_t mode = UDMA_MODE_BASIC;
+  uint32_t base = _uart_base[uart];
+
+  uDMAChannelTransferSet(UDMA0_BASE, dma_channel, mode, (void *)buffer,
+                         (void *)(base + UART_O_DR), len);
+
+  _uart_state[uart].tx_dma_channel |= (1 << dma_channel);
+  uDMAChannelEnable(UDMA0_BASE, dma_channel);
+  UARTDMAEnable(base, UART_DMA_TX);
+}
+
+void uart_tx_dma(uart_t uart, const uint8_t* buffer, uint32_t len)
+{
+  ASSERT(uart < MAX_UART);
+
+  // disable RX & TX channels
+  uint8_t dma_channel = _uart_tx_dma_channel[uart];
+  uDMAChannelDisable(UDMA0_BASE, dma_channel);
+
+  // set buffer
+  uart_tx_buffer_t* buf = &_uart_state[uart].tx_buf;
+  buf->buffer = (uint8_t*)buffer;
+  buf->size = len;
+
+  len = MAX_DMA_XFER_SIZE(len);
+  buf->head = len;
+  buf->tail = 0;
+
+  _start_tx_dma_xfer(uart, dma_channel, (void *)buffer, len);
+}
+
+bool uart_tx_dma_done(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  return _uart_state[uart].tx_dma_channel == 0;
+}
+
+static void _dma_done_irq(uart_t uart)
+{
+  // disable DMA channel & TX DMA
+  uint32_t base = _uart_base[uart];
+  uart_state_t* st = &_uart_state[uart];
+  uint32_t dma_channel_mask = st->tx_dma_channel;
+  uint32_t dma_channel = DMA_CHANNEL_NUM(dma_channel_mask);
+
+  uDMAChannelDisable(UDMA0_BASE, dma_channel);
+  UARTDMADisable(base, UART_DMA_TX);
+  uDMAIntClear(UDMA0_BASE, dma_channel_mask);
+
+  // update buffer state
+  uart_tx_buffer_t* buf = &st->tx_buf;
+  buf->tail += (buf->head - buf->tail);
+
+  if (buf->tail < buf->size) {
+    // transfer not yet complete
+    uint32_t xfer_len = MAX_DMA_XFER_SIZE(buf->size - buf->tail);
+    buf->head = buf->tail + xfer_len;
+
+    const uint8_t* buffer = buf->buffer + buf->tail;
+    _start_tx_dma_xfer(uart, dma_channel, (void *)buffer, xfer_len);
+  } else {
+    // transfer complete
+    st->tx_dma_channel &= ~(dma_channel_mask);
+  }
+}

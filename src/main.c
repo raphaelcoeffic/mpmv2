@@ -5,10 +5,13 @@
 #include <driverlib/sys_ctrl.h>
 #include <driverlib/uart.h>
 
+#include <string.h>
+
+#include "board.h"
+#include "dma.h"
+#include "led_rgb.h"
 #include "timer.h"
 #include "uart.h"
-#include "led_rgb.h"
-#include "board.h"
 
 #define SERIAL_BAUDRATE 115200
 
@@ -48,11 +51,23 @@ static void serial_init()
   uart_enable_irqs(UART0, &uart0_cb);
   uart_enable_rx_irq(UART0, rx_buf, RX_BUFFER_SIZE);
   uart_enable_tx_irq(UART0, tx_buf, TX_BUFFER_SIZE);
+  dma_init();
 }
 
 static void serial_print(const char* str)
 {
   uart_print_irq(UART0, str);
+}
+
+static void serial_write(const uint8_t* data, uint32_t len)
+{
+  uart_tx_irq(UART0, data, len);
+}
+
+static void serial_print_dma(const char* str)
+{
+  uint32_t len = strlen(str);
+  uart_tx_dma(UART0, (const uint8_t*)str, strlen(str));
 }
 
 static void leds_init()
@@ -68,6 +83,22 @@ static void leds_init()
 #endif
 }
 
+static const char lorem_ipsum[] =
+    // Section 1.10.32 of "de Finibus Bonorum et Malorum", written by Cicero in 45 BC
+    "Sed ut perspiciatis unde omnis iste natus error sit voluptatem \n"
+    "accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab\n"
+    "illo inventore veritatis et quasi architecto beatae vitae dicta sunt\n"
+    "explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut\n"
+    "odit aut fugit, sed quia consequuntur magni dolores eos qui ratione\n"
+    "voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum\n"
+    "quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam\n"
+    "eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat\n"
+    "voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam\n"
+    "corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur?\n"
+    "Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam\n"
+    "nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo \n"
+    "voluptas nulla pariatur?\n";
+
 int main(void)
 {
   board_init();
@@ -76,13 +107,12 @@ int main(void)
   leds_init();
 
 #if defined(TEST_PIN)
-  IOCPinTypeGpioOutput(TEST_PIN);
   GPIO_setDio(TEST_PIN);
+  IOCPinTypeGpioOutput(TEST_PIN);
 #endif
 
-  serial_print("Boot completed\n");
-  serial_print("Test application to test "
-               "IRQ based UART sending and receiving\n");
+  serial_print("\n## Boot completed ##\n\n");
+  serial_print_dma(lorem_ipsum);
 
   while (true) {
     if (frame_received) {

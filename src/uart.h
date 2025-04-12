@@ -76,3 +76,7 @@ bool uart_tx_irq_enabled(uart_t uart);
 
 bool uart_tx_irq(uart_t uart, const uint8_t* data, uint32_t len);
 bool uart_print_irq(uart_t uart, const char* str);
+
+// TX DMA methods
+void uart_tx_dma(uart_t uart, const uint8_t* buffer, uint32_t len);
+bool uart_tx_dma_done(uart_t uart);
