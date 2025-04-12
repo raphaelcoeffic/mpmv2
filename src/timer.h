@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-// Init GPT0-A and GPT1
+// Init GPT0-A, GPT0-B and GPT1
 void timer_init();
 
 // Get milliseconds
@@ -30,3 +30,9 @@ uint32_t get_ticks();
 
 #define ticks_before(ms) _timer_before(get_ticks(), ms)
 #define ticks_after(ms) _timer_after(get_ticks(), ms)
+
+// Start timeout
+void timer_start_timeout(uint32_t timeout_us, void (*callback)());
+
+// Stop timeout
+void timer_stop_timeout();
