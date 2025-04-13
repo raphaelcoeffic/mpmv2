@@ -404,6 +404,13 @@ bool uart_tx_dma_done(uart_t uart)
   return _uart_state[uart].tx_dma_channel == 0;
 }
 
+void uart_tx_dma_wait(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  while (_uart_state[uart].tx_dma_channel != 0) {
+  }
+}
+
 static void _dma_done_irq(uart_t uart)
 {
   // disable DMA channel & TX DMA

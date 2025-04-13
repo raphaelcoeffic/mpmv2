@@ -66,10 +66,18 @@ static void serial_write(const uint8_t* data, uint32_t len)
   uart_tx_irq(UART0, data, len);
 }
 
+static void serial_wait_dma() { uart_tx_dma_wait(UART0); }
+
+static void serial_write_dma(const uint8_t* data, uint32_t len)
+{
+  serial_wait_dma();
+  uart_tx_dma(UART0, data, len);
+}
+
 static void serial_print_dma(const char* str)
 {
   uint32_t len = strlen(str);
-  uart_tx_dma(UART0, (const uint8_t*)str, strlen(str));
+  serial_write_dma((const uint8_t*)str, len);
 }
 
 static void leds_init()
@@ -121,11 +129,11 @@ int main(void)
       debugln("frame recvd (size=%d)", rx_len);
 
       // Echo RX buffer content
-      // serial_write_buffer(rx_buf, rx_len);
+      // serial_write_dma(rx_buf, rx_len);
 
       // TEST: reply with received len
       uint8_t data = (uint8_t)rx_len;
-      uart_tx_irq(UART0, &data, 1);
+      serial_write_dma(&data, 1);
 
       // Reset RX buffer
       uart_reset_rx_len(UART0);
