@@ -168,14 +168,18 @@ bool uart_rx_fifo_available(uart_t uart)
 static inline void _rx_irq(uint32_t base, uart_rx_buffer_t* rx, uint32_t len)
 {
   while(len--) {
-    rx->buffer[rx->rcvd++] = HWREG(base + UART_O_DR);
+    uint8_t data = HWREG(base + UART_O_DR);
+    if (rx->rcvd < rx->size) rx->buffer[rx->rcvd++] = data;
+    // TODO: else set overflow flag?
   }
 }
 
 static inline void _rx_flush_fifo(uint32_t base, uart_rx_buffer_t* rx)
 {
   while(!(HWREG(UART0_BASE + UART_O_FR) & UART_FR_RXFE)) {
-    rx->buffer[rx->rcvd++] = HWREG(base + UART_O_DR);
+    uint8_t data = HWREG(base + UART_O_DR);
+    if (rx->rcvd < rx->size) rx->buffer[rx->rcvd++] = data;
+    // TODO: else set overflow flag?
   }
 }
 
