@@ -9,11 +9,14 @@
 
 #include "board.h"
 #include "dma.h"
-#include "led_rgb.h"
 #include "timer.h"
 #include "uart.h"
 
 #include "debug.h"
+
+#if defined(LED_SPI) && defined(LED_DIN)
+  #include "led_rgb.h"
+#endif
 
 #define SERIAL_BAUDRATE 115200
 
@@ -82,12 +85,14 @@ static void serial_print_dma(const char* str)
 
 static void leds_init()
 {
-#if defined(BOARD_CC2652R1_LAUNCHXL)
+#if defined(LED_GREEN) && defined(LED_RED)
   IOCPinTypeGpioOutput(LED_GREEN);
   IOCPinTypeGpioOutput(LED_RED);
   GPIO_clearDio(LED_GREEN);
   GPIO_clearDio(LED_RED);
-#else
+#endif
+
+#if defined(LED_SPI) && defined(LED_DIN)
   led_rgb_init(LED_SPI, LED_DIN);
   led_rgb_set_color(LED_SPI, LED_COLOR(0x00, 0x00, 0x60));
 #endif
