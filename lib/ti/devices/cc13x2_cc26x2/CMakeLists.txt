@@ -26,3 +26,11 @@ target_include_directories(
     driverlib_cc13x2_cc26x2
     PUBLIC .
 )
+
+if (DRIVERLIB_NOROM)
+    message("## Use compiled driverlib (NOROM)")
+    target_compile_definitions(
+        driverlib_cc13x2_cc26x2 PUBLIC
+        DRIVERLIB_NOROM
+    )
+endif()

@@ -25,13 +25,6 @@ if (USE_XOSC)
     target_compile_definitions(firmware PRIVATE USE_XOSC)
 endif()
 
-# Uncomment to use compiled code instead of ROM
-#
-# target_compile_definitions(
-#     driverlib_cc13x2_cc26x2 PUBLIC
-#     DRIVERLIB_NOROM
-# )
-
 if (USE_CCFG)
     message("## Include CCFG")
     target_sources(firmware PRIVATE ccfg.c)
