@@ -19,7 +19,7 @@ add_library(
 
 target_link_libraries(
     driverlib_cc13x2_cc26x2
-    toolchain_gcc_m4f
+    PUBLIC toolchain_gcc_m4f
 )
 
 target_include_directories(

@@ -1,5 +1,5 @@
 
-#if defined(CC2652RB)
+#if defined(MCU_CC2652RB)
   // HF source is HPOSC (BAW) (only valid for CC2652RB)
   #define SET_CCFG_MODE_CONF_XOSC_FREQ 0x1
 #else

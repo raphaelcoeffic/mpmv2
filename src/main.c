@@ -13,6 +13,8 @@
 #include "timer.h"
 #include "uart.h"
 
+#include "debug.h"
+
 #define SERIAL_BAUDRATE 115200
 
 #define RX_BUFFER_SIZE 128
@@ -111,11 +113,13 @@ int main(void)
   IOCPinTypeGpioOutput(TEST_PIN);
 #endif
 
-  serial_print("\n## Boot completed ##\n\n");
+  debugln("\n## Boot completed ##\n");
   serial_print_dma(lorem_ipsum);
 
   while (true) {
     if (frame_received) {
+      debugln("frame recvd (size=%d)", rx_len);
+
       // Echo RX buffer content
       // serial_write_buffer(rx_buf, rx_len);
 

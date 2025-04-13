@@ -14,11 +14,16 @@ add_executable(firmware
     ${firmware_sources}
 )
 
-# Comment to use internal oscillator
-# 
-# Please note: USE_XOSC is required to use the CC2652RB's HPOSC
-#
-target_compile_definitions(firmware PRIVATE USE_XOSC)
+if (USE_XOSC)
+    if (BOARD_CC2652R1_LAUNCHXL)
+        message("## Target is CC2652R1-LAUNCHXL: use external oscillator")
+        target_compile_definitions(firmware PRIVATE BOARD_CC2652R1_LAUNCHXL)
+    else()
+        message("## Target is CC2652RB: use HPOSC (BAW)")
+        target_compile_definitions(firmware PRIVATE MCU_CC2652RB)
+    endif()
+    target_compile_definitions(firmware PRIVATE USE_XOSC)
+endif()
 
 # Uncomment to use compiled code instead of ROM
 #
@@ -27,22 +32,19 @@ target_compile_definitions(firmware PRIVATE USE_XOSC)
 #     DRIVERLIB_NOROM
 # )
 
-# Comment to remove CCFG from firmware
-#
-target_sources(firmware PRIVATE ccfg.c)
+if (USE_CCFG)
+    message("## Include CCFG")
+    target_sources(firmware PRIVATE ccfg.c)
+endif()
 
-# Comment if the target MCU is NOT CC2652RB
-#
-target_compile_definitions(firmware PRIVATE CC2652RB)
-
-# Board setting
-# target_compile_definitions(firmware
-#     PRIVATE
-#     BOARD_CC2652R1_LAUNCHXL
-# )
+if (DEBUG)
+    message("## Debug output enabled (Segger RTT)")
+    target_compile_definitions(firmware PRIVATE DEBUG)
+endif()
 
 target_link_libraries(firmware
     driverlib_cc13x2_cc26x2
+    segger_rtt
 )
 
 set_target_properties(firmware
