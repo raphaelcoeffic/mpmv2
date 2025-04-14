@@ -18,6 +18,8 @@ static const uint16_t _to_spi[] = {
     _TO_SPI_WORD(0xC), _TO_SPI_WORD(0xD), _TO_SPI_WORD(0xE), _TO_SPI_WORD(0xF),
 };
 
+static spi_t _led_spi;
+
 void led_rgb_init(spi_t spi, uint32_t dio)
 {
   const spi_device_t dev = {
@@ -26,14 +28,15 @@ void led_rgb_init(spi_t spi, uint32_t dio)
     .bit_rate = 2400000,
     .rx = IOID_UNUSED,
     .tx = dio,
-    .fss = IOID_UNUSED,
     .clk = IOID_UNUSED,
+    .cs = IOID_UNUSED,
   };
 
   spi_init(spi, &dev);
+  _led_spi = spi;
 }
 
-void led_rgb_set_color(spi_t spi, uint32_t color)
+void led_rgb_set_color(uint32_t color)
 {
   // GRB pixel format
   // Total runtime: 9.32 us
@@ -52,5 +55,5 @@ void led_rgb_set_color(spi_t spi, uint32_t color)
   pixel_data[5] = _to_spi[color & 0xF];
 
   // Send data: 6.42 us
-  spi_write_16(spi, pixel_data, 6);
+  spi_write_16(_led_spi, pixel_data, 6);
 }

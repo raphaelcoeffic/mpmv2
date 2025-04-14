@@ -4,6 +4,7 @@ set(firmware_sources
     dma.c
     led_rgb.c
     main.c
+    nor_flash.c
     spi.c
     syscalls.c
     timer.c

@@ -9,6 +9,7 @@
 
 #include "board.h"
 #include "dma.h"
+#include "nor_flash.h"
 #include "timer.h"
 #include "uart.h"
 
@@ -94,7 +95,7 @@ static void leds_init()
 
 #if defined(LED_SPI) && defined(LED_DIN)
   led_rgb_init(LED_SPI, LED_DIN);
-  led_rgb_set_color(LED_SPI, LED_COLOR(0x00, 0x00, 0x60));
+  led_rgb_set_color(LED_COLOR(0x00, 0x00, 0x60));
 #endif
 }
 
@@ -114,6 +115,16 @@ static const char lorem_ipsum[] =
     "nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo \n"
     "voluptas nulla pariatur?\n";
 
+const spi_device_t nor_flash = {
+  .frame_format = SPI_POL0_PHA0,
+  .data_width = 8,
+  .bit_rate = 4800000, // 4.8 MHz
+  .rx = FLASH_MISO,
+  .tx = FLASH_MOSI,
+  .clk = FLASH_SCLK,
+  .cs = FLASH_CS,
+};
+
 int main(void)
 {
   board_init();
@@ -121,12 +132,32 @@ int main(void)
   serial_init();
   leds_init();
 
+  bool nor_flash_ok = true;
+  if (nor_flash_init(FLASH_SPI, &nor_flash) != 0) {
+    debugln("[NOR flash]: error: init failed");
+    nor_flash_ok = false;
+  }
+
 #if defined(TEST_PIN)
   GPIO_setDio(TEST_PIN);
   IOCPinTypeGpioOutput(TEST_PIN);
 #endif
 
-  debugln("\n## Boot completed ##\n");
+  debugln("## Boot completed ##");
+
+  if (nor_flash_ok) {
+    char* unit = "B";
+    uint32_t flash_size = nor_flash_size();
+    if (flash_size >= 1024 * 1024) {
+      flash_size /= 1024 * 1024;
+      unit = "MB";
+    } else if (flash_size >= 1024) {
+      flash_size /= 1024;
+      unit = "KB";
+    }
+    debugln("flash size = %d %s", flash_size, unit);
+  }
+  
   serial_print_dma(lorem_ipsum);
 
   while (true) {
