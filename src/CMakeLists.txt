@@ -2,6 +2,7 @@
 set(firmware_sources
     board.c
     dma.c
+    lfs_driver.c
     led_rgb.c
     main.c
     nor_flash.c
@@ -34,11 +35,21 @@ endif()
 if (DEBUG)
     message("## Debug output enabled (Segger RTT)")
     target_compile_definitions(firmware PRIVATE DEBUG)
+else()
+    message("## Debug output disabled")
+    target_compile_definitions(littlefs
+        PRIVATE
+        LFS_NO_DEBUG
+        LFS_NO_WARN
+        LFS_NO_ERROR
+        LFS_NO_ASSERT
+    )
 endif()
 
 target_link_libraries(firmware
     driverlib_cc13x2_cc26x2
     segger_rtt
+    littlefs
 )
 
 set_target_properties(firmware

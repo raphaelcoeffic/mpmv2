@@ -64,6 +64,7 @@ if(NOT TARGET toolchain_gcc)
             -Dgcc
             -ffunction-sections
             -fdata-sections
+            -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.
     )
     target_link_options(
         toolchain_gcc

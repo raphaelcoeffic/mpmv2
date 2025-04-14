@@ -1,11 +1,16 @@
 #pragma once
 
+#include <driverlib/ioc.h>
+
 #if defined(BOARD_CC2652R1_LAUNCHXL)
   #define SERIAL_RX_IOD IOID_2
   #define SERIAL_TX_IOD IOID_3
   //
   #define LED_GREEN     IOID_7
   #define LED_RED       IOID_6
+  //
+  #define LED_DIN       IOID_18
+  #define LED_SPI       SPI1
   //
   #define FLASH_MISO    IOID_8
   #define FLASH_MOSI    IOID_9

@@ -17,6 +17,5 @@ option(DEBUG "Enable debug output (Segger RTT)" OFF)
 option(USE_CCFG "Include MCU user configuration (CCFG)" ON)
 option(USE_XOSC "Use external oscillator (or HPOSC on CC2652RB)" ON)
 
-add_subdirectory(lib/ti)
-add_subdirectory(lib/SeggerRTT)
+add_subdirectory(lib)
 add_subdirectory(src)

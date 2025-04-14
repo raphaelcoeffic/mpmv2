@@ -2,6 +2,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#if defined(DEBUG)
+  #include <SEGGER_RTT.h>
+#endif
+
 __attribute__((weak)) int _close(int fildes)
 {
     errno = ENOSYS;
@@ -39,8 +43,14 @@ __attribute__((weak)) int _read(int file, char *ptr, int len)
 }
 __attribute__((weak)) int _write(int file, char *ptr, int len)
 {
+#if defined(DEBUG)
+    SEGGER_RTT_Write(0, ptr, len);
+    return len;
+#else
+
     errno = ENOSYS;
     return -1;
+#endif
 }
 __attribute__((weak)) void _exit(int rc)
 {
