@@ -3,3 +3,6 @@ build/
 .cache/
 *.jdebug*
 doc
+*.hex
+*.bin
+*.o

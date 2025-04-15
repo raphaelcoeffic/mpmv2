@@ -63,21 +63,21 @@ typedef struct {
 void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks);
 
 // RX IRQ methods
-void uart_enable_rx_irq(uart_t uart, uint8_t* buffer, uint32_t size);
+void uart_enable_rx_irq(uart_t uart, void* buffer, uint32_t size);
 void uart_disable_rx_irq(uart_t uart);
 
 void uart_reset_rx_len(uart_t uart);
 uint32_t uart_get_rx_len(uart_t uart);
 
 // TX IRQ methods
-void uart_enable_tx_irq(uart_t uart, uint8_t* buffer, uint32_t size);
+void uart_enable_tx_irq(uart_t uart, void* buffer, uint32_t size);
 void uart_disable_tx_irq(uart_t uart);
 bool uart_tx_irq_enabled(uart_t uart);
 
-bool uart_tx_irq(uart_t uart, const uint8_t* data, uint32_t len);
+bool uart_tx_irq(uart_t uart, const void* data, uint32_t len);
 bool uart_print_irq(uart_t uart, const char* str);
 
 // TX DMA methods
-void uart_tx_dma(uart_t uart, const uint8_t* buffer, uint32_t len);
+void uart_tx_dma(uart_t uart, const void* buffer, uint32_t len);
 bool uart_tx_dma_done(uart_t uart);
 void uart_tx_dma_wait(uart_t uart);

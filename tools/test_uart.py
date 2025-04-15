@@ -6,7 +6,7 @@ import serial
 import sys
 import time
 
-ser = serial.Serial(sys.argv[1], 115200)
+ser = serial.Serial(sys.argv[1], 921600)
 
 
 def test_packet(size: int) -> None:

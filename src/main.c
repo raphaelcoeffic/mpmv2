@@ -5,84 +5,22 @@
 #include <driverlib/sys_ctrl.h>
 #include <driverlib/uart.h>
 
-#include <string.h>
-
 #include "board.h"
-#include "dma.h"
+#include "file_system.h"
+#include "ihex.h"
+#include "serial.h"
 #include "timer.h"
 #include "uart.h"
-#include "file_system.h"
-
-#include "debug.h"
 
 #if defined(LED_SPI) && defined(LED_DIN)
   #include "led_rgb.h"
 #endif
 
-#define SERIAL_BAUDRATE 115200
+#include "debug.h"
 
-#define RX_BUFFER_SIZE 128
-#define TX_BUFFER_SIZE 128 // must be a power of 2
-
-static uint8_t rx_buf[RX_BUFFER_SIZE];
-static uint8_t tx_buf[TX_BUFFER_SIZE];
-
-// Frame received flag
-static volatile bool frame_received = false;
-static volatile uint32_t rx_len = 0;
-
-static void _serial_rx_timeout()
-{
-  rx_len = uart_get_rx_len(UART0);
-  frame_received = true;
-}
-
-static void serial_init()
-{
-  uart_device_t uart0 = {
-    .mode = UART_8N1,
-    .baud_rate = SERIAL_BAUDRATE,
-    .rx = SERIAL_RX_IOD,
-    .tx = SERIAL_TX_IOD,
-    .cts = IOID_UNUSED,
-    .rts = IOID_UNUSED,
-  };
-  uart_init(UART0, &uart0);
-
-  // UART IRQ callbacks
-  uart_callbacks_t uart0_cb = {
-    .frame_received = _serial_rx_timeout,
-    .error = 0, // TODO
-  };
-  uart_enable_irqs(UART0, &uart0_cb);
-  uart_enable_rx_irq(UART0, rx_buf, RX_BUFFER_SIZE);
-  uart_enable_tx_irq(UART0, tx_buf, TX_BUFFER_SIZE);
-  dma_init();
-}
-
-static void serial_print(const char* str)
-{
-  uart_print_irq(UART0, str);
-}
-
-static void serial_write(const uint8_t* data, uint32_t len)
-{
-  uart_tx_irq(UART0, data, len);
-}
-
-static void serial_wait_dma() { uart_tx_dma_wait(UART0); }
-
-static void serial_write_dma(const uint8_t* data, uint32_t len)
-{
-  serial_wait_dma();
-  uart_tx_dma(UART0, data, len);
-}
-
-static void serial_print_dma(const char* str)
-{
-  uint32_t len = strlen(str);
-  serial_write_dma((const uint8_t*)str, len);
-}
+// File system variables
+lfs_t lfs;
+lfs_file_t file;
 
 static void leds_init()
 {
@@ -115,6 +53,54 @@ static const char lorem_ipsum[] =
     "nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo \n"
     "voluptas nulla pariatur?\n";
 
+static void test_print_file()
+{
+  int err = lfs_file_open(&lfs, &file, "lorem_ipsum", LFS_O_RDWR | LFS_O_CREAT);
+  if (err) return;
+
+  uint32_t size = lfs_file_size(&lfs, &file);
+  if (size == 0) {
+    int written = lfs_file_write(&lfs, &file, lorem_ipsum, sizeof(lorem_ipsum) - 1);
+    if (written > 0) size = written;
+    lfs_file_rewind(&lfs, &file);
+    debugln("file created");
+  } else {
+    debugln("file size = %d", size);
+  }
+
+  if (size > 0) {
+    char buffer[32];
+    int read_count = 0;
+    while (read_count < size) {
+      int read = lfs_file_read(&lfs, &file, buffer, sizeof(buffer));
+      if (read > 0) {
+        read_count += read;
+        serial_write_dma((uint8_t*)buffer, read, true);
+      }
+    }
+  }
+
+  lfs_file_close(&lfs, &file);
+}
+
+#define SERIAL_TEST_CMD 0xAA
+#define DUMP_FLASH "dump_flash"
+
+static bool command_chr_equal(char cmd)
+{
+  return rx_buf[0] == cmd;
+}
+
+static bool command_equal(const char* cmd)
+{
+  return strncmp(cmd, (const char*)rx_buf, rx_len) == 0;
+}
+
+static void ihex_flush_cb(char* buffer, unsigned len)
+{
+  serial_write_dma(buffer, len, true);
+}
+
 int main(void)
 {
   board_init();
@@ -129,27 +115,34 @@ int main(void)
 
   debugln("## Boot completed ##");
 
-  lfs_t lfs;
-  if (file_system_init(&lfs) != 0) {
+  int err = file_system_init(&lfs);
+  if (err != 0) {
     debugln("error: file system init failed");
   } else {
     debugln("file system mounted");
+    // test_print_file();
   }
-
-  // Test DMA based serial:
-  // serial_print_dma(lorem_ipsum);
 
   while (true) {
     if (frame_received) {
-      debugln("frame recvd (size=%d)", rx_len);
+      if (rx_len > 0) {
+        // Echo RX buffer content
+        // serial_write_dma(rx_buf, rx_len);
 
-      // Echo RX buffer content
-      // serial_write_dma(rx_buf, rx_len);
+        if (command_chr_equal(SERIAL_TEST_CMD)) {
+          // reply with received len
+          uint8_t data = (uint8_t)rx_len;
+          serial_write_dma(&data, 1, true);
+          goto reset_frame;
+        }
 
-      // TEST: reply with received len
-      uint8_t data = (uint8_t)rx_len;
-      serial_write_dma(&data, 1);
+        if (command_equal(DUMP_FLASH)) {
+          ihex_dump_flash(ihex_flush_cb);
+          goto reset_frame;
+        }
+      }
 
+    reset_frame:
       // Reset RX buffer
       uart_reset_rx_len(UART0);
       frame_received = false;

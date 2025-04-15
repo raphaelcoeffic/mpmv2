@@ -2,10 +2,12 @@
 set(firmware_sources
     board.c
     dma.c
+    ihex.c
     lfs_driver.c
     led_rgb.c
     main.c
     nor_flash.c
+    serial.c
     spi.c
     syscalls.c
     timer.c
@@ -50,6 +52,7 @@ target_link_libraries(firmware
     driverlib_cc13x2_cc26x2
     segger_rtt
     littlefs
+    ihex
 )
 
 set_target_properties(firmware

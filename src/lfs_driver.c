@@ -3,13 +3,6 @@
 #include "board.h"
 #include "debug.h"
 
-#define KILOBYTE 1024
-#define MEGABYTE (1024 * 1024)
-
-// File system in the last 128KB of FLASH
-#define FS_SIZE     (128 * KILOBYTE)
-#define FS_OFFSET   (MEGABYTE - FS_SIZE)
-
 #define BLOCK_SIZE  (4 * KILOBYTE)
 #define BLOCK_COUNT (FS_SIZE / BLOCK_SIZE)
 
@@ -63,6 +56,13 @@ static void erase_file_system()
   debugln(" [done]");
 }
 
+#define CACHE_SIZE 256
+#define LOOKAHEAD_SIZE 16
+
+static uint8_t _read_buffer[CACHE_SIZE];
+static uint8_t _prog_buffer[CACHE_SIZE];
+static uint8_t _lookahead_buffer[CACHE_SIZE];
+
 static const struct lfs_config _flash_cfg = {
     // block device operations
     .read = _flash_read,
@@ -75,9 +75,12 @@ static const struct lfs_config _flash_cfg = {
     .prog_size = 256,
     .block_size = BLOCK_SIZE,
     .block_count = BLOCK_COUNT,
-    .cache_size = 256,
-    .lookahead_size = 16,
+    .cache_size = CACHE_SIZE,
+    .lookahead_size = LOOKAHEAD_SIZE,
     .block_cycles = 500,
+    .read_buffer = _read_buffer,
+    .prog_buffer = _prog_buffer,
+    .lookahead_buffer = _lookahead_buffer,
 };
 
 int file_system_init(lfs_t* lfs)

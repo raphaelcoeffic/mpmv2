@@ -22,3 +22,19 @@ target_sources(littlefs
   ${LFS_DIR}/lfs.c
   ${LFS_DIR}/lfs_util.c  
 )
+
+# ihex
+add_library(ihex INTERFACE)
+
+set(IHEX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ihex)
+
+target_include_directories(ihex
+  INTERFACE
+  ${IHEX_DIR}
+)
+
+target_sources(ihex
+  INTERFACE
+  ${IHEX_DIR}/kk_ihex_write.c
+)
+

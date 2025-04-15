@@ -249,6 +249,11 @@ static void _uart_irq(uart_t uart)
   if (uDMAIntStatus(UDMA0_BASE) & st->tx_dma_channel) {
     _dma_done_irq(uart);
   }
+
+  if (status & UART_INT_EOT) {
+    UARTIntDisable(base, UART_INT_EOT);
+    st->tx_dma_channel = 0;
+  }
 }
 
 static void _uart0_irq() { _uart_irq(UART0); }
@@ -273,7 +278,7 @@ void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks)
 
 // RX IRQ methods
 // 
-void uart_enable_rx_irq(uart_t uart, uint8_t* buffer, uint32_t size)
+void uart_enable_rx_irq(uart_t uart, void* buffer, uint32_t size)
 {
   ASSERT(uart < MAX_UART);
 
@@ -307,7 +312,7 @@ void uart_reset_rx_len(uart_t uart)
 
 // TX IRQ methods
 // 
-void uart_enable_tx_irq(uart_t uart, uint8_t* buffer, uint32_t size)
+void uart_enable_tx_irq(uart_t uart, void* buffer, uint32_t size)
 {
   ASSERT(uart < MAX_UART);
 
@@ -343,11 +348,12 @@ static inline bool _tx_buffered(uint32_t uart, uint8_t data)
   return true;
 }
 
-bool uart_tx_irq(uart_t uart, const uint8_t* data, uint32_t len)
+bool uart_tx_irq(uart_t uart, const void* data, uint32_t len)
 {
   ASSERT(uart < MAX_UART);
+  const uint8_t* tx = (const uint8_t*)data;
   while (len--) {
-    if (!_tx_buffered(uart, *data++)) return false;
+    if (!_tx_buffered(uart, *tx++)) return false;
   }
   return true;
 }
@@ -378,7 +384,7 @@ static void _start_tx_dma_xfer(uint32_t uart, uint32_t dma_channel,
   UARTDMAEnable(base, UART_DMA_TX);
 }
 
-void uart_tx_dma(uart_t uart, const uint8_t* buffer, uint32_t len)
+void uart_tx_dma(uart_t uart, const void* buffer, uint32_t len)
 {
   ASSERT(uart < MAX_UART);
 
@@ -407,8 +413,10 @@ bool uart_tx_dma_done(uart_t uart)
 void uart_tx_dma_wait(uart_t uart)
 {
   ASSERT(uart < MAX_UART);
-  while (_uart_state[uart].tx_dma_channel != 0) {
-  }
+  uint32_t base = _uart_base[uart];
+  uart_state_t* st = &_uart_state[uart];
+  while (st->tx_dma_channel != 0) {}
+  while (HWREG(base + UART_O_FR) & UART_FR_BUSY) {}
 }
 
 static void _dma_done_irq(uart_t uart)
@@ -436,6 +444,6 @@ static void _dma_done_irq(uart_t uart)
     _start_tx_dma_xfer(uart, dma_channel, (void *)buffer, xfer_len);
   } else {
     // transfer complete
-    st->tx_dma_channel &= ~(dma_channel_mask);
+    UARTIntEnable(base, UART_INT_EOT);
   }
 }
