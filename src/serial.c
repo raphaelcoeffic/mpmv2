@@ -1,5 +1,4 @@
 #include "board.h"
-#include "dma.h"
 #include "serial.h"
 #include "uart.h"
 
@@ -41,7 +40,6 @@ void serial_init()
   uart_enable_irqs(UART0, &uart0_cb);
   uart_enable_rx_irq(UART0, rx_buf, RX_BUFFER_SIZE);
   uart_enable_tx_irq(UART0, tx_buf, TX_BUFFER_SIZE);
-  dma_init();
 }
 
 void serial_print(const char* str)

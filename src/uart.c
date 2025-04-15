@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "uart.h"
+#include "dma.h"
 
 #define MAX_UART 2
 
@@ -87,6 +88,7 @@ void uart_init(uart_t uart, const uart_device_t* dev)
 
   _init_pwr_domain(uart);
   _init_state(uart);
+  dma_init();
 
   uint32_t base = _uart_base[uart];
   IOCPinTypeUart(base, dev->rx, dev->tx, dev->cts, dev->rts);
