@@ -77,21 +77,27 @@ void spi_unselect(spi_t spi)
 }
 
 #define SPI_TRANSFER_LOOP(base, tx, tx_inc, rx, rx_inc, len)                   \
-  uint32_t tx_count = len;                                                     \
-  while (len--) {                                                              \
-    bool put = true;                                                           \
-    while (tx_count && put) {                                                  \
-      put = HWREG(base + SSI_O_SR) & SSI_TX_NOT_FULL;                          \
-      if (put) {                                                               \
-        HWREG(base + SSI_O_DR) = *tx;                                          \
-        tx += tx_inc;                                                          \
-        tx_count--;                                                            \
+  {                                                                            \
+    while (HWREG(base + SSI_O_SR) & SSI_SR_BSY) {                              \
+    }                                                                          \
+    uint32_t tx_count = len;                                                   \
+    while (len--) {                                                            \
+      bool put = true;                                                         \
+      while (tx_count && put) {                                                \
+        put = HWREG(base + SSI_O_SR) & SSI_TX_NOT_FULL;                        \
+        if (put) {                                                             \
+          HWREG(base + SSI_O_DR) = *tx;                                        \
+          tx += tx_inc;                                                        \
+          tx_count--;                                                          \
+        }                                                                      \
       }                                                                        \
+      while (!(HWREG(base + SSI_O_SR) & SSI_RX_NOT_EMPTY)) {                   \
+      }                                                                        \
+      *rx = HWREG(base + SSI_O_DR);                                            \
+      rx += rx_inc;                                                            \
     }                                                                          \
-    while (!(HWREG(base + SSI_O_SR) & SSI_RX_NOT_EMPTY)) {                     \
+    while (HWREG(base + SSI_O_SR) & SSI_SR_BSY) {                              \
     }                                                                          \
-    *rx = HWREG(base + SSI_O_DR);                                              \
-    rx += rx_inc;                                                              \
   }
 
 static uint16_t _scratch;
