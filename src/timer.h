@@ -14,6 +14,9 @@ uint32_t micros();
 // Get ticks timer (48 MHz)
 uint32_t get_ticks();
 
+// Microsecond delay
+void delay_us(uint32_t us);
+
 // Convert microseconds into ticks
 #define us2ticks(us) (us * 48)
 

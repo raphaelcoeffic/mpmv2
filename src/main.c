@@ -22,6 +22,19 @@
 lfs_t lfs;
 lfs_file_t file;
 
+static bool detect_button()
+{
+  uint32_t pin = BUTTON;
+  IOCPinTypeGpioInput(pin);
+  IOCIOPortPullSet(pin, IOC_IOPULL_UP);
+  delay_us(100);
+
+  uint32_t start = millis();
+  while ((millis() - start) < 10 && !GPIO_readDio(pin)) {}
+
+  return millis() - start >= 10 ? true : false;
+}
+
 static void leds_init()
 {
 #if defined(LED_GREEN) && defined(LED_RED)
@@ -83,8 +96,10 @@ static void test_print_file()
   lfs_file_close(&lfs, &file);
 }
 
+// Commands
 #define SERIAL_TEST_CMD 0xAA
 #define DUMP_FLASH "dump_flash"
+#define LOAD_FLASH "load_flash"
 
 static bool command_chr_equal(char cmd)
 {
@@ -105,6 +120,9 @@ int main(void)
 {
   board_init();
   timer_init();
+
+  bool button_pressed = detect_button();
+  
   serial_init();
   leds_init();
 
@@ -114,6 +132,10 @@ int main(void)
 #endif
 
   debugln("## Boot completed ##");
+
+  if (button_pressed) {
+    debugln("button pressed detected");
+  }
 
   int err = file_system_init(&lfs);
   if (err != 0) {
@@ -138,6 +160,10 @@ int main(void)
 
         if (command_equal(DUMP_FLASH)) {
           ihex_dump_flash(ihex_flush_cb);
+          goto reset_frame;
+        }
+
+        if (command_equal(LOAD_FLASH)) {
           goto reset_frame;
         }
       }

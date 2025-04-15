@@ -71,6 +71,12 @@ uint32_t get_ticks() {
   return HWREG(GPT1_BASE + GPT_O_TAR);
 }
 
+void delay_us(uint32_t us)
+{
+  uint32_t t = get_ticks() + us2ticks(us);
+  while (ticks_before(t)) {}
+}
+
 static void timeout_int_handler() {
   TimerIntClear(GPT0_BASE, TIMER_TIMB_TIMEOUT);
   TimerDisable(GPT0_BASE, TIMER_B);

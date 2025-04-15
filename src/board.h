@@ -18,6 +18,8 @@
   #define FLASH_CS      IOID_20
   #define FLASH_SPI     SPI0
   //
+  #define BUTTON        IOID_13
+  //
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
   //
@@ -45,6 +47,8 @@
   #define FLASH_SCLK    IOID_10
   #define FLASH_CS      IOID_7
   #define FLASH_SPI     SPI0
+  //
+  #define BUTTON        IOID_0
   //
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
