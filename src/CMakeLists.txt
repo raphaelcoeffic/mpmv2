@@ -41,7 +41,7 @@ if (DEBUG)
 else()
     message("## Debug output disabled")
     target_compile_definitions(littlefs
-        PRIVATE
+        INTERFACE
         LFS_NO_DEBUG
         LFS_NO_WARN
         LFS_NO_ERROR
