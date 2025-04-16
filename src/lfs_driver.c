@@ -13,7 +13,7 @@
 const spi_device_t nor_flash = {
   .frame_format = SPI_POL0_PHA0,
   .data_width = 8,
-  .bit_rate = 2400000, // 2.4 MHz
+  .bit_rate = 12000000, // 12 MHz
   .rx = FLASH_MISO,
   .tx = FLASH_MOSI,
   .clk = FLASH_SCLK,
@@ -56,7 +56,9 @@ static void erase_file_system()
   debugln(" [done]");
 }
 
-#define CACHE_SIZE 256
+#define READ_SIZE      16
+#define PROG_SIZE      16
+#define CACHE_SIZE     16
 #define LOOKAHEAD_SIZE 16
 
 static uint8_t _read_buffer[CACHE_SIZE];
@@ -71,8 +73,8 @@ static const struct lfs_config _flash_cfg = {
     .sync = _flash_sync,
 
     // block device configuration
-    .read_size = 256,
-    .prog_size = 256,
+    .read_size = READ_SIZE,
+    .prog_size = PROG_SIZE,
     .block_size = BLOCK_SIZE,
     .block_count = BLOCK_COUNT,
     .cache_size = CACHE_SIZE,

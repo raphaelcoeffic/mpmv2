@@ -15,7 +15,7 @@ if len(sys.argv) < 2:
     print("Missing argument: serial port", file=sys.stderr)
     sys.exit(1)
 
-ser = serial.Serial(sys.argv[1], BAUDRATE, timeout=1)
+ser = serial.Serial(sys.argv[1], BAUDRATE, timeout=5)
 
 # flush buffer
 ser.read_all()

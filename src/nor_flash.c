@@ -25,6 +25,7 @@
 #define FLASH_PAGE_SIZE 256
 #define FLASH_PAGE_MASK (FLASH_PAGE_SIZE - 1)
 
+#define FLASH_DMA_THRESHOLD 8
 
 typedef struct {
   uint8_t vendor_id;
@@ -56,11 +57,19 @@ static inline void flash_transfer(const uint8_t* tx, uint8_t* rx, uint32_t len) 
 }
 
 static inline void flash_write(const uint8_t* data, uint32_t len) {
-  flash_transfer(data, 0, len);
+  if (len > FLASH_DMA_THRESHOLD) {
+    spi_write_dma_8(_flash_state.spi, data, len, true);
+  } else {
+    spi_write_8(_flash_state.spi, data, len);
+  }
 }
 
 static inline void flash_read(uint8_t* data, uint32_t len) {
-  flash_transfer(0, data, len);
+  if (len > FLASH_DMA_THRESHOLD) {
+    spi_read_dma_8(_flash_state.spi, data, len, true);
+  } else {
+    spi_read_8(_flash_state.spi, data, len);
+  }
 }
 
 static inline void put_cmd_addr(uint8_t cmd, uint32_t addr)

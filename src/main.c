@@ -122,6 +122,11 @@ int main(void)
   board_init();
   timer_init();
 
+// #if defined(TEST_PIN)
+//   GPIO_setDio(TEST_PIN);
+//   IOCPinTypeGpioOutput(TEST_PIN);
+// #endif
+
   bool button_pressed = detect_button();
 
   ppm_timer_init(SERIAL_RX_IOD);
@@ -129,11 +134,6 @@ int main(void)
 
   serial_init();
   leds_init();
-
-#if defined(TEST_PIN)
-  GPIO_setDio(TEST_PIN);
-  IOCPinTypeGpioOutput(TEST_PIN);
-#endif
 
   debugln("## Boot completed ##");
 
