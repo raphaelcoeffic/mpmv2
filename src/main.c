@@ -8,6 +8,7 @@
 #include "board.h"
 #include "file_system.h"
 #include "ihex.h"
+#include "ppm.h"
 #include "serial.h"
 #include "timer.h"
 #include "uart.h"
@@ -122,7 +123,10 @@ int main(void)
   timer_init();
 
   bool button_pressed = detect_button();
-  
+
+  ppm_timer_init(SERIAL_RX_IOD);
+  bool ppm_detected = detect_ppm(100);
+
   serial_init();
   leds_init();
 
@@ -135,6 +139,10 @@ int main(void)
 
   if (button_pressed) {
     debugln("button pressed detected");
+  }
+
+  if (ppm_detected) {
+    debugln("PPM detected");
   }
 
   int err = file_system_init(&lfs);

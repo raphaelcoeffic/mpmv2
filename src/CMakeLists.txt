@@ -7,6 +7,7 @@ set(firmware_sources
     led_rgb.c
     main.c
     nor_flash.c
+    ppm.c
     serial.c
     spi.c
     syscalls.c
