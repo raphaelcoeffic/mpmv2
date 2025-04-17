@@ -39,10 +39,15 @@ void led_rgb_init(spi_t spi, uint32_t dio)
 void led_rgb_set_color(uint32_t color)
 {
   // GRB pixel format
-  // Total runtime: 9.32 us
 
-  // Compute SPI data: 2.9 us
-  uint16_t pixel_data[6];
+  // LED separation blank:
+  //   here we use 16 words, but fill only 6
+  //   to append a pause at the end of the pulse train
+  // 
+  static uint16_t pixel_data[16] = {0};
+
+  spi_wait_dma_done(_led_spi);
+
   pixel_data[0] = _to_spi[(color >> 4) & 0xF];
   pixel_data[1] = _to_spi[color & 0xF];
   color >>= 8;
@@ -54,6 +59,5 @@ void led_rgb_set_color(uint32_t color)
   pixel_data[4] = _to_spi[(color >> 4) & 0xF];
   pixel_data[5] = _to_spi[color & 0xF];
 
-  // Send data: 6.42 us
-  spi_write_16(_led_spi, pixel_data, 6);
+  spi_write_dma_16(_led_spi, pixel_data, 16, false);
 }
