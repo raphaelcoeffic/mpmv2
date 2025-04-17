@@ -30,6 +30,7 @@ void spi_init(spi_t spi, const spi_device_t* dev);
 void spi_select(spi_t spi);
 void spi_unselect(spi_t spi);
 
+// polling methods
 void spi_transfer_8(spi_t spi, const uint8_t *tx, uint8_t *rx, uint32_t len);
 void spi_transfer_16(spi_t spi, const uint16_t *tx, uint16_t *rx, uint32_t len);
 
@@ -38,3 +39,12 @@ void spi_read_16(spi_t spi, uint16_t* data, uint32_t len);
 
 void spi_write_8(spi_t spi, const uint8_t* data, uint32_t len);
 void spi_write_16(spi_t spi, const uint16_t* data, uint32_t len);
+
+// DMA mtheods
+void spi_read_dma_8(spi_t spi, uint8_t* data, uint32_t len, bool blocking);
+void spi_read_dma_16(spi_t spi, uint16_t* data, uint32_t len, bool blocking);
+
+void spi_write_dma_8(spi_t spi, const uint8_t* data, uint32_t len, bool blocking);
+void spi_write_dma_16(spi_t spi, const uint16_t* data, uint32_t len, bool blocking);
+
+void spi_wait_dma_done(spi_t spi);
