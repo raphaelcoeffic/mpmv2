@@ -16,9 +16,14 @@
 // uses GPT2 A
 void ppm_timer_init(uint32_t pin);
 
-// return true if a PPM signal is detected
-bool detect_ppm(uint32_t timeout_ms);
+// start detecting PPM signal
+void ppm_start_detect();
+void ppm_stop_detect();
 
+// return true if detection is done
+bool ppm_detect_done();
+
+// start / stop normal PPM timer
 void ppm_timer_start();
 void ppm_timer_stop();
 

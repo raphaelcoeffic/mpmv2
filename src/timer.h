@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-// Init GPT0-A, GPT0-B and GPT1
+// Init GPT2-A, GPT2-B and GPT3
 void timer_init();
 
 // Get milliseconds

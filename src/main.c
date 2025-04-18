@@ -117,6 +117,47 @@ static void ihex_flush_cb(char* buffer, unsigned len)
   serial_write_dma(buffer, len, true);
 }
 
+typedef enum {
+  SIGNAL_TYPE_NONE = 0,
+  SIGNAL_TYPE_PPM,
+  SIGNAL_TYPE_SERIAL,  
+} signal_type_t;
+
+static signal_type_t detect_input_signal()
+{
+  ppm_timer_init(SERIAL_RX_IOD);
+  ppm_start_detect();
+
+  uint32_t timeout = millis() + 100;
+  while (!ppm_detect_done() && millis_before(timeout)) {}
+
+  ppm_stop_detect();
+  if (millis_after(timeout)) {
+    return SIGNAL_TYPE_NONE;
+  }
+
+  int valid_ppm_channels = 0;
+  const uint16_t* ppm_channels = ppm_get_channels();
+
+  for (int i = 0; i < PPM_MAX_CHANNELS; i++) {
+    if (ppm_channels[i] < PULSE_MIN_US || ppm_channels[i] > PULSE_MAX_US) {
+      break;
+    }
+    valid_ppm_channels++;
+  }
+
+  if (valid_ppm_channels >= PPM_MIN_CHANNELS) {
+    return SIGNAL_TYPE_PPM;
+  }
+
+  int long_pulses = 0;
+  for (int i = 0; i < PPM_MAX_CHANNELS; i++) {
+    if (ppm_channels[i] > 200) long_pulses++;
+  }
+
+  return long_pulses <= 1 ? SIGNAL_TYPE_SERIAL : SIGNAL_TYPE_NONE;
+}
+
 int main(void)
 {
   board_init();
@@ -128,9 +169,7 @@ int main(void)
 // #endif
 
   bool button_pressed = detect_button();
-
-  ppm_timer_init(SERIAL_RX_IOD);
-  bool ppm_detected = detect_ppm(100);
+  signal_type_t signal_detected = detect_input_signal();
 
   serial_init();
   leds_init();
@@ -141,8 +180,18 @@ int main(void)
     debugln("button pressed detected");
   }
 
-  if (ppm_detected) {
-    debugln("PPM detected");
+  switch (signal_detected) {
+    case SIGNAL_TYPE_PPM:
+      debugln("PPM detected");
+      break;
+
+    case SIGNAL_TYPE_SERIAL:
+      debugln("SERIAL detected");
+      break;
+
+    default:
+      debugln("no signal detected");
+      break;
   }
 
   int err = file_system_init(&lfs);

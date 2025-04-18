@@ -196,12 +196,6 @@ static const uint32_t _dma_tx_options[2] = {
 #undef BASIC_8
 #undef BASIC_16
 
-static inline tDMAControlTable* dma_channel_entry(uint32_t channel)
-{
-  tDMAControlTable *dma_tbl = (tDMAControlTable *)HWREG(UDMA0_BASE + UDMA_O_CTRL);
-  return &dma_tbl[channel];
-}
-
 static inline void enable_dma_channel(uint32_t channel_mask)
 {  
   HWREG(UDMA0_BASE + UDMA_O_SETCHANNELEN) = channel_mask;
@@ -233,7 +227,7 @@ static inline void _start_rx_dma_xfer(uint32_t base, uint32_t dma_channel,
 
   if (buffer) {
     ctrl = _dma_rx_options[data_size - 1];
-    dma_entry->pvDstEndAddr = buffer + (len - 1) * data_size;
+    dma_entry->pvDstEndAddr = (uint8_t*)buffer + (len - 1) * data_size;
   } else {
     ctrl = _dma_null_options[data_size - 1];
     dma_entry->pvDstEndAddr = &_scratch;
@@ -254,7 +248,7 @@ static inline void _start_tx_dma_xfer(uint32_t base, uint32_t dma_channel,
 
   if (buffer) {
     ctrl = _dma_tx_options[data_size - 1];
-    dma_entry->pvSrcEndAddr = (void*)buffer + (len - 1) * data_size;
+    dma_entry->pvSrcEndAddr = (uint8_t*)buffer + (len - 1) * data_size;
   } else {
     ctrl = _dma_null_options[data_size - 1];
     dma_entry->pvSrcEndAddr = &_scratch;
