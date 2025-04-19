@@ -61,7 +61,7 @@ if(NOT TARGET toolchain_gcc)
             $<$<COMPILE_LANGUAGE:CXX>:-std=c++11>
             -mthumb -g
             -mabi=aapcs
-            -Dgcc
+            -fomit-frame-pointer
             -ffunction-sections
             -fdata-sections
             -fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.

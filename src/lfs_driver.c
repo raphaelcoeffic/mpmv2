@@ -1,6 +1,6 @@
 #include "file_system.h"
+#include "flash_driver.h"
 #include "nor_flash.h"
-#include "board.h"
 #include "debug.h"
 
 #define BLOCK_SIZE  (4 * KILOBYTE)
@@ -9,16 +9,6 @@
 #define FLASH_BLOCK (32 * KILOBYTE)
 
 #define ADDR(block, off) (FS_OFFSET + block * BLOCK_SIZE + off)
-
-const spi_device_t nor_flash = {
-  .frame_format = SPI_POL0_PHA0,
-  .data_width = 8,
-  .bit_rate = 12000000, // 12 MHz
-  .rx = FLASH_MISO,
-  .tx = FLASH_MOSI,
-  .clk = FLASH_SCLK,
-  .cs = FLASH_CS,
-};
 
 static int _flash_read(const struct lfs_config *c, lfs_block_t block,
                        lfs_off_t off, void *buffer, lfs_size_t size)
@@ -87,8 +77,8 @@ static const struct lfs_config _flash_cfg = {
 
 int file_system_init(lfs_t* lfs)
 {
-  if (nor_flash_init(FLASH_SPI, &nor_flash) != 0) {
-    debugln("[NOR flash]: error: init failed");
+  if (flash_init() != 0) {
+    debugln("error: flash init failed");
     return LFS_ERR_IO;
   }
 

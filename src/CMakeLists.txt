@@ -2,6 +2,7 @@
 set(firmware_sources
     board.c
     dma.c
+    flash_driver.c
     ihex.c
     lfs_driver.c
     led_rgb.c
@@ -9,6 +10,7 @@ set(firmware_sources
     nor_flash.c
     ppm.c
     serial.c
+    shell.c
     spi.c
     syscalls.c
     timer.c

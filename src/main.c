@@ -7,9 +7,9 @@
 
 #include "board.h"
 #include "file_system.h"
-#include "ihex.h"
 #include "ppm.h"
 #include "serial.h"
+#include "shell.h"
 #include "timer.h"
 #include "uart.h"
 
@@ -18,6 +18,9 @@
 #endif
 
 #include "debug.h"
+
+#define MPM_BAUDRATE   100000
+#define MPM_SER_MODE   UART_8E2
 
 // File system variables
 lfs_t lfs;
@@ -49,6 +52,15 @@ static void leds_init()
   led_rgb_init(LED_SPI, LED_DIN);
   led_rgb_set_color(LED_COLOR(0x00, 0x00, 0x60));
 #endif
+}
+
+static volatile bool ppm_frame_received = false;
+
+static void ppm_frame_timeout(const uint16_t* ppm, uint32_t channels)
+{
+  (void)ppm;
+  (void)channels;
+  ppm_frame_received = true;
 }
 
 static const char lorem_ipsum[] =
@@ -97,49 +109,21 @@ static void test_print_file()
   lfs_file_close(&lfs, &file);
 }
 
-// Commands
-#define SERIAL_TEST_CMD 0xAA
-#define DUMP_FLASH "dump_flash"
-#define LOAD_FLASH "load_flash"
-
-static bool command_chr_equal(char cmd)
-{
-  return rx_buf[0] == cmd;
-}
-
-static bool command_equal(const char* cmd)
-{
-  return strncmp(cmd, (const char*)rx_buf, rx_len) == 0;
-}
-
-static void ihex_flush_cb(char* buffer, unsigned len)
-{
-  serial_write_dma(buffer, len, true);
-}
-
 typedef enum {
   SIGNAL_TYPE_NONE = 0,
   SIGNAL_TYPE_PPM,
   SIGNAL_TYPE_SERIAL,  
 } signal_type_t;
 
-static signal_type_t detect_input_signal()
+static signal_type_t analyse_input_signal()
 {
-  ppm_timer_init(SERIAL_RX_IOD);
-  ppm_start_detect();
-
-  uint32_t timeout = millis() + 100;
-  while (!ppm_detect_done() && millis_before(timeout)) {}
-
   ppm_stop_detect();
-  if (millis_after(timeout)) {
-    return SIGNAL_TYPE_NONE;
-  }
 
-  int valid_ppm_channels = 0;
+  uint32_t max_channels = ppm_get_valid_channels();
   const uint16_t* ppm_channels = ppm_get_channels();
 
-  for (int i = 0; i < PPM_MAX_CHANNELS; i++) {
+  int valid_ppm_channels = 0;
+  for (int i = 0; i < max_channels; i++) {
     if (ppm_channels[i] < PULSE_MIN_US || ppm_channels[i] > PULSE_MAX_US) {
       break;
     }
@@ -151,84 +135,126 @@ static signal_type_t detect_input_signal()
   }
 
   int long_pulses = 0;
-  for (int i = 0; i < PPM_MAX_CHANNELS; i++) {
+  for (int i = 0; i < max_channels; i++) {
     if (ppm_channels[i] > 200) long_pulses++;
   }
 
   return long_pulses <= 1 ? SIGNAL_TYPE_SERIAL : SIGNAL_TYPE_NONE;
 }
 
-int main(void)
+static signal_type_t detect_input_signal()
 {
-  board_init();
-  timer_init();
+  ppm_timer_init(SERIAL_RX_IOD);
+  ppm_start_detect();
 
-// #if defined(TEST_PIN)
-//   GPIO_setDio(TEST_PIN);
-//   IOCPinTypeGpioOutput(TEST_PIN);
-// #endif
+  uint32_t timeout = millis() + 100;
+  while (!ppm_detect_done() && millis_before(timeout)) {}
 
-  bool button_pressed = detect_button();
-  signal_type_t signal_detected = detect_input_signal();
-
-  serial_init();
-  leds_init();
-
-  debugln("## Boot completed ##");
-
-  if (button_pressed) {
-    debugln("button pressed detected");
+  if (millis_after(timeout)) {
+    return SIGNAL_TYPE_NONE;
   }
 
-  switch (signal_detected) {
+  return analyse_input_signal();
+}
+
+static void init_signal_receiver(signal_type_t t)
+{
+  switch (t) {
     case SIGNAL_TYPE_PPM:
       debugln("PPM detected");
+      ppm_timer_start();
+      ppm_timer_set_timeout(2400, ppm_frame_timeout);
       break;
 
     case SIGNAL_TYPE_SERIAL:
       debugln("SERIAL detected");
+      serial_init(MPM_BAUDRATE, MPM_SER_MODE);
       break;
 
     default:
       debugln("no signal detected");
       break;
-  }
+  }  
+}
 
-  int err = file_system_init(&lfs);
-  if (err != 0) {
-    debugln("error: file system init failed");
-  } else {
-    debugln("file system mounted");
-    // test_print_file();
-  }
+static void main_loop()
+{
+  signal_type_t signal = SIGNAL_TYPE_NONE;
+  uint32_t timeout = 0;
+  bool detect = false;
 
   while (true) {
-    if (frame_received) {
-      if (rx_len > 0) {
-        // Echo RX buffer content
-        // serial_write_dma(rx_buf, rx_len);
+    bool frame_received = false;
 
-        if (command_chr_equal(SERIAL_TEST_CMD)) {
-          // reply with received len
-          uint8_t data = (uint8_t)rx_len;
-          serial_write_dma(&data, 1, true);
-          goto reset_frame;
-        }
-
-        if (command_equal(DUMP_FLASH)) {
-          ihex_dump_flash(ihex_flush_cb);
-          goto reset_frame;
-        }
-
-        if (command_equal(LOAD_FLASH)) {
-          goto reset_frame;
-        }
+    switch (signal) {
+    case SIGNAL_TYPE_NONE:
+      if (!detect) {
+        detect = true;
+        ppm_timer_init(SERIAL_RX_IOD);
+        ppm_start_detect();
+        continue;
       }
+      if (ppm_detect_done()) {
+        detect = false;
+        signal = analyse_input_signal();
+        frame_received = (signal != SIGNAL_TYPE_NONE);
+        init_signal_receiver(signal);
+      }
+      break;
 
-    reset_frame:
-      // Reset RX buffer
-      uart_reset_rx_len(UART0);
-      frame_received = false;
+    case SIGNAL_TYPE_PPM:
+      if (ppm_frame_received) {
+        ppm_frame_received = false;
+        frame_received = true;
+      }
+      break;
+
+    case SIGNAL_TYPE_SERIAL:
+      if (serial_frame_received) {
+        serial_frame_received = false;
+        if (rx_len > 0 && rx_buf[0] == 0x55) {
+          frame_received = true;
+        }
+        uart_reset_rx_len(UART0);
+      }
+      break;
+    }
+
+    if (frame_received) {
+      timeout = millis() + 50;
+    } else if (millis_after(timeout)) {
+      signal = SIGNAL_TYPE_NONE;
+      debugln("signal timeout");
     }
   }
+}
+
+int main(void)
+{
+  board_init();
+  timer_init();
+  leds_init();
+
+// #if defined(TEST_PIN)
+  // GPIO_setDio(TEST_PIN);
+  // IOCPinTypeGpioOutput(TEST_PIN);
+// #endif
+
+  debugln("## Boot completed ##");
+
+  bool button_pressed = detect_button();
+  if (button_pressed) {
+    debugln("button pressed detected");
+    shell_loop();
+  }
+
+  // int err = file_system_init(&lfs);
+  // if (err != 0) {
+  //   debugln("error: file system init failed");
+  // } else {
+  //   debugln("file system mounted");
+  //   // test_print_file();
+  // }
+
+  main_loop();
 }

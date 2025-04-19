@@ -37,7 +37,7 @@ def main(port: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("port", help="serial port")
     args = parser.parse_args()
     main(args.port)

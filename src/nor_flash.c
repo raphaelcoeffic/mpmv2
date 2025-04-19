@@ -194,9 +194,6 @@ int nor_flash_init(spi_t spi, const spi_device_t* dev)
   _flash_state.spi = spi;
 
   read_id(&_flash_state.desc.id);
-  // debugln("[NOR flash]: vendor ID = 0x%X", id.vendor_id);
-  // debugln("[NOR flash]: device ID = 0x%X", id.device_id);
-
   return read_sfdp();
 }
 

@@ -10,6 +10,7 @@ typedef enum {
 
 typedef enum {
   UART_8N1,
+  UART_8E2,
 } uart_mode_t;
 
 typedef enum {

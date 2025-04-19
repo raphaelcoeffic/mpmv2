@@ -103,6 +103,10 @@ void uart_init(uart_t uart, const uart_device_t* dev)
     cfg = UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE;
     break;
 
+  case UART_8E2:
+    cfg = UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_TWO | UART_CONFIG_PAR_EVEN;
+    break;
+
   default:
     cfg = 0;
     break;

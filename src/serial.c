@@ -5,7 +5,7 @@
 #include <string.h>
 
 // Frame received flag
-volatile bool frame_received = false;
+volatile bool serial_frame_received = false;
 volatile uint32_t rx_len = 0;
 
 // IRQ RX buffer
@@ -17,14 +17,14 @@ static uint8_t tx_buf[TX_BUFFER_SIZE];
 static void _serial_rx_timeout()
 {
   rx_len = uart_get_rx_len(UART0);
-  frame_received = true;
+  serial_frame_received = true;
 }
 
-void serial_init()
+void serial_init(uint32_t baudrate, uart_mode_t mode)
 {
   uart_device_t uart0 = {
-    .mode = UART_8N1,
-    .baud_rate = SERIAL_BAUDRATE,
+    .mode = mode,
+    .baud_rate = baudrate,
     .rx = SERIAL_RX_IOD,
     .tx = SERIAL_TX_IOD,
     .cts = IOID_UNUSED,
