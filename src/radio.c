@@ -43,6 +43,10 @@ static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_FS_t _fs;
 static rfc_CMD_PROP_TX_t _tx;
 static rfc_CMD_PROP_RX_t _rx;
+static rfc_CMD_PROP_TX_ADV_t _tx_adv;
+static rfc_CMD_PROP_RX_ADV_t _rx_adv;
+static rfc_radioOp_t* _tx_op;  // _tx or _tx_adv
+static rfc_radioOp_t* _rx_op;  // _rx or _rx_adv
 static rfc_propRxOutput_t _rx_out;
 
 static uint32_t _freq_khz;
@@ -51,10 +55,11 @@ static bool _rx_running;
 static uint8_t _rx_entries[RX_ENTRIES][RX_ENTRY_SIZE] __attribute__((aligned(4)));
 static dataQueue_t _rx_queue;
 static uint8_t _rx_next;
-static uint8_t _rx_len;
+static uint16_t _rx_len;
 
 static uint32_t _tx_sync;
 static uint32_t _rx_sync;
+static uint32_t _rx_sync_alt;
 static uint16_t _last_status;
 static bool _powered;
 
@@ -246,8 +251,22 @@ void radio_set_sync_word(uint32_t tx_sync, uint32_t rx_sync)
   _rx_sync = rx_sync;
 }
 
-static void _init_tx(const uint8_t* data, uint8_t len)
+void radio_set_rx_sync_alt(uint32_t rx_sync) { _rx_sync_alt = rx_sync; }
+
+static void _init_tx(const uint8_t* data, uint16_t len)
 {
+  if (len > 255) {
+    memset(&_tx_adv, 0, sizeof(_tx_adv));
+    _tx_adv.commandNo = CMD_PROP_TX_ADV;
+    _tx_adv.startTrigger.triggerType = TRIG_NOW;
+    _tx_adv.condition.rule = COND_NEVER;
+    _tx_adv.pktLen = len;
+    _tx_adv.preTrigger.triggerType = TRIG_NOW;  // one preamble, as configured
+    _tx_adv.syncWord = _tx_sync;
+    _tx_adv.pPkt = (uint8_t*)data;
+    _tx_op = (rfc_radioOp_t*)&_tx_adv;
+    return;
+  }
   memset(&_tx, 0, sizeof(_tx));
   _tx.commandNo = CMD_PROP_TX;
   _tx.startTrigger.triggerType = TRIG_NOW;
@@ -257,19 +276,20 @@ static void _init_tx(const uint8_t* data, uint8_t len)
   _tx.pktLen = len;
   _tx.syncWord = _tx_sync;
   _tx.pPkt = (uint8_t*)data;
+  _tx_op = (rfc_radioOp_t*)&_tx;
 }
 
-radio_status_t radio_send(const uint8_t* data, uint8_t len)
+radio_status_t radio_send(const uint8_t* data, uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
   if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_tx(data, len);
-  return _run_op((rfc_radioOp_t*)&_tx);
+  return _run_op(_tx_op);
 }
 
-static void _init_rx_queue(uint8_t len)
+static void _init_rx_queue(uint16_t len)
 {
   for (int i = 0; i < RX_ENTRIES; i++) {
     rfc_dataEntryGeneral_t* e = (rfc_dataEntryGeneral_t*)_rx_entries[i];
@@ -286,10 +306,30 @@ static void _init_rx_queue(uint8_t len)
 }
 
 // repeat: continuous reception, else stop after the first packet
-static void _init_rx(uint32_t sync_word, uint8_t len, bool repeat)
+static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool repeat)
 {
   _init_rx_queue(len);
+  memset(&_rx_out, 0, sizeof(_rx_out));
 
+  // Fixed length: no header, no length field
+  if (len > 255 || sync_alt) {
+    memset(&_rx_adv, 0, sizeof(_rx_adv));
+    _rx_adv.commandNo = CMD_PROP_RX_ADV;
+    _rx_adv.startTrigger.triggerType = TRIG_NOW;
+    _rx_adv.condition.rule = COND_NEVER;
+    _rx_adv.pktConf.bRepeatOk = repeat;
+    _rx_adv.pktConf.bRepeatNok = repeat;
+    _rx_adv.rxConf.bAutoFlushIgnored = 1;
+    _rx_adv.rxConf.bAppendRssi = 1;
+    _rx_adv.syncWord0 = sync_word;
+    _rx_adv.syncWord1 = sync_alt;
+    _rx_adv.maxPktLen = len;
+    _rx_adv.endTrigger.triggerType = TRIG_NEVER;
+    _rx_adv.pQueue = &_rx_queue;
+    _rx_adv.pOutput = (uint8_t*)&_rx_out;
+    _rx_op = (rfc_radioOp_t*)&_rx_adv;
+    return;
+  }
   memset(&_rx, 0, sizeof(_rx));
   _rx.commandNo = CMD_PROP_RX;
   _rx.startTrigger.triggerType = TRIG_NOW;
@@ -305,19 +345,19 @@ static void _init_rx(uint32_t sync_word, uint8_t len, bool repeat)
   _rx.endTrigger.triggerType = TRIG_NEVER;
   _rx.pQueue = &_rx_queue;
   _rx.pOutput = (uint8_t*)&_rx_out;
-  memset(&_rx_out, 0, sizeof(_rx_out));
+  _rx_op = (rfc_radioOp_t*)&_rx;
 }
 
-radio_status_t radio_rx_start(uint8_t len)
+radio_status_t radio_rx_start(uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
   if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
-  _init_rx(_rx_sync, len, true);
+  _init_rx(_rx_sync, _rx_sync_alt, len, true);
 
-  _rx.status = IDLE;
-  uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)&_rx);
+  _rx_op->status = IDLE;
+  uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)_rx_op);
   if ((cmdsta & 0xFF) != CMDSTA_Done) {
     _last_status = cmdsta;
     return RADIO_ERR_CMD;
@@ -326,23 +366,23 @@ radio_status_t radio_rx_start(uint8_t len)
 
   // Wait for the command to be running
   uint32_t timeout = micros() + CMD_TIMEOUT_US;
-  while (RF_STATUS(&_rx) < ACTIVE) {
+  while (RF_STATUS(_rx_op) < ACTIVE) {
     if (micros_after(timeout)) return RADIO_ERR_TIMEOUT;
   }
-  _last_status = RF_STATUS(&_rx);
+  _last_status = RF_STATUS(_rx_op);
   return _last_status == ACTIVE ? RADIO_OK : RADIO_ERR_CMD;
 }
 
-radio_status_t radio_send_rx(const uint8_t* data, uint8_t len, uint32_t rx_sync,
-                             uint8_t rx_len, uint32_t window_us, radio_packet_t* pkt)
+radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
+                             uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > RADIO_MAX_PKT_LEN || rx_len == 0 || rx_len > RADIO_MAX_PKT_LEN)
-    return RADIO_ERR_PARAM;
+  // Short packets only (basic commands): acknowledgments
+  if (len == 0 || len > 255 || rx_len == 0 || rx_len > 255) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_tx(data, len);
-  _init_rx(rx_sync, rx_len, false);
+  _init_rx(rx_sync, 0, rx_len, false);
 
   // RX right after TX, until a packet or the end of the window (from the RX
   // start)
@@ -373,15 +413,15 @@ void radio_rx_stop()
 {
   if (!_powered || !_rx_running) return;
   _rx_running = false;
-  if (_cmd_done(RF_STATUS(&_rx))) return;
+  if (_cmd_done(RF_STATUS(_rx_op))) return;
 
   RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
   uint32_t timeout = micros() + CMD_TIMEOUT_US;
-  while (!_cmd_done(RF_STATUS(&_rx)) && micros_before(timeout)) {
+  while (!_cmd_done(RF_STATUS(_rx_op)) && micros_before(timeout)) {
   }
 }
 
-bool radio_rx_active() { return _powered && _rx_running && RF_STATUS(&_rx) == ACTIVE; }
+bool radio_rx_active() { return _powered && _rx_running && RF_STATUS(_rx_op) == ACTIVE; }
 
 bool radio_receive(radio_packet_t* pkt)
 {

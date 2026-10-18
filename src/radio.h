@@ -7,7 +7,9 @@
 // preamble + sync word + fixed length payload, no HW CRC and no whitening.
 // Protocol framing (address bytes, CRC, scrambling) is left to the caller.
 
-#define RADIO_MAX_PKT_LEN 128
+// Packets of up to 255 bytes use the basic RF core commands, longer ones the
+// advanced ones (CYRF6936 SDR emulation: 1 KB for 16 bytes)
+#define RADIO_MAX_PKT_LEN 1100
 
 typedef struct {
   uint32_t symbol_rate;   // bps
@@ -23,7 +25,7 @@ typedef struct {
 
 typedef struct {
   uint8_t data[RADIO_MAX_PKT_LEN];
-  uint8_t len;
+  uint16_t len;
   int8_t rssi;  // dBm
   uint32_t timestamp_us;
 } radio_packet_t;
@@ -49,17 +51,20 @@ radio_status_t radio_set_frequency(uint32_t freq_khz);
 // Sync words for TX and RX, right aligned on sync_bits
 void radio_set_sync_word(uint32_t tx_sync, uint32_t rx_sync);
 
+// Alternative RX sync word for radio_rx_start(), 0 = none
+void radio_set_rx_sync_alt(uint32_t rx_sync);
+
 // Send one packet, blocks until sent
-radio_status_t radio_send(const uint8_t* data, uint8_t len);
+radio_status_t radio_send(const uint8_t* data, uint16_t len);
 
 // Start continuous reception of fixed length packets
-radio_status_t radio_rx_start(uint8_t len);
+radio_status_t radio_rx_start(uint16_t len);
 
 // Send one packet, then receive one packet of rx_len bytes with the rx_sync
 // sync word (e.g. an acknowledgment). RX starts right after TX (chained RF core
 // commands) and lasts window_us. Returns RADIO_NO_PACKET if nothing was received.
-radio_status_t radio_send_rx(const uint8_t* data, uint8_t len, uint32_t rx_sync,
-                             uint8_t rx_len, uint32_t window_us, radio_packet_t* pkt);
+radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
+                             uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt);
 
 // Stop reception
 void radio_rx_stop();

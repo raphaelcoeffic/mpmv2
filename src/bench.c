@@ -19,7 +19,8 @@
 //                                frskyx2eu hott hitec redpine
 //                                redpineslow skyartec frskyv corona coronav2
 //                                fdv3 ares radiolink ikea sfhss, A7105 ones:
-//                                flysky afhds2a hubsan
+//                                flysky afhds2a hubsan, CYRF6936: dsm (data
+//                                packets), dsmbind (bind packets: SDR)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -44,6 +45,13 @@
 //                                bit inversion (default 0)
 //   a7105 <id> [crc] [fec]       A7105 framing: ID (2 or 4 bytes, as given to
 //                                A7105_WriteID), CRC (default 1), FEC (default 0)
+//   cyrf <sop> <data_code> [seed] [crc] [len] [sdr]  CYRF6936 framing (64
+//                                chip codes): SOP code (8 bytes, 0 = no SOP)
+//                                and data codes (16 bytes, SDR: 8) as given to
+//                                CYRF_ConfigSOPCode() / CYRF_ConfigDataCode(),
+//                                CRC seed (default 0), CRC16 (default 1),
+//                                length field (default 1), SDR instead of 8DR
+//                                (default 0). 8DR needs the SOP code
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
@@ -123,7 +131,7 @@ static frame_t _ack_frame;
 static uint32_t _stat_acked;
 static uint32_t _stat_retries;
 
-static const char* const _frame_names[] = {"raw", "nrf", "xn297", "cc2500", "a7105"};
+static const char* const _frame_names[] = {"raw", "nrf", "xn297", "cc2500", "a7105", "cyrf"};
 
 //
 // Output
@@ -217,6 +225,7 @@ static int _hex(char* args, uint8_t* buf, uint32_t size)
 static void _set_sync_word()
 {
   radio_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
+  radio_set_rx_sync_alt(frame_rx_sync_alt(&_frame));
 }
 
 static bool _apply_phy()
@@ -269,10 +278,10 @@ typedef struct {
 } ack_t;
 
 // Sends and waits for the ack, up to 1 + _ack_retries times
-static radio_status_t _send_acked(const uint8_t* air, uint8_t n, ack_t* ack)
+static radio_status_t _send_acked(const uint8_t* air, uint16_t n, ack_t* ack)
 {
   uint8_t max_len = _ack_frame.dpl ? _ack_max_len : 0;
-  uint8_t rx_len = frame_rx_len(&_ack_frame, max_len);
+  uint16_t rx_len = frame_rx_len(&_ack_frame, max_len);
   for (ack->tries = 1; ack->tries <= 1 + _ack_retries; ack->tries++) {
     radio_status_t st = radio_send_rx(air, n, frame_rx_sync(&_ack_frame), rx_len, _ack_window,
                                       &ack->pkt);
@@ -291,7 +300,7 @@ static radio_status_t _send_acked(const uint8_t* air, uint8_t n, ack_t* ack)
 static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
 {
   uint8_t air[RADIO_MAX_PKT_LEN];
-  uint8_t n = frame_tx_data(&_frame, payload, len, air);
+  uint16_t n = frame_tx_data(&_frame, payload, len, air);
   radio_status_t st = RADIO_ERR_PARAM;
   if (n) st = _ack_on ? _send_acked(air, n, ack) : radio_send(air, n);
   if (st != RADIO_OK) {
@@ -380,6 +389,7 @@ typedef struct {
 #define CC_MSK 0x10    // MSK: bits inverted
 #define CC_CRC2400 0x20  // CRC_EN with CC2400_EN
 #define CC_A7105 0x40    // A7105 framing (CC_CRC, CC_FEC)
+#define CC_CYRF 0x80     // CYRF6936 framing (CC_CRC, CC_VAR), CC_FEC: SDR without SOP
 
 #define NRF_CH_BASE 2400000000
 #define NRF_CH_SPACING 1000000
@@ -387,6 +397,15 @@ typedef struct {
 #define FRSKY_CH_SPACING 299927   // CHANSPC 0x7A, E=3
 #define A7105_CH_BASE 2400000000
 #define A7105_CH_SPACING 500000   // PLL_II CHR 0xF
+#define CYRF_CH_BASE 2401000000   // measured: CHANNEL n at 2401 + n MHz
+#define CYRF_CH_SPACING 1000000
+
+// DSM codes of PN row 0, SOP column 0 (MULTI-Module DSM_set_sop_data_crc())
+static const uint8_t _dsm_sop_code[8] = {0x03, 0xBC, 0x6E, 0x8A, 0xEF, 0xBD, 0xFE, 0xF8};
+static const uint8_t _dsm_data_code[16] = {0x40, 0xBA, 0x97, 0xD5, 0x86, 0x4F, 0xCC, 0xD1,
+                                           0xD7, 0xA1, 0x54, 0xB1, 0x5E, 0x89, 0xAE, 0x86};
+// DSM bind packets: data code of PN row 0, column 8 (DSM_initialize_bind_phase())
+#define DSM_BIND_CODE (_dsm_data_code + 8)
 
 static const preset_t _presets[] = {
     {"nrf1m", 1000000, 160000, 97, false, NRF_CH_BASE, NRF_CH_SPACING},     // 1399 kHz
@@ -450,6 +469,12 @@ static const preset_t _presets[] = {
     // Hubsan: 100 kbps, no CRC
     {"hubsan", 100000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105, 0,
      0x55201041},  // 882 kHz
+    // CYRF6936 DSM data packets: 1 Mchip/s GFSK, SOP code, length, CRC (seed
+    // 0: cyrf command for others), PN row 0 codes. ch = CYRF CHANNEL
+    {"dsm", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8,
+     CC_CYRF | CC_CRC | CC_VAR, 1},  // the CYRF preamble is in the frame
+    // DSM bind: SDR (1 bit per 64 chips), no SOP, length or CRC: 16 bytes = 1 KB
+    {"dsmbind", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8, CC_CYRF | CC_FEC, 1},
 };
 
 static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
@@ -477,6 +502,26 @@ static void _set_a7105_frame(const uint8_t* id, uint8_t id_len, uint8_t options)
   _frame.crc_len = options & CC_CRC ? 2 : 0;
   _frame.fec = options & CC_FEC;
   _frame.var_len = _frame.whitening = _frame.invert = _frame.cc2400_crc = false;
+  _frame.prefix_len = 0;
+  _frame_ok = frame_init(&_frame);
+  _ack_on = false;
+}
+
+// sop: NULL for none. data_code: 16 bytes, SDR: 8
+static void _set_cyrf_frame(const uint8_t* sop, const uint8_t* data_code, uint16_t seed,
+                            uint8_t options)
+{
+  _frame.type = FRAME_CYRF;
+  _frame.sop = sop != NULL;
+  _frame.sdr = options & CC_FEC;
+  memset(_frame.sop_code, 0, sizeof(_frame.sop_code));
+  if (sop) memcpy(_frame.sop_code, sop, sizeof(_frame.sop_code));
+  memset(_frame.data_code, 0, sizeof(_frame.data_code));
+  memcpy(_frame.data_code, data_code, _frame.sdr ? 8 : sizeof(_frame.data_code));
+  _frame.crc_seed = seed;
+  _frame.crc_len = options & CC_CRC ? 2 : 0;
+  _frame.var_len = options & CC_VAR;
+  _frame.fec = _frame.whitening = _frame.invert = _frame.cc2400_crc = false;
   _frame.prefix_len = 0;
   _frame_ok = frame_init(&_frame);
   _ack_on = false;
@@ -512,7 +557,10 @@ static bool _load_preset(const char* name)
   _ch_base_hz = p->ch_base_hz;
   _ch_spacing_hz = p->ch_spacing_hz;
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
-  if (p->sync_len && (p->cc2500 & CC_A7105)) {
+  if (p->cc2500 & CC_CYRF) {
+    if (p->cc2500 & CC_FEC) _set_cyrf_frame(NULL, DSM_BIND_CODE, 0, p->cc2500);
+    else _set_cyrf_frame(_dsm_sop_code, _dsm_data_code, 0, p->cc2500);
+  } else if (p->sync_len && (p->cc2500 & CC_A7105)) {
     const uint8_t id[] = {p->sync >> 24, p->sync >> 16, p->sync >> 8, p->sync};
     _set_a7105_frame(id, p->sync_len, p->cc2500);
   } else if (p->sync_len) {
@@ -567,6 +615,11 @@ static void _cmd_syncthr(char* args)
 {
   uint32_t thr;
   if (_number(&args, &thr) && thr < 0x80) _sync_threshold = thr;
+  _job_stop();
+  if (_phy_ok && !_apply_phy()) {
+    _report_radio_error("radio init");
+    return;
+  }
   _printf("@ok syncthr=0x%02x\r\n", _sync_threshold);
 }
 
@@ -737,6 +790,40 @@ static void _cmd_a7105(char* args)
   }
   _printf("@ok framing=a7105 id=%08lx crc=%d fec=%d rx_sync=%08lx\r\n", frame_tx_sync(&_frame),
           _frame.crc_len != 0, _frame.fec, frame_rx_sync(&_frame));
+}
+
+static void _cmd_cyrf(char* args)
+{
+  char* sop = _next_arg(&args);
+  char* data = _next_arg(&args);
+  uint8_t sop_buf[8], data_buf[16];
+  bool no_sop = sop && !strcmp(sop, "0");
+  int sop_len = no_sop ? 8 : sop ? _hex(sop, sop_buf, sizeof(sop_buf)) : -1;
+  int data_len = data ? _hex(data, data_buf, sizeof(data_buf)) : -1;
+  uint32_t seed = _number_or(&args, 0);
+  uint8_t options = 0;
+  if (_number_or(&args, 1)) options |= CC_CRC;
+  if (_number_or(&args, 1)) options |= CC_VAR;
+  if (_number_or(&args, 0)) options |= CC_FEC;
+  if (sop_len != 8 || data_len != (options & CC_FEC ? 8 : 16) || seed > 0xFFFF) {
+    _print("@err usage: cyrf <sop: 8 bytes, 0: none> <data code: 16 bytes, sdr: 8> [seed] [crc] "
+           "[len] [sdr]\r\n");
+    return;
+  }
+
+  _job_stop();
+  _set_cyrf_frame(no_sop ? NULL : sop_buf, data_buf, seed, options);
+  if (!_frame_ok) {
+    _print("@err bad cyrf framing\r\n");
+    return;
+  }
+  if (_phy_ok && !_apply_phy()) {
+    _report_radio_error("radio init");
+    return;
+  }
+  _printf("@ok framing=cyrf sop=%d seed=%04x crc=%d len=%d sdr=%d tx_sync=%08lx rx_sync=%08lx\r\n",
+          _frame.sop, _frame.crc_seed, _frame.crc_len != 0, _frame.var_len, _frame.sdr,
+          frame_tx_sync(&_frame), frame_rx_sync(&_frame));
 }
 
 static void _cmd_esb(char* args)
@@ -919,7 +1006,7 @@ static void _cmd_rx(char* args)
     return;
   }
   if (!_need_phy()) return;
-  uint8_t air_len = frame_rx_len(&_frame, len);
+  uint16_t air_len = frame_rx_len(&_frame, len);
   if (air_len == 0 || air_len > RADIO_MAX_PKT_LEN) {
     _print("@err bad rx length for this framing (prefix?)\r\n");
     return;
@@ -933,8 +1020,9 @@ static void _cmd_rx(char* args)
     return;
   }
   _job = JOB_RX;
-  _printf("@ok rx len=%lu sync=%08lx syncthr=0x%02x\r\n", len, frame_rx_sync(&_frame),
-          _phy.sync_threshold);
+  _printf("@ok rx len=%lu sync=%08lx", len, frame_rx_sync(&_frame));
+  if (frame_rx_sync_alt(&_frame)) _printf(",%08lx", frame_rx_sync_alt(&_frame));
+  _printf(" syncthr=0x%02x\r\n", _phy.sync_threshold);
 }
 
 static void _cmd_stop()
@@ -974,6 +1062,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "trim")) _cmd_trim(args);
   else if (!strcmp(cmd, "cc2500")) _cmd_cc2500(args);
   else if (!strcmp(cmd, "a7105")) _cmd_a7105(args);
+  else if (!strcmp(cmd, "cyrf")) _cmd_cyrf(args);
   else if (!strcmp(cmd, "freq")) _cmd_freq(args);
   else if (!strcmp(cmd, "tx")) _cmd_tx(args);
   else if (!strcmp(cmd, "txp")) _cmd_txp(args);

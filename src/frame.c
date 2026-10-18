@@ -11,6 +11,18 @@
 #define CC2500_CRC_INIT 0xFFFF
 #define A7105_CRC_INIT 0x1D0F  // CRC-16 CCITT, over the payload (measured)
 
+// CYRF6936 (measured), as CC2652 bits: preamble (1100 repeated, 64 chips), the
+// SOP code (bytes sent LSB first), 0101, the inverted SOP code, a 1, then one
+// 8DR symbol of 64 chips per byte: the data code rotated left by bits 0-5, the
+// second data code if bit 6, inverted unless bit 7. SDR (DSM bind, no SOP): one
+// symbol per bit, LSB first: the data code for 1, inverted for 0. CRC-16/ARC (0x8005
+// reflected, xorout 0xFFFF) over the length and payload, from the bit reversed
+// seed, sent low byte first. _put_chips() / _get_chips(): CC2652 bit = !chip.
+#define CYRF_SYMBOL_CHIPS 64
+#define CYRF_GAP_CHIPS 1
+#define CYRF_SYNC_CHIPS 23  // chips of the first symbol in the RX sync word (no SOP)
+#define CYRF_PREAMBLE_NIBBLES 17  // 68 chips: header on whole bytes (with SOP)
+
 // A7105 FEC (measured): each nibble, high one first, as a 7 bit Hamming code
 // word, its data bits first
 static const uint8_t _a7105_fec[16] = {0x00, 0x0B, 0x16, 0x1D, 0x27, 0x2C, 0x31, 0x3A,
@@ -161,6 +173,82 @@ static uint16_t _xn297_xorout_for(const frame_t* f, uint8_t len)
   return f->scramble ? _xn297_xorout_scrambled[idx] : _xn297_xorout[idx];
 }
 
+// CYRF6936 chips: bit k = chip k (code bytes sent LSB first)
+static uint64_t _cyrf_code(const uint8_t* code)
+{
+  uint64_t c = 0;
+  for (int8_t i = 7; i >= 0; i--) c = (c << 8) | code[i];
+  return c;
+}
+
+static uint64_t _cyrf_symbol(const frame_t* f, uint8_t v)
+{
+  uint64_t c = _cyrf_code(f->data_code + (v & 0x40 ? 8 : 0));
+  uint8_t r = v & 0x3F;
+  if (r) c = (c >> r) | (c << (64 - r));
+  return v & 0x80 ? ~c : c;
+}
+
+static void _put_chips(uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
+{
+  for (uint8_t k = 0; k < n; k++) _put_bits(buf, pos, !((chips >> k) & 1), 1);
+}
+
+static uint64_t _get_chips(const uint8_t* buf, uint16_t pos)
+{
+  uint64_t chips = 0;
+  for (uint8_t k = 0; k < CYRF_SYMBOL_CHIPS; k++)
+    if (!_get_bits(buf, pos + k, 1)) chips |= 1ULL << k;
+  return chips;
+}
+
+// Nearest symbol value
+static uint8_t _cyrf_decode_symbol(const frame_t* f, uint64_t chips)
+{
+  uint8_t best = 0, best_d = 0xFF;
+  for (uint8_t code = 0; code < 2; code++) {
+    uint64_t c = _cyrf_code(f->data_code + 8 * code);
+    for (uint8_t r = 0; r < 64; r++) {
+      uint64_t s = r ? (c >> r) | (c << (64 - r)) : c;
+      uint8_t d = __builtin_popcountll(chips ^ s);
+      uint8_t v = (code << 6) | r;
+      if (d > 32) {
+        d = 64 - d;
+        v |= 0x80;
+      }
+      if (d < best_d) {
+        best_d = d;
+        best = v;
+      }
+    }
+  }
+  return best;
+}
+
+static uint16_t _cyrf_crc(const frame_t* f, const uint8_t* data, uint8_t len)
+{
+  uint16_t crc = 0;
+  for (uint8_t i = 0; i < 16; i++)
+    if (f->crc_seed & (1 << i)) crc |= 0x8000 >> i;
+  while (len--) {
+    crc ^= *data++;
+    for (uint8_t i = 0; i < 8; i++) crc = crc & 1 ? (crc >> 1) ^ 0xA001 : crc >> 1;
+  }
+  return crc ^ 0xFFFF;
+}
+
+// CYRF6936: chips for n bytes (length, payload, CRC)
+static uint16_t _cyrf_chips(const frame_t* f, uint8_t n)
+{
+  return (f->sdr ? 8 * n : n) * CYRF_SYMBOL_CHIPS;
+}
+
+// CYRF6936: bytes after the header for n bytes
+static uint16_t _cyrf_air_len(const frame_t* f, uint8_t n)
+{
+  return (CYRF_GAP_CHIPS + _cyrf_chips(f, n) + 7) / 8;
+}
+
 // CC2500 FEC: data bytes encoded for n bytes of payload and CRC
 static uint8_t _fec_data_len(uint8_t n) { return n + (n & 1 ? 1 : 2); }
 
@@ -171,9 +259,10 @@ static uint8_t _a7105_air_len(const frame_t* f, uint8_t n)
 }
 
 // Total frame length for a payload of len bytes
-static uint8_t _frame_len(const frame_t* f, uint8_t len)
+static uint16_t _frame_len(const frame_t* f, uint8_t len)
 {
   if (f->type == FRAME_A7105) return f->hdr_len + _a7105_air_len(f, len + f->crc_len);
+  if (f->type == FRAME_CYRF) return f->hdr_len + _cyrf_air_len(f, f->var_len + len + f->crc_len);
   if (f->type == FRAME_CC2500 && f->fec) return f->hdr_len + 2 * _fec_data_len(len + f->crc_len);
   if (f->type == FRAME_XN297 && f->enhanced)
     return f->hdr_len + len + (f->crc_len ? 4 : 2);  // 10 bit pcf, CRC shifted by 2 bits
@@ -189,6 +278,7 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
   if (f->type == FRAME_CC2500 && f->fec)
     return _fec_data_len(len + f->crc_len) <= FRAME_FEC_DATA_MAX;
   if (f->type == FRAME_A7105) return _frame_len(f, len) <= FRAME_BUF_LEN - FRAME_PREFIX_MAX;
+  if (f->type == FRAME_CYRF) return _frame_len(f, len) <= FRAME_AIR_MAX;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -418,7 +508,35 @@ static uint8_t _encode_a7105(const frame_t* f, const uint8_t* payload, uint8_t l
   return f->hdr_len + pos / 8;
 }
 
-static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
+static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
+{
+  uint8_t body[FRAME_BUF_LEN];
+  uint8_t n = 0;
+  if (f->var_len) body[n++] = len;
+  memcpy(body + n, payload, len);
+  n += len;
+  if (f->crc_len) {
+    uint16_t crc = _cyrf_crc(f, body, n);
+    body[n++] = crc & 0xFF;
+    body[n++] = crc >> 8;
+  }
+
+  uint16_t pos = 8 * f->hdr_len;
+  uint64_t code = _cyrf_code(f->data_code);
+  _put_chips(buf, &pos, 0, CYRF_GAP_CHIPS);
+  for (uint8_t i = 0; i < n; i++) {
+    if (!f->sdr) {
+      _put_chips(buf, &pos, _cyrf_symbol(f, body[i]), CYRF_SYMBOL_CHIPS);
+      continue;
+    }
+    for (uint8_t b = 0; b < 8; b++)
+      _put_chips(buf, &pos, (body[i] >> b) & 1 ? ~code : code, CYRF_SYMBOL_CHIPS);
+  }
+  while (pos & 7) _put_bits(buf, &pos, 1, 1);  // idle chips (0)
+  return pos / 8;
+}
+
+static uint16_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
   memcpy(buf, f->known, f->hdr_len);
   switch (f->type) {
@@ -432,6 +550,8 @@ static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, ui
       return _encode_cc2500(f, payload, len, buf);
     case FRAME_A7105:
       return _encode_a7105(f, payload, len, buf);
+    case FRAME_CYRF:
+      return _encode_cyrf(f, payload, len, buf);
     default:
       memcpy(buf + f->hdr_len, payload, len);
       return f->hdr_len + len;
@@ -456,7 +576,7 @@ static frame_result_t _decode_nrf(const frame_t* f, const uint8_t* buf, uint8_t 
 }
 
 // 'len' is the maximum length with dynamic payload length
-static frame_result_t _decode_esb(const frame_t* f, const uint8_t* buf, uint8_t avail,
+static frame_result_t _decode_esb(const frame_t* f, const uint8_t* buf, uint16_t avail,
                                   uint8_t len, uint8_t* payload, uint8_t* payload_len,
                                   uint16_t* pcf)
 {
@@ -498,7 +618,7 @@ static frame_result_t _decode_xn297(const frame_t* f, const uint8_t* buf, uint8_
 
 // 'len' is the maximum length, the actual one comes from the packet control field
 static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* buf,
-                                             uint8_t avail, uint8_t len, uint8_t* payload,
+                                             uint16_t avail, uint8_t len, uint8_t* payload,
                                              uint8_t* payload_len)
 {
   const uint8_t* b = buf + f->hdr_len;
@@ -528,7 +648,7 @@ static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* bu
 }
 
 // 'len' is the maximum length with a variable length
-static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8_t avail,
+static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint16_t avail,
                                      uint8_t len, uint8_t* payload, uint8_t* payload_len)
 {
   uint8_t b[FRAME_BUF_LEN];
@@ -598,6 +718,47 @@ static frame_result_t _decode_a7105(const frame_t* f, const uint8_t* buf, uint8_
   if (!f->crc_len) return FRAME_OK;
   uint16_t crc = _crc16_buf(A7105_CRC_INIT, body, len);
   return body[len] == crc >> 8 && body[len + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
+}
+
+// len: maximum payload length with a length field
+static uint8_t _cyrf_decode_byte(const frame_t* f, const uint8_t* buf, uint16_t* pos)
+{
+  if (!f->sdr) {
+    uint8_t v = _cyrf_decode_symbol(f, _get_chips(buf, *pos));
+    *pos += CYRF_SYMBOL_CHIPS;
+    return v;
+  }
+  uint64_t code = _cyrf_code(f->data_code);
+  uint8_t v = 0;
+  for (uint8_t b = 0; b < 8; b++, *pos += CYRF_SYMBOL_CHIPS)
+    if (__builtin_popcountll(_get_chips(buf, *pos) ^ code) > 32) v |= 1 << b;
+  return v;
+}
+
+static frame_result_t _decode_cyrf(const frame_t* f, const uint8_t* buf, uint16_t avail,
+                                   uint8_t len, uint8_t* payload, uint8_t* payload_len)
+{
+  uint16_t pos = 8 * f->hdr_len + CYRF_GAP_CHIPS;
+  uint8_t body[FRAME_BUF_LEN];
+  uint8_t n = 0;
+  if (f->var_len) {
+    if (avail < f->hdr_len + _cyrf_air_len(f, 1)) return FRAME_SHORT;
+    body[n++] = _cyrf_decode_byte(f, buf, &pos);
+    if (body[0] > len) return FRAME_BAD;
+    len = body[0];
+  }
+  uint8_t total = n + len + f->crc_len;
+  if (avail < f->hdr_len + _cyrf_air_len(f, total)) return FRAME_SHORT;
+  for (; n < total; n++) body[n] = _cyrf_decode_byte(f, buf, &pos);
+
+  memcpy(payload, body + f->var_len, len);
+  *payload_len = len;
+  // Known first payload bytes (chip errors are allowed: not compared on air)
+  if (f->prefix_len && (len < f->prefix_len || memcmp(payload, f->prefix, f->prefix_len)))
+    return FRAME_BAD;
+  if (!f->crc_len) return FRAME_OK;
+  uint16_t crc = _cyrf_crc(f, body, f->var_len + len);
+  return body[total - 2] == (crc & 0xFF) && body[total - 1] == crc >> 8 ? FRAME_OK : FRAME_BAD;
 }
 
 //
@@ -726,21 +887,61 @@ bool frame_init(frame_t* f)
       f->sync_len = n;
       break;
 
+    case FRAME_CYRF: {
+      // 8DR needs the SOP code (no MULTI-Module protocol goes without)
+      if ((f->crc_len && f->crc_len != 2) || (f->var_len && f->prefix_len) || (!f->sop && !f->sdr))
+        return false;
+      uint16_t pos = 0;
+      uint64_t sop = _cyrf_code(f->sop_code);
+      for (uint8_t i = 0; i < (f->sop ? CYRF_PREAMBLE_NIBBLES : 16); i++)
+        _put_bits(f->known, &pos, 0xC, 4);
+      if (f->sop) {
+        _put_chips(f->known, &pos, ~sop, 64);
+        _put_bits(f->known, &pos, 0x5, 4);
+        _put_chips(f->known, &pos, sop, 64);
+      }
+      n = pos / 8;
+      f->sync_len = 4;
+      break;
+    }
+
     default:
       return false;
   }
   f->hdr_len = n;
 
-  // Known payload prefix, encoded as it will be sent
+  // Known payload prefix, encoded as it will be sent. CYRF6936: the whole
+  // bytes of its chips that fit
   if (f->prefix_len) {
     if (f->prefix_len > FRAME_PREFIX_MAX || !frame_len_ok(f, f->prefix_len)) return false;
-    uint8_t buf[FRAME_BUF_LEN];
+    uint8_t buf[FRAME_AIR_MAX];
     _encode(f, f->prefix, f->prefix_len, buf);
-    memcpy(f->known + n, buf + n, f->prefix_len);
-    n += f->prefix_len;
+    uint16_t known = f->prefix_len;
+    if (f->type == FRAME_CYRF) known = (CYRF_GAP_CHIPS + _cyrf_chips(f, f->prefix_len)) / 8;
+    if (n + known > sizeof(f->known)) known = sizeof(f->known) - n;
+    memcpy(f->known + n, buf + n, known);
+    n += known;
   }
   f->known_len = n;
   _choose_rx_sync(f);
+  f->rx_sync_alt = 0;
+  if (f->type == FRAME_CYRF && !f->sop && !f->prefix_len) {
+    // Only the repeated preamble is known: the CC2652 misses most packets with
+    // a sync word on it (measured). Sync on the preamble end, the gap and the
+    // first chips of the first data bit instead: one sync word per bit value.
+    // The first symbol is decoded with these known chips (23 of 64).
+    uint16_t pos = 8 * n;
+    uint64_t code = _cyrf_code(f->data_code);  // bit 0
+    _put_chips(f->known, &pos, 0, CYRF_GAP_CHIPS);
+    _put_chips(f->known, &pos, code, CYRF_SYNC_CHIPS);
+    f->known_len = pos / 8;
+    f->rx_sync = _sync_word(f->known + f->known_len - f->sync_len, f->sync_len);
+    f->rx_sync_alt = f->rx_sync ^ ((1u << CYRF_SYNC_CHIPS) - 1);
+    // Weak: the default threshold loses 26 to 55% of the bind responses (data
+    // code 98881be430790384), the strict one none (measured)
+    f->rx_sync_errors = 0;
+    f->rx_start = f->rx_first_start = f->known_len;
+  }
   return true;
 }
 
@@ -750,6 +951,8 @@ uint32_t frame_tx_sync(const frame_t* f) { return _sync_word(f->known, f->sync_l
 
 uint32_t frame_rx_sync(const frame_t* f) { return f->rx_sync; }
 
+uint32_t frame_rx_sync_alt(const frame_t* f) { return f->rx_sync_alt; }
+
 bool frame_rx_sync_weak(const frame_t* f) { return f->rx_sync_errors * 2 < SYNC_SCORE_GOOD; }
 
 static bool _has_pid(const frame_t* f)
@@ -757,30 +960,30 @@ static bool _has_pid(const frame_t* f)
   return (f->type == FRAME_XN297 && f->enhanced) || (f->type == FRAME_NRF && f->esb);
 }
 
-uint8_t frame_tx_data(frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* data)
+uint16_t frame_tx_data(frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* data)
 {
   if (!frame_len_ok(f, len)) return 0;
 
-  uint8_t buf[FRAME_BUF_LEN];
-  uint8_t n = _encode(f, payload, len, buf) - f->sync_len;
+  uint8_t buf[FRAME_AIR_MAX];
+  uint16_t n = _encode(f, payload, len, buf) - f->sync_len;
   memcpy(data, buf + f->sync_len, n);
   f->tx_pid = f->pid;
   if (_has_pid(f)) f->pid = (f->pid + 1) & 0x03;
   return n;
 }
 
-uint8_t frame_rx_len(const frame_t* f, uint8_t len)
+uint16_t frame_rx_len(const frame_t* f, uint8_t len)
 {
   if (!frame_len_ok(f, len) || len < f->prefix_len) return 0;
   return _frame_len(f, len) - f->rx_first_start;
 }
 
 static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t* data,
-                                 uint8_t rx_len, uint8_t len, uint8_t* payload,
+                                 uint16_t rx_len, uint8_t len, uint8_t* payload,
                                  uint8_t* payload_len, uint16_t* pcf)
 {
-  uint8_t buf[FRAME_BUF_LEN];
-  uint8_t avail = start + rx_len;
+  uint8_t buf[FRAME_AIR_MAX];
+  uint16_t avail = start + rx_len;
   if (avail > sizeof(buf)) avail = sizeof(buf);
   memcpy(buf, f->known, start);
   memcpy(buf + start, data, avail - start);
@@ -794,6 +997,16 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     else res = _decode_esb(f, buf, avail, len, payload, payload_len, pcf);
   } else if (f->type == FRAME_CC2500) {
     res = _decode_cc2500(f, buf, avail, len, payload, payload_len);
+  } else if (f->type == FRAME_CYRF) {
+    // Synced with either polarity of the first data bit: the known chips must
+    // match the received ones
+    uint16_t sym = 8 * f->hdr_len + CYRF_GAP_CHIPS;
+    if (f->rx_sync_alt && 8 * avail >= sym + CYRF_SYMBOL_CHIPS) {
+      uint64_t diff = _get_chips(buf, sym) ^ _cyrf_code(f->data_code);
+      if (__builtin_popcountll(diff >> CYRF_SYNC_CHIPS) > (CYRF_SYMBOL_CHIPS - CYRF_SYNC_CHIPS) / 2)
+        for (uint16_t p = sym; p < sym + CYRF_SYNC_CHIPS; p++) buf[p >> 3] ^= 0x80 >> (p & 7);
+    }
+    res = _decode_cyrf(f, buf, avail, len, payload, payload_len);
   } else {
     if (avail < _frame_len(f, len)) return FRAME_SHORT;
     if (f->type == FRAME_NRF) res = _decode_nrf(f, buf, len, payload);
@@ -805,14 +1018,14 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     }
   }
 
-  // The received known bytes must be right too
-  if (res == FRAME_OK && start < f->known_len &&
+  // The received known bytes must be right too (CYRF6936: decoded instead)
+  if (res == FRAME_OK && f->type != FRAME_CYRF && start < f->known_len &&
       memcmp(buf + start, f->known + start, f->known_len - start))
     res = FRAME_BAD;
   return res;
 }
 
-frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint8_t rx_len,
+frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                                 uint8_t len, uint8_t* payload, uint8_t* payload_len,
                                 uint16_t* pcf)
 {
@@ -835,7 +1048,7 @@ frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint8_t r
   return res;
 }
 
-frame_result_t frame_decode(const frame_t* f, const uint8_t* data, uint8_t rx_len,
+frame_result_t frame_decode(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                             uint8_t len, uint8_t* payload, uint8_t* payload_len)
 {
   uint16_t pcf;
