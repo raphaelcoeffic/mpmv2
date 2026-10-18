@@ -3,34 +3,38 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// On-air packet formats of the MULTI-Module 2.4 GHz chips (NRF24L01, XN297),
-// emulated on top of the raw radio (preamble + sync word + fixed length data,
-// see radio.h).
+// On-air packet formats of the MULTI-Module 2.4 GHz chips (NRF24L01, XN297,
+// CC2500), emulated on top of the raw radio (preamble + sync word + fixed
+// length data, see radio.h).
 //
-// A frame is: header (bytes known in advance: XN297 preamble, address) |
-// encoded payload | CRC. TX sends the first header bytes as the sync word and
-// the rest as data. RX syncs on the bytes known in advance (NRF preamble,
-// header and payload prefix) that differ the most from the bits before them:
-// repeated patterns (e.g. address e7e7e7e7e7) make the CC2652 miss packets.
+// A frame is: header (bytes known in advance: XN297 preamble, address, CC2500
+// last 2 preamble bytes and sync word) | encoded payload | CRC. TX sends the
+// first header bytes as the sync word and the rest as data. RX syncs on the
+// bytes known in advance (NRF preamble, header and payload prefix) that differ
+// the most from the bits before them: repeated patterns (e.g. address
+// e7e7e7e7e7) make the CC2652 miss packets.
 
 #define FRAME_ADDR_MAX 5
 #define FRAME_PREFIX_MAX 8
-#define FRAME_PAYLOAD_MAX 32
+#define FRAME_PAYLOAD_MAX 48
+#define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
 #define FRAME_HDR_MAX (4 + FRAME_ADDR_MAX)
 
 typedef enum {
   FRAME_RAW,    // sync word + payload
   FRAME_NRF,    // NRF24L01 ShockBurst, or Enhanced ShockBurst (esb)
   FRAME_XN297,  // XN297, standard or enhanced mode
+  FRAME_CC2500, // CC2500 packet: preamble, sync word, payload, CRC
 } frame_type_t;
 
 typedef struct {
   frame_type_t type;
   // Address as given to the NRF24L01 TX_ADDR register or XN297_SetTXAddr()
   // (sent last byte first), 3 to 5 bytes. Raw: the sync word, MSB first.
+  // CC2500: SYNC1, SYNC0, twice (4 bytes) for MDMCFG2.SYNC_MODE 3 or 7.
   uint8_t addr[FRAME_ADDR_MAX];
   uint8_t addr_len;
-  uint8_t crc_len;     // NRF: 0 to 2, XN297: 0 or 2
+  uint8_t crc_len;     // NRF: 0 to 2, XN297 and CC2500: 0 or 2
   // NRF: 9 bit packet control field, sent by the nRF24L01+ when EN_AA or
   // dynamic payload length (DYNPD) is enabled
   bool esb;
@@ -38,6 +42,9 @@ typedef struct {
   bool scramble;       // XN297
   bool enhanced;       // XN297 enhanced mode (packet control field)
   bool noack;          // NRF esb / XN297 enhanced mode: no ack request
+  // CC2500: variable packet length (PKTCTRL0.LENGTH_CONFIG 1), the first
+  // payload byte is the length of the rest (CRC excluded)
+  bool var_len;
   uint8_t sync_bytes;  // NRF: address bytes used as sync word (2 to 4)
   // Known first payload bytes (not with a packet control field)
   uint8_t prefix[FRAME_PREFIX_MAX];

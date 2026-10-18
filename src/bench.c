@@ -13,8 +13,12 @@
 // Commands (one per line, numbers in decimal or 0x hex):
 //
 //   info                         @ok bench=1 dev=cc2652 ...
-//   preset <nrf1m|nrf2m|nrf250k|xn250k>  load a PHY preset
-//   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq]   custom 2-GFSK PHY
+//   preset <name>                load a PHY preset (and its channel plan):
+//                                nrf1m nrf2m nrf250k xn250k, CC2500 ones with
+//                                their framing: frskyd frskyx frskyx2 frskyxeu
+//                                frskyx2eu
+//   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
+//                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
 //   syncthr <n>                  sync correlation threshold, 0 = auto: default
 //                                (0x1F), strict (0x32) for weak RX sync words
@@ -28,12 +32,20 @@
 //   xaddr <hex>                  XN297 address (as for XN297_SetTXAddr), 3..5 bytes
 //   prefix [hex]                 known first payload bytes (none to clear): the RX
 //                                sync word moves into them, see frame.h
+//   cc2500 <sync> [crc] [var]    CC2500 framing: sync word SYNC1 SYNC0 (twice for
+//                                SYNC_MODE 3), CC2500 CRC (default 1), variable
+//                                length (default 1): the payload starts with the
+//                                length byte, as the CC2500 FIFO content
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
 //                                after each packet, as the nRF24L01+ with EN_AA:
 //                                RX window after each TX, retransmissions
-//   ch <n>                       channel: 2400 + n MHz (NRF numbering)
+//   ch <n>                       channel: base + n * spacing of the channel plan
+//                                (NRF: 2400 + n MHz)
+//   chplan <base_hz> <spacing_hz>  channel plan (CC2500: FREQ and CHANSPC)
+//   trim <khz>                   frequency correction added to ch and freq, signed
+//                                (crystal offsets: the MULTI-Module CC2500 option)
 //   freq <khz>                   frequency in kHz
 //   tx <hex>                     send one packet
 //   txp <period_us> <count> <hex>  send periodically, count 0 = forever
@@ -64,6 +76,9 @@ static uint8_t _sync_threshold;
 
 static uint32_t _freq_khz = 2440000;
 static int _channel = 40;
+static uint32_t _ch_base_hz = 2400000000;
+static uint32_t _ch_spacing_hz = 1000000;
+static int32_t _trim_khz;
 
 // TI default sync word
 static frame_t _frame = {
@@ -93,12 +108,12 @@ static uint32_t _stat_err;
 static bool _ack_on;
 static uint8_t _ack_retries = 3;
 static uint32_t _ack_window = 500;
-static uint8_t _ack_max_len = FRAME_PAYLOAD_MAX;
+static uint8_t _ack_max_len = FRAME_NRF_PAYLOAD_MAX;
 static frame_t _ack_frame;
 static uint32_t _stat_acked;
 static uint32_t _stat_retries;
 
-static const char* const _frame_names[] = {"raw", "nrf", "xn297"};
+static const char* const _frame_names[] = {"raw", "nrf", "xn297", "cc2500"};
 
 //
 // Output
@@ -202,7 +217,8 @@ static bool _apply_phy()
   // to 100%. Its sensitivity cost is not measured: only used when needed.
   _phy.sync_threshold = _sync_threshold ? _sync_threshold
                         : frame_rx_sync_weak(&_frame) ? SYNC_THRESHOLD_STRICT : 0;
-  _phy_ok = radio_init(&_phy) == RADIO_OK && radio_set_frequency(_freq_khz) == RADIO_OK;
+  _phy_ok = radio_init(&_phy) == RADIO_OK &&
+            radio_set_frequency(_freq_khz + _trim_khz) == RADIO_OK;
   _set_sync_word();
   return _phy_ok;
 }
@@ -321,44 +337,97 @@ static bool _need_phy()
 
 static void _cmd_info()
 {
-  _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u ch=%d freq=%lu "
-          "framing=%s esb=%d ack=%d\r\n",
-          _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _channel, _freq_khz,
-          _frame_names[_frame.type], _frame.type == FRAME_NRF && _frame.esb, _ack_on);
+  _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
+          "chplan=%lu/%lu framing=%s esb=%d ack=%d\r\n",
+          _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
+          _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
+          _frame.type == FRAME_NRF && _frame.esb, _ack_on);
+}
+
+// PHY presets. nRF24L01: 160 kHz deviation at 250k/1M, 320 kHz at 2M. XN297 at
+// 250 kbps: as the MULTI-Module CC2500 emulation (127 kHz). CC2500 ones: the
+// MULTI-Module register settings (26 MHz crystal), with their channel plan
+// (FREQ, CHANSPC) and framing (SYNC_MODE, CRC_EN, LENGTH_CONFIG).
+typedef struct {
+  const char* name;
+  uint32_t rate;
+  uint32_t deviation;
+  uint8_t rx_bw;
+  bool fsk;
+  uint32_t ch_base_hz;
+  uint32_t ch_spacing_hz;
+  uint8_t sync_len;  // CC2500 framing: 2, 4 = sync word sent twice, 0 = keep the framing
+  bool crc;
+} preset_t;
+
+#define NRF_CH_BASE 2400000000
+#define NRF_CH_SPACING 1000000
+#define FRSKY_CH_BASE 2403999848  // FREQ 0x5C7627
+#define FRSKY_CH_SPACING 299927   // CHANSPC 0x7A, E=3
+
+static const preset_t _presets[] = {
+    {"nrf1m", 1000000, 160000, 97, false, NRF_CH_BASE, NRF_CH_SPACING},     // 1243 kHz
+    {"nrf2m", 2000000, 320000, 100, false, NRF_CH_BASE, NRF_CH_SPACING},    // 2185 kHz
+    {"nrf250k", 250000, 160000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},    // 784 kHz
+    {"xn250k", 250000, 127000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},     // 784 kHz
+    // FrSky D: 31.04 kbps GFSK, 31.7 kHz deviation, CRC, sync 15/16
+    {"frskyd", 31044, 31750, 85, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 2, true},  // 175 kHz
+    // FrSky X (D16 v1): 70.0 kbps GFSK, 57.1 kHz deviation, sync 30/32, no CRC
+    {"frskyx", 70023, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, false},  // 265 kHz
+    // FrSky X v2: 77.0 kbps, CRC
+    {"frskyx2", 76965, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, true},
+    // FrSky X LBT (EU): 100 kbps 2-FSK, 69.8 kHz deviation, 2405 MHz base. X v2
+    // LBT: the same with CRC
+    {"frskyxeu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, false},  // 307 kHz
+    {"frskyx2eu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, true},
+};
+
+static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, bool crc, bool var_len)
+{
+  _frame.type = FRAME_CC2500;
+  memcpy(_frame.addr, sync, sync_len);
+  _frame.addr_len = sync_len;
+  _frame.crc_len = crc ? 2 : 0;
+  _frame.var_len = var_len;
+  _frame.prefix_len = 0;
+  _frame_ok = frame_init(&_frame);
+  _ack_on = false;
+}
+
+static bool _set_frequency(uint32_t khz);
+
+static uint32_t _ch_khz(uint32_t ch)
+{
+  return (_ch_base_hz + (uint64_t)ch * _ch_spacing_hz + 500) / 1000;
 }
 
 static bool _load_preset(const char* name)
 {
-  // nRF24L01: 160 kHz deviation at 250k/1M, 320 kHz at 2M.
-  // XN297 at 250 kbps: as the MULTI-Module CC2500 emulation (127 kHz)
-  radio_phy_t phy = {
-      .preamble_bytes = 4,
-      .if_freq = 0x8000,  // RF core default
-  };
-  if (!strcmp(name, "nrf1m")) {
-    phy.symbol_rate = 1000000;
-    phy.deviation = 160000;
-    phy.rx_bw = 97;  // 1243 kHz
-  } else if (!strcmp(name, "nrf2m")) {
-    phy.symbol_rate = 2000000;
-    phy.deviation = 320000;
-    phy.rx_bw = 100;  // 2185 kHz
-  } else if (!strcmp(name, "nrf250k")) {
-    phy.symbol_rate = 250000;
-    phy.deviation = 160000;
-    phy.rx_bw = 94;  // 784 kHz
-  } else if (!strcmp(name, "xn250k")) {
-    phy.symbol_rate = 250000;
-    phy.deviation = 127000;
-    phy.rx_bw = 94;  // 784 kHz
-  } else {
+  const preset_t* p = NULL;
+  for (uint32_t i = 0; i < sizeof(_presets) / sizeof(_presets[0]); i++)
+    if (!strcmp(name, _presets[i].name)) p = &_presets[i];
+  if (!p) {
     _printf("@err unknown preset %s\r\n", name);
     return false;
   }
 
   _job_stop();
-  _phy = phy;
+  _phy = (radio_phy_t){
+      .symbol_rate = p->rate,
+      .deviation = p->deviation,
+      .rx_bw = p->rx_bw,
+      .preamble_bytes = 4,
+      .if_freq = 0x8000,  // RF core default
+      .fsk = p->fsk,
+  };
   strncpy(_phy_name, name, sizeof(_phy_name) - 1);
+  _ch_base_hz = p->ch_base_hz;
+  _ch_spacing_hz = p->ch_spacing_hz;
+  if (_channel >= 0) _freq_khz = _ch_khz(_channel);
+  if (p->sync_len) {
+    static const uint8_t sync[] = {0xD3, 0x91, 0xD3, 0x91};  // CC2500 default
+    _set_cc2500_frame(sync, p->sync_len, p->crc, true);
+  }
   if (!_apply_phy()) {
     _report_radio_error("radio init");
     return false;
@@ -370,7 +439,7 @@ static void _cmd_preset(char* args)
 {
   char* name = _next_arg(&args);
   if (!name) {
-    _print("@err usage: preset <nrf1m|nrf2m|nrf250k|xn250k>\r\n");
+    _print("@err usage: preset <nrf1m|nrf2m|nrf250k|xn250k|frskyd|frskyx|frskyx2|frskyxeu|frskyx2eu>\r\n");
     return;
   }
   if (_load_preset(name)) _printf("@ok preset=%s\r\n", name);
@@ -380,7 +449,7 @@ static void _cmd_phy(char* args)
 {
   uint32_t rate, dev, bw;
   if (!_number(&args, &rate) || !_number(&args, &dev) || !_number(&args, &bw)) {
-    _print("@err usage: phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq]\r\n");
+    _print("@err usage: phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]\r\n");
     return;
   }
 
@@ -390,6 +459,7 @@ static void _cmd_phy(char* args)
   _phy.rx_bw = bw;
   _phy.preamble_bytes = _number_or(&args, 4);
   _phy.if_freq = _number_or(&args, 0x8000);
+  _phy.fsk = _number_or(&args, 0);
   strcpy(_phy_name, "custom");
   if (!_apply_phy()) {
     _report_radio_error("radio init");
@@ -512,6 +582,28 @@ static void _cmd_prefix(char* args)
   _printf("@ok prefix=%d\r\n", len);
 }
 
+static void _cmd_cc2500(char* args)
+{
+  char* sync = _next_arg(&args);
+  uint8_t buf[4];
+  int len = sync ? _hex(sync, buf, sizeof(buf)) : -1;
+  uint32_t crc = _number_or(&args, 1);
+  uint32_t var_len = _number_or(&args, 1);
+  if (len != 2 && len != 4) {
+    _print("@err usage: cc2500 <sync: 2 bytes, 4 for SYNC_MODE 3> [crc] [var]\r\n");
+    return;
+  }
+
+  _job_stop();
+  _set_cc2500_frame(buf, len, crc, var_len);
+  if (_phy_ok && !_apply_phy()) {
+    _report_radio_error("radio init");
+    return;
+  }
+  _printf("@ok framing=cc2500 sync=%08lx crc=%lu var=%lu rx_sync=%08lx\r\n",
+          frame_tx_sync(&_frame), crc, var_len, frame_rx_sync(&_frame));
+}
+
 static void _cmd_esb(char* args)
 {
   uint32_t on;
@@ -544,7 +636,7 @@ static void _cmd_ack(char* args)
     _print("@err ack needs esb framing\r\n");
     return;
   }
-  if (retries > 15 || window < 100 || window > 100000 || max_len > FRAME_PAYLOAD_MAX) {
+  if (retries > 15 || window < 100 || window > 100000 || max_len > FRAME_NRF_PAYLOAD_MAX) {
     _print("@err bad ack parameters\r\n");
     return;
   }
@@ -563,7 +655,7 @@ static bool _set_frequency(uint32_t khz)
   if (job == JOB_RX) radio_rx_stop();
 
   _freq_khz = khz;
-  bool ok = !_phy_ok || radio_set_frequency(khz) == RADIO_OK;
+  bool ok = !_phy_ok || radio_set_frequency(khz + _trim_khz) == RADIO_OK;
   if (ok && job == JOB_RX) ok = _rx_start();
   if (!ok) {
     _job = JOB_IDLE;
@@ -575,12 +667,36 @@ static bool _set_frequency(uint32_t khz)
 static void _cmd_ch(char* args)
 {
   uint32_t ch;
-  if (!_number(&args, &ch) || ch > 125) {
-    _print("@err usage: ch <0..125>\r\n");
+  if (!_number(&args, &ch) || ch > 255 || _ch_khz(ch) > 2500000) {
+    _print("@err usage: ch <n>, up to 2500 MHz\r\n");
     return;
   }
+  uint32_t khz = _ch_khz(ch);
   _channel = ch;
-  if (_set_frequency(2400000 + ch * 1000)) _printf("@ok ch=%lu\r\n", ch);
+  if (_set_frequency(khz)) _printf("@ok ch=%lu freq=%lu\r\n", ch, khz);
+}
+
+static void _cmd_trim(char* args)
+{
+  uint32_t trim;
+  if (_number(&args, &trim) && (int32_t)trim >= -500 && (int32_t)trim <= 500) {
+    _trim_khz = (int32_t)trim;
+    if (!_set_frequency(_freq_khz)) return;
+  }
+  _printf("@ok trim=%ld\r\n", _trim_khz);
+}
+
+static void _cmd_chplan(char* args)
+{
+  uint32_t base, spacing;
+  if (!_number(&args, &base) || !_number(&args, &spacing) || base < 2360000000 ||
+      base > 2500000000 || spacing > 10000000) {
+    _print("@err usage: chplan <base_hz> <spacing_hz>\r\n");
+    return;
+  }
+  _ch_base_hz = base;
+  _ch_spacing_hz = spacing;
+  _printf("@ok chplan base=%lu spacing=%lu\r\n", base, spacing);
 }
 
 static void _cmd_freq(char* args)
@@ -719,6 +835,9 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "esb")) _cmd_esb(args);
   else if (!strcmp(cmd, "ack")) _cmd_ack(args);
   else if (!strcmp(cmd, "ch")) _cmd_ch(args);
+  else if (!strcmp(cmd, "chplan")) _cmd_chplan(args);
+  else if (!strcmp(cmd, "trim")) _cmd_trim(args);
+  else if (!strcmp(cmd, "cc2500")) _cmd_cc2500(args);
   else if (!strcmp(cmd, "freq")) _cmd_freq(args);
   else if (!strcmp(cmd, "tx")) _cmd_tx(args);
   else if (!strcmp(cmd, "txp")) _cmd_txp(args);

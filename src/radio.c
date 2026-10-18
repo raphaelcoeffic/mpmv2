@@ -161,7 +161,7 @@ static void _init_setup(const radio_phy_t* phy)
   _setup.startTrigger.triggerType = TRIG_NOW;
   _setup.condition.rule = COND_NEVER;
 
-  _setup.modulation.modType = 1;  // 2-GFSK
+  _setup.modulation.modType = phy->fsk ? 0 : 1;  // 2-FSK or 2-GFSK
   _setup.modulation.deviation = phy->deviation / 250;
   _setup.modulation.deviationStepSz = 0;  // 250 Hz steps
 

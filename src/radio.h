@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Raw 2-GFSK packet radio on top of the RF core proprietary mode:
+// Raw 2-GFSK / 2-FSK packet radio on top of the RF core proprietary mode:
 // preamble + sync word + fixed length payload, no HW CRC and no whitening.
 // Protocol framing (address bytes, CRC, scrambling) is left to the caller.
 
@@ -18,6 +18,7 @@ typedef struct {
   int16_t if_freq;        // MHz in 4.12 signed format, 0x8000 = default
   uint16_t tx_power;      // RF core TX power word
   uint8_t sync_threshold; // sync word correlation threshold, 0 = default (0x1F)
+  bool fsk;               // 2-FSK instead of 2-GFSK
 } radio_phy_t;
 
 typedef struct {

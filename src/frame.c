@@ -8,6 +8,11 @@
 #define NRF_CRC16_INIT 0xFFFF
 #define NRF_CRC8_INIT 0xFF
 #define XN297_CRC_INIT 0xB5D2
+#define CC2500_CRC_INIT 0xFFFF
+
+// CC2500: last preamble bytes before the sync word (at least 2 are sent)
+#define CC2500_PREAMBLE 0xAA
+#define CC2500_PREAMBLE_LEN 2
 
 // nRF24L01+ packet control field: 6 bit length, 2 bit pid, 1 bit "ack
 // requested" (the datasheet's NO_ACK flag, sent inverted). Without dynamic
@@ -80,6 +85,16 @@ static uint16_t _crc16_buf(uint16_t crc, const uint8_t* data, uint8_t len)
   return crc;
 }
 
+// CC2500 CRC-16: polynomial 0x8005, MSB first
+static uint16_t _cc2500_crc_buf(uint16_t crc, const uint8_t* data, uint8_t len)
+{
+  while (len--) {
+    crc ^= (uint16_t)*data++ << 8;
+    for (int i = 0; i < 8; i++) crc = crc & 0x8000 ? (crc << 1) ^ 0x8005 : crc << 1;
+  }
+  return crc;
+}
+
 static uint8_t _crc8_buf(uint8_t crc, const uint8_t* data, uint8_t len)
 {
   while (len--) {
@@ -147,6 +162,7 @@ static uint8_t _frame_len(const frame_t* f, uint8_t len)
 bool frame_len_ok(const frame_t* f, uint8_t len)
 {
   if (len > FRAME_PAYLOAD_MAX) return false;
+  if (f->type == FRAME_NRF) return len <= FRAME_NRF_PAYLOAD_MAX;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -240,6 +256,22 @@ static uint8_t _encode_xn297_enhanced(const frame_t* f, const uint8_t* payload, 
   return n;
 }
 
+// The payload includes the length byte with a variable length
+static uint8_t _encode_cc2500(const frame_t* f, const uint8_t* payload, uint8_t len,
+                              uint8_t* buf)
+{
+  uint8_t n = f->hdr_len;
+  memcpy(buf + n, payload, len);
+  n += len;
+
+  if (f->crc_len) {
+    uint16_t crc = _cc2500_crc_buf(CC2500_CRC_INIT, payload, len);
+    buf[n++] = crc >> 8;
+    buf[n++] = crc & 0xFF;
+  }
+  return n;
+}
+
 static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
   memcpy(buf, f->known, f->hdr_len);
@@ -250,6 +282,8 @@ static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, ui
     case FRAME_XN297:
       if (f->enhanced) return _encode_xn297_enhanced(f, payload, len, buf);
       return _encode_xn297(f, payload, len, buf);
+    case FRAME_CC2500:
+      return _encode_cc2500(f, payload, len, buf);
     default:
       memcpy(buf + f->hdr_len, payload, len);
       return f->hdr_len + len;
@@ -343,6 +377,30 @@ static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* bu
   crc ^= _xn297_xorout_for(f, size);
   uint16_t rx_crc = (b[size + 1] << 10) | (b[size + 2] << 2) | (b[size + 3] >> 6);
   return crc == rx_crc ? FRAME_OK : FRAME_BAD;
+}
+
+// 'len' is the maximum length with a variable length
+static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8_t avail,
+                                     uint8_t len, uint8_t* payload, uint8_t* payload_len)
+{
+  const uint8_t* b = buf + f->hdr_len;
+  uint8_t size = len;
+  if (f->var_len) {
+    if (avail <= f->hdr_len) return FRAME_SHORT;
+    size = b[0] + 1;
+    if (size > len) {
+      *payload_len = 0;
+      return FRAME_BAD;
+    }
+  }
+  if (avail < _frame_len(f, size)) return FRAME_SHORT;
+
+  memcpy(payload, b, size);
+  *payload_len = size;
+
+  if (!f->crc_len) return FRAME_OK;
+  uint16_t crc = _cc2500_crc_buf(CC2500_CRC_INIT, b, size);
+  return b[size] == crc >> 8 && b[size + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
 }
 
 //
@@ -450,6 +508,14 @@ bool frame_init(frame_t* f)
       f->sync_len = sizeof(_xn297_preamble);
       break;
 
+    case FRAME_CC2500:
+      if (f->addr_len < 1 || f->addr_len > 4 || (f->crc_len && f->crc_len != 2)) return false;
+      for (uint8_t i = 0; i < CC2500_PREAMBLE_LEN; i++) f->known[n++] = CC2500_PREAMBLE;
+      memcpy(f->known + n, f->addr, f->addr_len);
+      n += f->addr_len;
+      f->sync_len = 4;
+      break;
+
     default:
       return false;
   }
@@ -516,6 +582,8 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     if (avail < f->hdr_len + 2) return FRAME_SHORT;
     if (f->type == FRAME_XN297) res = _decode_xn297_enhanced(f, buf, avail, len, payload, payload_len);
     else res = _decode_esb(f, buf, avail, len, payload, payload_len, pcf);
+  } else if (f->type == FRAME_CC2500) {
+    res = _decode_cc2500(f, buf, avail, len, payload, payload_len);
   } else {
     if (avail < _frame_len(f, len)) return FRAME_SHORT;
     if (f->type == FRAME_NRF) res = _decode_nrf(f, buf, len, payload);
