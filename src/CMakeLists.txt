@@ -9,6 +9,8 @@ set(firmware_sources
     main.c
     nor_flash.c
     ppm.c
+    frame.c
+    radio.c
     serial.c
     shell.c
     spi.c
@@ -35,6 +37,12 @@ endif()
 if (USE_CCFG)
     message("## Include CCFG")
     target_sources(firmware PRIVATE ccfg.c)
+endif()
+
+if (BENCH)
+    message("## Radio bench mode")
+    target_sources(firmware PRIVATE bench.c)
+    target_compile_definitions(firmware PRIVATE BENCH)
 endif()
 
 if (DEBUG)

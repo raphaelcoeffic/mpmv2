@@ -4,6 +4,7 @@ file(GLOB driverlib_c_sources driverlib/*.c)
 
 set(driverlib_sources
     ${driverlib_c_sources}
+    rf_patches/rf_patch_cpe_prop.c
 )
 
 set(startup_file

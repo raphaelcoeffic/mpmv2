@@ -6,3 +6,4 @@ doc
 *.hex
 *.bin
 *.o
+build-*/

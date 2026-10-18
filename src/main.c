@@ -5,6 +5,7 @@
 #include <driverlib/sys_ctrl.h>
 #include <driverlib/uart.h>
 
+#include "bench.h"
 #include "board.h"
 #include "file_system.h"
 #include "ppm.h"
@@ -260,6 +261,10 @@ int main(void)
 // #endif
 
   debugln("## Boot completed ##");
+
+#if defined(BENCH)
+  bench_loop();
+#endif
 
   bool button_pressed = detect_button();
   if (button_pressed) {
