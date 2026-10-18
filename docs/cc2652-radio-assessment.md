@@ -7,8 +7,8 @@ Measured 2026-10-18: CC2652R1 LaunchPad (PCB antenna) next to an iRangeX IRX4
 Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
 -24 dBm. Test commands and per-test results: `Bench/README.md` in
 DIY-Multiprotocol-TX-Module (branch `bench-mode`). CC2652 code: `src/radio.c`
-(RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 / CYRF6936 framing), built
-with `-DBENCH=ON`.
+(RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
+CYRF6936 / HS6200 / RF2500 framing), built with `-DBENCH=ON`.
 
 ## Summary
 
@@ -24,14 +24,19 @@ with `-DBENCH=ON`.
   MPM `option`. Only FrSky L (TX only, raw chip stream) is untested. FrSky
   itself runs ACCST and ACCESS on CC26xx chips in its receivers and transmitter
   modules (information from the project owner, not a bench result).
-- Works: the A7105 protocols tried, FlySky, AFHDS2A (FEC) and Hubsan: 100%
-  from the A7105, 99 to 100% to it (A7105 CRC errors at 500 kbps), with a
-  90 kHz trim on this board.
-- Works: DSM (CYRF6936, 1 Mchip/s DSSS with 64 chip codes), data, bind and
-  bind response packets, and Walkera Devo (32 chip codes), 100% both ways
-  without trim. Every CYRF6936 DSSS format of the MPM protocols has been run. The chip codes are sent
-  and correlated in software; the 8.2 ms bind packet (1029 bytes on air) needs
-  the advanced RF core commands, above 255 bytes.
+- Works: every MPM A7105 protocol: FlySky, AFHDS2A (FEC), Hubsan, Bugs,
+  Height, Pelikan, Kyosho (FHSS and Hype), WFLY2, Joysway. 100% from the A7105,
+  88 to 100% to it (A7105 CRC errors at 500 kbps), with a 90 kHz trim on this
+  board.
+- Works: every MPM CYRF6936 DSSS protocol, with its own register setup: DSM
+  (data, bind and bind response packets), Devo, J6Pro, WK2x01, Scorpio,
+  Kyosho3, Traxxas, WFLY, MLINK, Losi. 97 to 100% both ways without trim. The
+  chip codes are sent and correlated in software; the 8.2 ms DSM bind packet
+  (1029 bytes on air) needs the advanced RF core commands, above 255 bytes.
+- Works: the CYRF6936 GFSK mode protocols (E01X, E129, E010R5): plain 1 Mbps
+  GFSK, with the HS6200 and RF2500 framings the MPM builds in software. 100%
+  of the MPM packets received. The MPM sends wrong HS6200 CRCs (an MPM bug,
+  see below); the CC2652 sends the intended ones.
 - Mitigated in software: repeated address patterns. Degenerate addresses such
   as `5555555555` still fail.
 - Biggest unknown: receiver sensitivity (sync thresholds raised for weak sync
@@ -56,13 +61,13 @@ with `-DBENCH=ON`.
 | CC2500 2-FSK / GFSK: FrSky V8, Corona, Flydream, Ares, RadioLink, SFHSS, Redpine slow | works | 99.6 to 100% both ways |
 | CC2500 FrSky L (raw chip stream) | not tested | |
 | A7105 FlySky, AFHDS2A (500 kbps, CRC, FEC), Hubsan (100 kbps) | works | 100% A7105 -> CC2652, 99 to 99.8% (500 kbps) and 100% (Hubsan) CC2652 -> A7105, with a 90 kHz trim |
-| Other A7105 protocols (Bugs, Height, Pelikan, Kyosho, WFLY2, Joysway) | not tested | same PHY family, 250 or 500 kbps |
+| Other A7105 protocols (Bugs, Height, Pelikan, Kyosho, Kyosho Hype, WFLY2, Joysway) | works | 100% A7105 -> CC2652, 88 to 100% CC2652 -> A7105 (see A7105 section) |
 | CYRF6936 DSM data packets (8DR, SOP, length, CRC), 10 and 16 bytes, 4 channels | works | 100% both ways |
 | CYRF6936 DSM bind and bind response (SDR, no SOP) | works | 100% both ways (bind TX -> CC2652 RX needs a sync word on the preamble end, see below) |
 | CYRF6936 Devo (32 chip SOP and data codes, 32 chip preamble) | works | 100% both ways, 3 SOP codes, CRC seeds 0 and 0xa55a |
 | CYRF6936 64 chip SOP + 32 chip data (WFLY), 32 chip SOP + 64 chip data (Kyosho3) | works | 100% both ways (Devo register setup with the WFLY / Kyosho3 framing) |
-| Other CYRF6936 protocols (J6Pro, WK2x01, Scorpio, MLINK, Losi, Traxxas) | not tested with their registers | same chip formats as DSM or Devo |
-| CYRF6936 GFSK mode (E01X, E129, E010R5) | not tested | 1 Mbps GFSK with software framing (HS6200...) |
+| Other CYRF6936 protocols with their registers (J6Pro, WK2x01, Scorpio, Kyosho3, Traxxas, WFLY, MLINK, Losi) | works | 99 to 100% CYRF6936 -> CC2652, 97 to 100% CC2652 -> CYRF6936 |
+| CYRF6936 GFSK mode: E01X (HS6200 framing), E129 and E010R5 (RF2500 framing) | works | 100% of the MPM packets received (TX only protocols) |
 | Sensitivity, range, blocking | not measured | no attenuator on the bench |
 
 ## Weaknesses, by impact
@@ -123,8 +128,7 @@ with `-DBENCH=ON`.
 
 ### 5. Not evaluated yet
 
-- Protocols: the CYRF6936 protocols other than DSM and Devo with their own
-  register setups, and the HS6200 framing of the CYRF6936 GFSK mode (E01X).
+- Protocols: only FrSky L (CC2500, TX only, raw chip stream) is left.
 - RF: sensitivity, range and blocking are unmeasured. The CC2652 receives the
   CYRF6936 chips as plain 1 Mbps GFSK bits and correlates the codes in
   software: the CYRF6936 DSSS processing gain is only partly kept (up to 20
@@ -204,8 +208,12 @@ Other findings:
 | FlySky (AFHDS) | 500 kbps GFSK | ID sync, fixed 21, CRC | works |
 | AFHDS2A (+RX) | 500 kbps GFSK | ID sync, fixed 38, CRC, FEC | works |
 | Hubsan | 100 kbps GFSK | ID 55201041, fixed 16, no CRC | works |
-| Kyosho FHSS / Syncro, WFLY2, Joysway | 500 kbps | ID sync, CRC (Kyosho: FEC) | not tested, same PHY as FlySky |
-| Bugs, Height, Pelikan, Kyosho Hype | 250 kbps | ID sync, CRC (Height, Hype: FEC, Pelikan: no CRC) | not tested |
+| Kyosho FHSS / Syncro | 500 kbps | ID sync, fixed 38, CRC, FEC | works |
+| WFLY2, Joysway | 500 kbps | ID sync, fixed 32 / 16, CRC | works (A7105 RX: 98%, CRC errors) |
+| Bugs | 250 kbps | ID sync, fixed 22, CRC | works |
+| Height (5 / 8 channels) | 250 kbps | ID 25A53C45, fixed 8 / 11, CRC, FEC | works (A7105 RX of 8 bytes: 88 to 98%, see below) |
+| Pelikan | 250 kbps (125 kbps also tried) | ID 06230623, fixed 16, no CRC | works |
+| Kyosho Hype | 250 kbps | ID sync, fixed 17, CRC, FEC | works |
 
 Measured on raw captures of the A7105 (bit exact): preamble, the 4 byte ID
 (as given to `A7105_WriteID()`) as the sync word, the fixed length payload,
@@ -223,18 +231,36 @@ no reference to compare it to. At 2410 MHz (Wi-Fi channel 1) the A7105
 also lost about one packet per 100 ms, likely Wi-Fi beacons; the CC2652
 receiver did not.
 
+The other A7105 protocols were run with their own `A7105_Init()` register
+tables (bench presets), 500 packets each way. `CODE_I` bit 3 enables the CRC,
+bit 4 the FEC. Notes:
+
+- Most of them only transmit, and their tables don't receive on the bench. The
+  CC2652 -> A7105 runs use the AFHDS2A table set to each protocol's rate,
+  `CODE_I`, FIFO length and ID. The packet format is the same, but the A7105
+  receiver isn't tested with the protocols' own tables.
+- Bugs (which receives telemetry) receives at `PLL_I` - 2 with its own table,
+  as `Bugs_a7105.ino` sets it; it doesn't receive on the bench with it.
+  Bugs' format with the AFHDS2A table: 99%.
+- Height 5 channels (8 byte packets): the A7105 missed 2 to 12% of the
+  packets, without CRC errors, while Height 8 channels (11 bytes) got 100%.
+  This looks like the bench's A7105 RX restart between short packets, not
+  the format.
+
 ## CYRF6936 protocol family
 
 | Protocols | `TX_CFG` mode | Framing | CC2652 status |
 |---|---|---|---|
 | DSM2 / DSMX data and telemetry | 64 chip 8DR | SOP, length, CRC-16 with seed | works |
 | DSM bind, bind response | 64 chip SDR | no SOP, length or CRC, 16 / 10 bytes | works |
-| J6Pro, WK2x01, Scorpio | 64 chip 8DR | SOP, length | not tested, same format as DSM data |
-| Kyosho3 | 64 chip 8DR | 32 chip SOP (`FRAMING_CFG` 0xA4), length | format works (Devo registers, Kyosho3 framing) |
-| MLINK, Losi | 64 chip SDR | MLINK: no SOP; Losi: as DSM bind | not tested, same format as DSM bind |
-| Devo, Traxxas | 32 chip 8DR | 32 chip SOP, length | Devo works, Traxxas not tested (same framing) |
-| WFLY | 32 chip 8DR | 64 chip SOP, length | format works (Devo registers, WFLY framing) |
-| E01X, E129, E010R5 | GFSK 1 Mbps (no DSSS) | HS6200 / XN297 like | not tested, a plain 1 Mbps GFSK PHY |
+| J6Pro, WK2x01 | 64 chip 8DR | SOP, length, CRC | works |
+| Scorpio | 64 chip 8DR | default SOP, length, CRC seed 1 | works |
+| Kyosho3 | 64 chip 8DR | 32 chip SOP (`FRAMING_CFG` 0xA4), length, no CRC, all chips inverted (`TX_OVERRIDE` TX_INV) | works |
+| MLINK | 64 chip SDR | no SOP, length or CRC | works |
+| Losi | 64 chip SDR | as DSM bind | works |
+| Devo, Traxxas | 32 chip 8DR | 32 chip SOP, length, CRC (Traxxas: seed 0x5a5a) | works |
+| WFLY | 32 chip 8DR | 64 chip SOP, length, CRC | works |
+| E01X, E129, E010R5 | GFSK 1 Mbps (no DSSS) | HS6200 / RF2500, built in software | works, see below |
 
 Measured on raw captures of the CYRF6936 (bit exact), at 1 Mchip/s, in CC2652
 bits:
@@ -250,10 +276,28 @@ bits:
 - The length byte first, then the payload and a CRC-16 (0xA001 reflected, from
   the bit-reversed seed, xorout 0xFFFF), low byte first. No end of packet code.
 - Devo doesn't set the data codes: the CYRF6936 default is
-  `6fbe3201dbf12b01e35cfa029793f902`.
+  `6fbe3201dbf12b01e35cfa029793f902`, and the default SOP code
+  `82c79036219eff17` (Scorpio, Kyosho3). J6Pro's `j6pro_data_code` is that
+  default in reversed byte order, despite its comment.
+- `TX_OVERRIDE` TX_INV (Kyosho3) inverts every chip, the preamble included.
 
-Channels 2401 MHz + n x 1 MHz (`CYRF_ConfigRFChannel()`), 250 kHz deviation
-(the CYRF6936 still receives with the CC2652 250 kHz off, not at 500 kHz).
+Frequencies (`CYRF_ConfigRFChannel()` n, measured): TX at 2400 + n MHz, or
+2401 + n with `TX_OFFSET` 0x0555 (set by most protocols, not Kyosho3, MLINK or
+the GFSK mode). RX at about 2401.2 + n with `RX_CFG` FAST_TURN_EN (bit 3) and
+bit 4 clear (0x4A), at 2402 + n otherwise (0x52, 0x42, 0x5A, 0x12). On the
+image frequency the CYRF6936 receives inverted data. So a protocol's own TX and
+RX frequencies can differ by 1 MHz; the CC2652 follows each one with its
+channel plan. 250 kHz deviation (the CYRF6936 still receives with the CC2652
+250 kHz off, not at 500 kHz).
+
+The protocols were run with their own register setups (bind configuration,
+one channel), 100 packets each way. Most of them only transmit; for
+CC2652 -> CYRF6936 the bench adds what their setup lacks to receive:
+`CLK_EN` 0x02 (Scorpio, Kyosho3), a first RX that gets nothing (WFLY), RX CRC
+checking off (Losi). MLINK sets `RX_CFG` VLD_EN: each received byte is then
+followed by a valid flag byte; the bench turns it off. With MLINK's receiver
+at 2402 + n the bench CC2652 had to send inverted chips; this isn't
+understood, and MLINK's own packets are not inverted.
 
 The CC2652 side:
 
@@ -277,6 +321,46 @@ The CC2652 side:
   most a single CC2652 packet needs (`RADIO_MAX_PKT_LEN` 1100). Basic
   `CMD_PROP_TX` / `RX` stop at 255 bytes.
 
+## CYRF6936 GFSK mode (E01X, E129, E010R5)
+
+These protocols put the CYRF6936 in its 1 Mbps GFSK mode (`CYRF_GFSK1M_Init()`:
+no SOP, length or CRC) and build the frames of other chips in software:
+HS6200 (`HS6200_EMU.ino`) and RF2500 (`RF2500_EMU.ino`). On the CC2652 they are
+plain 1 Mbps GFSK packets, framed by `frame.c` (`FRAME_HS6200`,
+`FRAME_RF2500`). Measured on the CYRF6936:
+
+- Bytes are sent LSB first (the MPM bit-reverses its buffer for that), so the
+  frames are MSB first on air.
+- The preamble is 0xAA on air, whatever the first address bit: about 2 bytes
+  for E01X (preamble count 1). The CC2652 sends the 0xAA byte as part of the
+  frame, so its preamble matches.
+- Channel n at 2400 + n MHz (`TX_OFFSET` 0).
+
+| Framing | Protocols | Format |
+|---|---|---|
+| HS6200 | E01X (E012, E015) | address (last byte first), 2 guard bytes (its last byte again), 9 bit packet control field (6 bit length, 2 bit pid, no ack bit set), payload XORed with a 15 byte table, CRC-16 CCITT from 0xFFFF over the address, control field and payload |
+| RF2500 | E129, C186 (16 / 19 bytes, scrambled), E010R5 (14 bytes) | 4 byte address, `C3 C3`, then payload and CRC with each bit (LSB first) sent as 4: `1100` / `0011`. CRC-16 CCITT from 0 over the bits as sent; scrambled: payload XORed with a table, CRC with a value per length |
+
+The CC2652 encoder matches the MPM code bit for bit (unit test, random
+payloads). The CC2652 received the MPM's own E012, E015, E129, C186 and
+E010R5 bind packets and E015 data packets, all of them with the right
+payload. Two MPM bugs showed up:
+
+- HS6200 CRC: `HS6200_calc_crc()` takes the last CRC bit from the byte after
+  the payload (`msg[pos+1]` instead of `msg[pos]`). That byte isn't written
+  yet: it holds stack contents. `crc16_update()` also mixes all 8 bits of it
+  into the CRC, not one. Each MPM CRC was explained by exactly one value of
+  that byte, and the value changed from packet to packet. The CRC was right
+  for 3% of the E012 bind packets, 100% of the E015 bind packets (by chance)
+  and 0% of the E015 data packets. Either the models don't check it or E01X
+  doesn't work. The CC2652 sends the CRC as intended (`msg[pos]`). Without an
+  E01X model nobody can tell which one it accepts.
+- E010R5: the callback changes the channel right after
+  `RF2500_SendPayload()`, while the CYRF6936 still sends the last bytes
+  (`CYRF_GFSK1M_SendPayload()` returns when its FIFO is filled). The last
+  packet before each hop, 1 in 6, arrives corrupted. The CC2652 `radio_send()`
+  waits for the end of the packet.
+
 ## What any candidate chip must show
 
 Requirements that came out of these tests, to check on each alternative:
@@ -291,7 +375,7 @@ Requirements that came out of these tests, to check on each alternative:
 5. A way to emulate the CC2500, A7105 and CYRF6936 PHYs, DSM's DSSS included:
    2-FSK and GFSK from 10 kbps to 1 Mbps, MSK, a 16 or 32 bit sync word after
    a 2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: the
-   CC2500, A7105 and CYRF6936 families done.
+   CC2500 (but FrSky L), A7105 and CYRF6936 families done.
 6. Raw packets of at least 1029 bytes at 1 Mbps (DSM bind: 128 SDR bits of 64
    chips), or a streaming RX/TX mode, and an alternative RX sync word (or a
    sync word placed anywhere in the known bits) for the DSM bind packets.

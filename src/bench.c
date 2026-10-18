@@ -19,9 +19,11 @@
 //                                frskyx2eu hott hitec redpine
 //                                redpineslow skyartec frskyv corona coronav2
 //                                fdv3 ares radiolink ikea sfhss, A7105 ones:
-//                                flysky afhds2a hubsan, CYRF6936: dsm (data
+//                                flysky afhds2a hubsan bugs height pelikan
+//                                kyosho kyoshohype wfly2 joysway, CYRF6936: dsm (data
 //                                packets), dsmbind (bind packets: SDR), devo
-//                                (32 chip SOP and data codes)
+//                                (32 chip SOP and data codes), gfsk1m (GFSK mode:
+//                                PHY only, for hs6200 and rf2500)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -46,15 +48,22 @@
 //                                bit inversion (default 0)
 //   a7105 <id> [crc] [fec]       A7105 framing: ID (2 or 4 bytes, as given to
 //                                A7105_WriteID), CRC (default 1), FEC (default 0)
-//   cyrf <sop> <data_code> [seed] [crc] [len] [sdr] [data_chips]  CYRF6936
+//   cyrf <sop> <data_code> [seed] [crc] [len] [sdr] [data_chips] [invert]  CYRF6936
 //                                framing: SOP code (8 bytes, 4 = 32 chip SOP,
 //                                0 = no SOP) and data codes (16 bytes, SDR: 8)
 //                                as given to CYRF_ConfigSOPCode() /
 //                                CYRF_ConfigDataCode(), CRC seed (default 0),
 //                                CRC16 (default 1), length field (default 1),
 //                                SDR instead of 8DR (default 0), data code
-//                                length 32 or 64 (default). 8DR needs the SOP
-//                                code, SDR 64 chips
+//                                length 32 or 64 (default), all chips inverted
+//                                (TX_INV, default 0). 8DR needs the SOP code,
+//                                SDR 64 chips
+//   hs6200 <addr> [crc] [scramble]  HS6200 framing (E01X): addr as given to
+//                                HS6200_SetTXAddr(), 3 to 5 bytes, CRC and
+//                                scrambling (default 1), no ack bit set
+//   rf2500 <addr> [scramble] [crc]  RF2500 framing (E129: scrambled, 16 or 19
+//                                bytes, E010R5: not): addr as given to
+//                                RF2500_SetTXAddr(), 4 bytes, CRC (default 1)
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
@@ -134,7 +143,8 @@ static frame_t _ack_frame;
 static uint32_t _stat_acked;
 static uint32_t _stat_retries;
 
-static const char* const _frame_names[] = {"raw", "nrf", "xn297", "cc2500", "a7105", "cyrf"};
+static const char* const _frame_names[] = {"raw",   "nrf",  "xn297",  "cc2500",
+                                           "a7105", "cyrf", "hs6200", "rf2500"};
 
 //
 // Output
@@ -330,7 +340,8 @@ static void _report_packet(const radio_packet_t* pkt)
   _print_hex(payload, len);
   if (_frame.crc_len) _printf(" crc=%s", res == FRAME_OK ? "ok" : "bad");
   _printf(" rssi=%d", pkt->rssi);
-  if (_frame.type == FRAME_NRF && _frame.esb) _printf(" pid=%u", (pcf >> 1) & 3);
+  if ((_frame.type == FRAME_NRF && _frame.esb) || _frame.type == FRAME_HS6200)
+    _printf(" pid=%u", (pcf >> 1) & 3);
   _print("\r\n");
 }
 
@@ -479,6 +490,22 @@ static const preset_t _presets[] = {
     // Hubsan: 100 kbps, no CRC
     {"hubsan", 100000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105, 0,
      0x55201041},  // 882 kHz
+    // Other A7105 protocols (CODE_I CRCS, FECS; DATA_RATE): IDs of A7105_Init()
+    // or 5475C52A (bind ID of the FlySky family, a7105 command for others)
+    {"bugs", 250000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105 | CC_CRC, 0,
+     0x5475C52A},
+    {"height", 250000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4,
+     CC_A7105 | CC_CRC | CC_FEC, 0, 0x25A53C45},
+    {"pelikan", 250000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105, 0,
+     0x06230623},
+    {"kyosho", 500000, 250000, 97, false, A7105_CH_BASE, A7105_CH_SPACING, 4,
+     CC_A7105 | CC_CRC | CC_FEC, 0, 0x5475C52A},
+    {"kyoshohype", 250000, 250000, 94, false, A7105_CH_BASE, A7105_CH_SPACING, 4,
+     CC_A7105 | CC_CRC | CC_FEC, 0, 0x5475C52A},
+    {"wfly2", 500000, 250000, 97, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105 | CC_CRC, 0,
+     0x5475C52A},
+    {"joysway", 500000, 250000, 97, false, A7105_CH_BASE, A7105_CH_SPACING, 4, CC_A7105 | CC_CRC,
+     0, 0x5475C52A},
     // CYRF6936 DSM data packets: 1 Mchip/s GFSK, SOP code, length, CRC (seed
     // 0: cyrf command for others), PN row 0 codes. ch = CYRF CHANNEL
     {"dsm", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8,
@@ -488,6 +515,9 @@ static const preset_t _presets[] = {
     // Walkera Devo: 32 chip SOP and data codes, length, CRC (seed 0 as in bind)
     {"devo", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8,
      CC_CYRF | CC_CRC | CC_VAR | CC_SOP32 | CC_DATA32, 1},
+    // CYRF6936 GFSK mode (E01X, E129, E010R5): 1 Mbps, CHANNEL n at 2400 + n
+    // MHz (measured, TX_OFFSET 0). The 0xAA preamble byte is in the frame
+    {"gfsk1m", 1000000, 250000, 97, false, NRF_CH_BASE, NRF_CH_SPACING, 0, 0, 1},
 };
 
 static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
@@ -522,7 +552,7 @@ static void _set_a7105_frame(const uint8_t* id, uint8_t id_len, uint8_t options)
 
 // sop: NULL for none. data_code: 16 bytes, SDR: 8
 static void _set_cyrf_frame(const uint8_t* sop, const uint8_t* data_code, uint16_t seed,
-                            uint8_t options)
+                            uint8_t options, bool invert)
 {
   _frame.type = FRAME_CYRF;
   _frame.sop = sop != NULL;
@@ -536,7 +566,8 @@ static void _set_cyrf_frame(const uint8_t* sop, const uint8_t* data_code, uint16
   _frame.crc_seed = seed;
   _frame.crc_len = options & CC_CRC ? 2 : 0;
   _frame.var_len = options & CC_VAR;
-  _frame.fec = _frame.whitening = _frame.invert = _frame.cc2400_crc = false;
+  _frame.invert = invert;
+  _frame.fec = _frame.whitening = _frame.cc2400_crc = false;
   _frame.prefix_len = 0;
   _frame_ok = frame_init(&_frame);
   _ack_on = false;
@@ -573,9 +604,10 @@ static bool _load_preset(const char* name)
   _ch_spacing_hz = p->ch_spacing_hz;
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
   if (p->cc2500 & CC_CYRF) {
-    if (p->cc2500 & CC_FEC) _set_cyrf_frame(NULL, DSM_BIND_CODE, 0, p->cc2500);
-    else if (p->cc2500 & CC_DATA32) _set_cyrf_frame(_devo_sop_code, _cyrf_default_code, 0, p->cc2500);
-    else _set_cyrf_frame(_dsm_sop_code, _dsm_data_code, 0, p->cc2500);
+    if (p->cc2500 & CC_FEC) _set_cyrf_frame(NULL, DSM_BIND_CODE, 0, p->cc2500, false);
+    else if (p->cc2500 & CC_DATA32)
+      _set_cyrf_frame(_devo_sop_code, _cyrf_default_code, 0, p->cc2500, false);
+    else _set_cyrf_frame(_dsm_sop_code, _dsm_data_code, 0, p->cc2500, false);
   } else if (p->sync_len && (p->cc2500 & CC_A7105)) {
     const uint8_t id[] = {p->sync >> 24, p->sync >> 16, p->sync >> 8, p->sync};
     _set_a7105_frame(id, p->sync_len, p->cc2500);
@@ -824,15 +856,16 @@ static void _cmd_cyrf(char* args)
   if (_number_or(&args, 0)) options |= CC_FEC;
   uint32_t chips = _number_or(&args, 64);
   if (chips == 32) options |= CC_DATA32;
+  bool invert = _number_or(&args, 0);
   if ((sop_len != 8 && sop_len != 4) || data_len != (options & CC_FEC ? 8 : 16) ||
       seed > 0xFFFF || (chips != 32 && chips != 64)) {
     _print("@err usage: cyrf <sop: 8 bytes, 4: 32 chips, 0: none> <data code: 16 bytes, sdr: 8> "
-           "[seed] [crc] [len] [sdr] [data_chips]\r\n");
+           "[seed] [crc] [len] [sdr] [data_chips] [invert]\r\n");
     return;
   }
 
   _job_stop();
-  _set_cyrf_frame(no_sop ? NULL : sop_buf, data_buf, seed, options);
+  _set_cyrf_frame(no_sop ? NULL : sop_buf, data_buf, seed, options, invert);
   if (!_frame_ok) {
     _print("@err bad cyrf framing\r\n");
     return;
@@ -841,11 +874,66 @@ static void _cmd_cyrf(char* args)
     _report_radio_error("radio init");
     return;
   }
-  _printf("@ok framing=cyrf sop=%d seed=%04x crc=%d len=%d sdr=%d chips=%d tx_sync=%08lx "
-          "rx_sync=%08lx\r\n",
+  _printf("@ok framing=cyrf sop=%d seed=%04x crc=%d len=%d sdr=%d chips=%d invert=%d "
+          "tx_sync=%08lx rx_sync=%08lx\r\n",
           _frame.sop ? (_frame.sop32 ? 32 : 64) : 0, _frame.crc_seed, _frame.crc_len != 0,
-          _frame.var_len, _frame.sdr, _frame.data32 ? 32 : 64,
+          _frame.var_len, _frame.sdr, _frame.data32 ? 32 : 64, _frame.invert,
           frame_tx_sync(&_frame), frame_rx_sync(&_frame));
+}
+
+static void _cmd_hs6200(char* args)
+{
+  char* addr = _next_arg(&args);
+  uint8_t buf[FRAME_ADDR_MAX];
+  int len = addr ? _hex(addr, buf, sizeof(buf)) : -1;
+  uint32_t crc = _number_or(&args, 1);
+  uint32_t scramble = _number_or(&args, 1);
+  if (len < 3) {
+    _print("@err usage: hs6200 <addr: 3..5 bytes> [crc] [scramble]\r\n");
+    return;
+  }
+
+  _frame.type = FRAME_HS6200;
+  memcpy(_frame.addr, buf, len);
+  _frame.addr_len = len;
+  _frame.crc_len = crc ? 2 : 0;
+  _frame.scramble = scramble;
+  _frame.noack = true;  // as the MULTI-Module
+  _frame.pid = 0;
+  _frame.prefix_len = 0;
+  if (!_apply_frame()) {
+    if (!_frame_ok) _print("@err bad hs6200 framing\r\n");
+    return;
+  }
+  _printf("@ok framing=hs6200 addr_len=%d crc=%d scramble=%d tx_sync=%08lx rx_sync=%08lx\r\n",
+          len, _frame.crc_len != 0, _frame.scramble, frame_tx_sync(&_frame),
+          frame_rx_sync(&_frame));
+}
+
+static void _cmd_rf2500(char* args)
+{
+  char* addr = _next_arg(&args);
+  uint8_t buf[4];
+  int len = addr ? _hex(addr, buf, sizeof(buf)) : -1;
+  uint32_t scramble = _number_or(&args, 0);
+  uint32_t crc = _number_or(&args, 1);
+  if (len != 4) {
+    _print("@err usage: rf2500 <addr: 4 bytes> [scramble] [crc]\r\n");
+    return;
+  }
+
+  _frame.type = FRAME_RF2500;
+  memcpy(_frame.addr, buf, len);
+  _frame.addr_len = len;
+  _frame.crc_len = crc ? 2 : 0;
+  _frame.scramble = scramble;
+  _frame.prefix_len = 0;
+  if (!_apply_frame()) {
+    if (!_frame_ok) _print("@err bad rf2500 framing\r\n");
+    return;
+  }
+  _printf("@ok framing=rf2500 crc=%d scramble=%d tx_sync=%08lx rx_sync=%08lx\r\n",
+          _frame.crc_len != 0, _frame.scramble, frame_tx_sync(&_frame), frame_rx_sync(&_frame));
 }
 
 static void _cmd_esb(char* args)
@@ -1077,6 +1165,8 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "xn")) _cmd_xn(args);
   else if (!strcmp(cmd, "xaddr")) _cmd_xaddr(args);
   else if (!strcmp(cmd, "prefix")) _cmd_prefix(args);
+  else if (!strcmp(cmd, "hs6200")) _cmd_hs6200(args);
+  else if (!strcmp(cmd, "rf2500")) _cmd_rf2500(args);
   else if (!strcmp(cmd, "esb")) _cmd_esb(args);
   else if (!strcmp(cmd, "ack")) _cmd_ack(args);
   else if (!strcmp(cmd, "ch")) _cmd_ch(args);

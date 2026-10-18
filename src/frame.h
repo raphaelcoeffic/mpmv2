@@ -4,7 +4,8 @@
 #include <stdint.h>
 
 // On-air packet formats of the MULTI-Module 2.4 GHz chips (NRF24L01, XN297,
-// CC2500, A7105, CYRF6936), emulated on top of the raw radio (preamble + sync
+// CC2500, A7105, CYRF6936, and the HS6200 / RF2500 chips the CYRF6936
+// emulates in its GFSK mode), emulated on top of the raw radio (preamble + sync
 // word + fixed length data, see radio.h).
 //
 // A frame is: header (bytes known in advance: XN297 preamble, address, CC2500
@@ -29,6 +30,8 @@ typedef enum {
   FRAME_CC2500, // CC2500 packet: preamble, sync word, payload, CRC
   FRAME_A7105,  // A7105 packet: preamble, ID, fixed length payload, CRC, FEC
   FRAME_CYRF,   // CYRF6936 8DR or SDR packet, 64 chip codes: SOP, length, payload, CRC
+  FRAME_HS6200, // HS6200 (E01X): address, guard bytes, packet control field, payload, CRC
+  FRAME_RF2500, // RF2500 (E129, E010R5): address, sync, payload and CRC 4x coded
 } frame_type_t;
 
 typedef struct {
@@ -37,16 +40,22 @@ typedef struct {
   // (sent last byte first), 3 to 5 bytes. Raw: the sync word, MSB first.
   // CC2500: SYNC1, SYNC0, twice (4 bytes) for MDMCFG2.SYNC_MODE 3 or 7.
   // A7105: the ID, 2 or 4 bytes (CODE I IDL), as given to A7105_WriteID().
+  // HS6200: as given to HS6200_SetTXAddr() (sent last byte first), 3 to 5
+  // bytes. RF2500: 4 bytes, as given to RF2500_SetTXAddr() (sent first byte first)
   uint8_t addr[FRAME_ADDR_MAX];
   uint8_t addr_len;
-  uint8_t crc_len;     // NRF: 0 to 2, XN297, CC2500 and A7105: 0 or 2
+  uint8_t crc_len;     // NRF: 0 to 2, others: 0 or 2
   // NRF: 9 bit packet control field, sent by the nRF24L01+ when EN_AA or
   // dynamic payload length (DYNPD) is enabled
   bool esb;
   bool dpl;            // NRF esb: dynamic payload length
-  bool scramble;       // XN297
+  // XN297. HS6200: payload scrambled (up to 15 bytes). RF2500: payload
+  // scrambled, CRC xorout (E129: 16 or 19 bytes)
+  bool scramble;
   bool enhanced;       // XN297 enhanced mode (packet control field)
-  bool noack;          // NRF esb / XN297 enhanced mode: no ack request
+  // NRF esb / XN297 enhanced mode / HS6200: no ack request. HS6200: the packet
+  // control field bit is noack (the MULTI-Module sets it), not inverted as NRF
+  bool noack;
   // CC2500: variable packet length (PKTCTRL0.LENGTH_CONFIG 1), the first
   // payload byte is the length of the rest (CRC excluded). CYRF6936: length
   // field (FRAMING_CFG.LEN_EN), sent before the payload
@@ -55,7 +64,8 @@ typedef struct {
   bool fec;        // CC2500 MDMCFG1.FEC_EN, A7105 CODE I FECS (no prefix)
   bool cc2400_crc; // CC2500 PKTCTRL0.CC2400_EN: CC2400 compatible CRC
   // CC2500 MSK (MDMCFG2.MOD_FORMAT 7): received as 2-FSK with a 0.5 modulation
-  // index, all bits inverted (preamble and sync word included)
+  // index, all bits inverted (preamble and sync word included). CYRF6936:
+  // TX_OVERRIDE.TX_INV (Kyosho3), all chips inverted
   bool invert;
   // CYRF6936 (1 Mchip/s, 64 chip codes): the codes as given to
   // CYRF_ConfigSOPCode() / CYRF_ConfigDataCode() (sent LSB first), the CRC seed

@@ -21,7 +21,8 @@
 // chip symbol per bit, LSB first: the data code for 1, inverted for 0.
 // CRC-16/ARC (0x8005 reflected, xorout 0xFFFF) over the length and payload,
 // from the bit reversed seed, sent low byte first.
-// _put_chips() / _get_chips(): CC2652 bit = !chip.
+// TX_OVERRIDE.TX_INV inverts all of it. _put_chips() / _get_chips(): CC2652
+// bit = !chip (TX_INV: chip).
 #define CYRF_SDR_CHIPS 64  // SDR: 64 chip codes only
 #define CYRF_GAP_CHIPS 1
 #define CYRF_SYNC_CHIPS 23  // chips of the first symbol in the RX sync word (no SOP)
@@ -85,6 +86,33 @@ static const uint16_t _xn297_xorout_enhanced[] = {
     0x190C, 0x9117, 0x9A97, 0xABFC, 0xE68E, 0x0DE7, 0x28A2, 0x1965};
 
 #define XN297_XOROUT_LEN (sizeof(_xn297_xorout) / sizeof(_xn297_xorout[0]))
+
+// CYRF6936 GFSK mode (1 Mbps, bytes sent LSB first): the MULTI-Module builds
+// HS6200 and RF2500 packets in software. Its preamble is 0xAA on air
+// (measured), in the frame so the CC2652 sends the same one.
+#define GFSK1M_PREAMBLE 0xAA
+
+// HS6200 (MULTI-Module HS6200_EMU.ino): the address (last byte first), 2 guard
+// bytes (the last address byte again), a packet control field as ESB (6 bit
+// length, 2 bit pid, no ack bit), the scrambled payload, CRC-16 CCITT from
+// 0xFFFF over the address, the packet control field and the payload
+#define HS6200_GUARD_LEN 2
+static const uint8_t _hs6200_scramble[] = {0x80, 0xF5, 0x3B, 0x0D, 0x6D, 0x2A, 0xF9, 0xBC,
+                                           0x51, 0x8E, 0x4C, 0xFD, 0xC1, 0x65, 0xD0};
+
+// RF2500 (RF2500_EMU.ino): 4 address bytes, 2 sync bytes, then the payload and
+// CRC, each bit (LSB first) sent as 4: 1100 for 1, 0011 for 0. CRC-16 CCITT
+// from 0 over the bits as sent, MSB first. Scrambled: payload XORed with a
+// table, CRC with a value per length (16 or 19 bytes, E129)
+#define RF2500_ADDR_LEN 4
+#define RF2500_SYNC 0xC3
+#define RF2500_ONE 0xC
+#define RF2500_ZERO 0x3
+static const uint8_t _rf2500_scramble[] = {0xD0, 0x9E, 0x53, 0x33, 0xD8, 0xBA, 0x98,
+                                           0x08, 0x24, 0xCB, 0x3B, 0xFC, 0x71, 0xA3,
+                                           0xF4, 0x55, 0x68, 0x4F, 0xA9};
+#define RF2500_XOROUT_16 0xAEE4
+#define RF2500_XOROUT_19 0xE7C5
 
 static uint8_t _bit_reverse(uint8_t b)
 {
@@ -177,6 +205,19 @@ static uint16_t _xn297_xorout_for(const frame_t* f, uint8_t len)
   return f->scramble ? _xn297_xorout_scrambled[idx] : _xn297_xorout[idx];
 }
 
+// HS6200 packet control field and payload bits: the address before them
+static uint16_t _hs6200_crc_bits(const frame_t* f, const uint8_t* buf, uint16_t end)
+{
+  uint16_t crc = _crc16_buf(NRF_CRC16_INIT, f->known + 1, f->addr_len);
+  for (uint16_t i = 8 * f->hdr_len; i < end; i++) crc = _crc16(crc, _get_bits(buf, i, 1) << 7, 1);
+  return crc;
+}
+
+static uint8_t _hs6200_scr(const frame_t* f, uint8_t idx)
+{
+  return f->type == FRAME_HS6200 && f->scramble ? _hs6200_scramble[idx] : 0;
+}
+
 // CYRF6936 data symbol length: TX_CFG.DATA_CODE_LENGTH
 static uint8_t _cyrf_n(const frame_t* f) { return f->data32 ? 32 : 64; }
 
@@ -205,16 +246,17 @@ static uint64_t _cyrf_symbol(const frame_t* f, uint8_t v)
   return v & 0x80 ? ~c & _chip_mask(n) : c;
 }
 
-static void _put_chips(uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
+// TX_OVERRIDE.TX_INV: all chips inverted, preamble included (measured)
+static void _put_chips(const frame_t* f, uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
 {
-  for (uint8_t k = 0; k < n; k++) _put_bits(buf, pos, !((chips >> k) & 1), 1);
+  for (uint8_t k = 0; k < n; k++) _put_bits(buf, pos, !((chips >> k) & 1) ^ f->invert, 1);
 }
 
-static uint64_t _get_chips(const uint8_t* buf, uint16_t pos, uint8_t n)
+static uint64_t _get_chips(const frame_t* f, const uint8_t* buf, uint16_t pos, uint8_t n)
 {
   uint64_t chips = 0;
   for (uint8_t k = 0; k < n; k++)
-    if (!_get_bits(buf, pos + k, 1)) chips |= 1ULL << k;
+    if (!_get_bits(buf, pos + k, 1) ^ f->invert) chips |= 1ULL << k;
   return chips;
 }
 
@@ -285,8 +327,9 @@ static uint16_t _frame_len(const frame_t* f, uint8_t len)
   if (f->type == FRAME_CC2500 && f->fec) return f->hdr_len + 2 * _fec_data_len(len + f->crc_len);
   if (f->type == FRAME_XN297 && f->enhanced)
     return f->hdr_len + len + (f->crc_len ? 4 : 2);  // 10 bit pcf, CRC shifted by 2 bits
-  if (f->type == FRAME_NRF && f->esb)
+  if ((f->type == FRAME_NRF && f->esb) || f->type == FRAME_HS6200)
     return f->hdr_len + len + f->crc_len + 2;  // 9 bit pcf, CRC shifted by 1 bit
+  if (f->type == FRAME_RF2500) return f->hdr_len + 4 * (len + f->crc_len);
   return f->hdr_len + len + f->crc_len;
 }
 
@@ -298,6 +341,9 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
     return _fec_data_len(len + f->crc_len) <= FRAME_FEC_DATA_MAX;
   if (f->type == FRAME_A7105) return _frame_len(f, len) <= FRAME_BUF_LEN - FRAME_PREFIX_MAX;
   if (f->type == FRAME_CYRF) return _frame_len(f, len) <= FRAME_AIR_MAX;
+  if (f->type == FRAME_HS6200)
+    return len <= (f->scramble ? sizeof(_hs6200_scramble) : FRAME_NRF_PAYLOAD_MAX);
+  if (f->type == FRAME_RF2500) return !f->scramble || len == 16 || len == 19;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -326,16 +372,23 @@ static uint8_t _encode_nrf(const frame_t* f, const uint8_t* payload, uint8_t len
   return n;
 }
 
-// Enhanced ShockBurst: packet control field, then the payload and CRC shifted
-// by 1 bit
+// CRC of the ESB / HS6200 frame up to bit 'end'
+static uint16_t _esb_crc(const frame_t* f, const uint8_t* buf, uint16_t end)
+{
+  return f->type == FRAME_HS6200 ? _hs6200_crc_bits(f, buf, end) : _nrf_crc_bits(f, buf, end);
+}
+
+// Enhanced ShockBurst and HS6200: packet control field, then the payload and
+// CRC shifted by 1 bit
 static uint8_t _encode_esb(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
+  bool hs6200 = f->type == FRAME_HS6200;
   uint16_t pos = f->hdr_len * 8;
-  _put_bits(buf, &pos, f->dpl ? len : ESB_STATIC_LEN, 6);
+  _put_bits(buf, &pos, f->dpl || hs6200 ? len : ESB_STATIC_LEN, 6);
   _put_bits(buf, &pos, f->pid, 2);
-  _put_bits(buf, &pos, !f->noack, 1);
-  for (uint8_t i = 0; i < len; i++) _put_bits(buf, &pos, payload[i], 8);
-  if (f->crc_len) _put_bits(buf, &pos, _nrf_crc_bits(f, buf, pos), f->crc_len * 8);
+  _put_bits(buf, &pos, hs6200 ? f->noack : !f->noack, 1);
+  for (uint8_t i = 0; i < len; i++) _put_bits(buf, &pos, payload[i] ^ _hs6200_scr(f, i), 8);
+  if (f->crc_len) _put_bits(buf, &pos, _esb_crc(f, buf, pos), f->crc_len * 8);
   while (pos & 7) _put_bits(buf, &pos, 0, 1);
   return pos / 8;
 }
@@ -527,6 +580,33 @@ static uint8_t _encode_a7105(const frame_t* f, const uint8_t* payload, uint8_t l
   return f->hdr_len + pos / 8;
 }
 
+// Payload (scrambled) and CRC bytes, as the bits to send, LSB first
+static uint8_t _rf2500_body(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* body)
+{
+  uint8_t n = len;
+  for (uint8_t i = 0; i < len; i++) body[i] = payload[i] ^ (f->scramble ? _rf2500_scramble[i] : 0);
+  if (f->crc_len) {
+    uint16_t crc = 0;
+    for (uint8_t i = 0; i < len; i++) crc = _crc16(crc, _bit_reverse(body[i]), 8);
+    uint16_t xorout = !f->scramble ? 0 : len == 16 ? RF2500_XOROUT_16 : RF2500_XOROUT_19;
+    body[n++] = _bit_reverse(crc >> 8) ^ (xorout >> 8);
+    body[n++] = _bit_reverse(crc & 0xFF) ^ (xorout & 0xFF);
+  }
+  return n;
+}
+
+static uint16_t _encode_rf2500(const frame_t* f, const uint8_t* payload, uint8_t len,
+                               uint8_t* buf)
+{
+  uint8_t body[FRAME_BUF_LEN];
+  uint8_t n = _rf2500_body(f, payload, len, body);
+  uint16_t pos = 8 * f->hdr_len;
+  for (uint8_t i = 0; i < n; i++)
+    for (uint8_t b = 0; b < 8; b++)
+      _put_bits(buf, &pos, (body[i] >> b) & 1 ? RF2500_ONE : RF2500_ZERO, 4);
+  return pos / 8;
+}
+
 static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
   uint8_t body[FRAME_BUF_LEN];
@@ -545,11 +625,11 @@ static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t l
   _put_bits(buf, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
   for (uint8_t i = 0; i < n; i++) {
     if (!f->sdr) {
-      _put_chips(buf, &pos, _cyrf_symbol(f, body[i]), _cyrf_n(f));
+      _put_chips(f, buf, &pos, _cyrf_symbol(f, body[i]), _cyrf_n(f));
       continue;
     }
     for (uint8_t b = 0; b < 8; b++)
-      _put_chips(buf, &pos, (body[i] >> b) & 1 ? ~code : code, CYRF_SDR_CHIPS);
+      _put_chips(f, buf, &pos, (body[i] >> b) & 1 ? ~code : code, CYRF_SDR_CHIPS);
   }
   while (pos & 7) _put_bits(buf, &pos, 1, 1);  // idle chips (0)
   return pos / 8;
@@ -571,6 +651,10 @@ static uint16_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, u
       return _encode_a7105(f, payload, len, buf);
     case FRAME_CYRF:
       return _encode_cyrf(f, payload, len, buf);
+    case FRAME_HS6200:
+      return _encode_esb(f, payload, len, buf);
+    case FRAME_RF2500:
+      return _encode_rf2500(f, payload, len, buf);
     default:
       memcpy(buf + f->hdr_len, payload, len);
       return f->hdr_len + len;
@@ -603,7 +687,7 @@ static frame_result_t _decode_esb(const frame_t* f, const uint8_t* buf, uint16_t
   *pcf = _get_bits(buf, pos, ESB_PCF_BITS);
   pos += ESB_PCF_BITS;
   uint8_t size = len;
-  if (f->dpl) {
+  if (f->dpl || f->type == FRAME_HS6200) {
     size = *pcf >> 3;
     if (size > len) {
       *payload_len = 0;
@@ -612,12 +696,12 @@ static frame_result_t _decode_esb(const frame_t* f, const uint8_t* buf, uint16_t
   }
   if (avail < _frame_len(f, size)) return FRAME_SHORT;
 
-  for (uint8_t i = 0; i < size; i++, pos += 8) payload[i] = _get_bits(buf, pos, 8);
+  for (uint8_t i = 0; i < size; i++, pos += 8)
+    payload[i] = _get_bits(buf, pos, 8) ^ _hs6200_scr(f, i);
   *payload_len = size;
 
   if (!f->crc_len) return FRAME_OK;
-  return _get_bits(buf, pos, f->crc_len * 8) == _nrf_crc_bits(f, buf, pos) ? FRAME_OK
-                                                                           : FRAME_BAD;
+  return _get_bits(buf, pos, f->crc_len * 8) == _esb_crc(f, buf, pos) ? FRAME_OK : FRAME_BAD;
 }
 
 static frame_result_t _decode_xn297(const frame_t* f, const uint8_t* buf, uint8_t len,
@@ -739,18 +823,37 @@ static frame_result_t _decode_a7105(const frame_t* f, const uint8_t* buf, uint8_
   return body[len] == crc >> 8 && body[len + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
 }
 
+// Nearest 4 bit code per bit (1 error corrected, 2: read as 0)
+static frame_result_t _decode_rf2500(const frame_t* f, const uint8_t* buf, uint8_t len,
+                                     uint8_t* payload)
+{
+  uint8_t body[FRAME_BUF_LEN], check[FRAME_BUF_LEN];
+  uint8_t n = len + f->crc_len;
+  uint16_t pos = 8 * f->hdr_len;
+  for (uint8_t i = 0; i < n; i++) {
+    body[i] = 0;
+    for (uint8_t b = 0; b < 8; b++, pos += 4)
+      if (__builtin_popcount(_get_bits(buf, pos, 4) ^ RF2500_ONE) < 2) body[i] |= 1 << b;
+  }
+  for (uint8_t i = 0; i < len; i++)
+    payload[i] = body[i] ^ (f->scramble ? _rf2500_scramble[i] : 0);
+  if (!f->crc_len) return FRAME_OK;
+  _rf2500_body(f, payload, len, check);
+  return memcmp(check + len, body + len, 2) ? FRAME_BAD : FRAME_OK;
+}
+
 // len: maximum payload length with a length field
 static uint8_t _cyrf_decode_byte(const frame_t* f, const uint8_t* buf, uint16_t* pos)
 {
   if (!f->sdr) {
-    uint8_t v = _cyrf_decode_symbol(f, _get_chips(buf, *pos, _cyrf_n(f)));
+    uint8_t v = _cyrf_decode_symbol(f, _get_chips(f, buf, *pos, _cyrf_n(f)));
     *pos += _cyrf_n(f);
     return v;
   }
   uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
   uint8_t v = 0;
   for (uint8_t b = 0; b < 8; b++, *pos += CYRF_SDR_CHIPS)
-    if (__builtin_popcountll(_get_chips(buf, *pos, CYRF_SDR_CHIPS) ^ code) > 32) v |= 1 << b;
+    if (__builtin_popcountll(_get_chips(f, buf, *pos, CYRF_SDR_CHIPS) ^ code) > 32) v |= 1 << b;
   return v;
 }
 
@@ -917,18 +1020,39 @@ bool frame_init(frame_t* f)
       uint8_t sop_n = f->sop32 ? 32 : 64;
       uint64_t sop = _cyrf_code(f->sop_code, sop_n);
       for (uint8_t i = 0; i < (f->sop ? CYRF_PREAMBLE_NIBBLES : 16); i++)
-        _put_bits(f->known, &pos, 0xC, 4);
+        _put_bits(f->known, &pos, f->invert ? 0x3 : 0xC, 4);
       if (f->sop) {
         // 4 alternating chips between the copies, from the last one inverted.
         // The second copy is inverted with 64 chip data codes only (measured)
-        _put_chips(f->known, &pos, ~sop, sop_n);
+        _put_chips(f, f->known, &pos, ~sop, sop_n);
         _put_bits(f->known, &pos, _get_bits(f->known, pos - 1, 1) ? 0x5 : 0xA, 4);
-        _put_chips(f->known, &pos, f->data32 ? ~sop : sop, sop_n);
+        _put_chips(f, f->known, &pos, f->data32 ? ~sop : sop, sop_n);
       }
       n = pos / 8;
       f->sync_len = 4;
       break;
     }
+
+    case FRAME_HS6200:
+      if (f->addr_len < 3 || f->addr_len > FRAME_ADDR_MAX || (f->crc_len && f->crc_len != 2) ||
+          f->prefix_len)
+        return false;
+      f->known[n++] = GFSK1M_PREAMBLE;
+      for (uint8_t i = 0; i < f->addr_len; i++) f->known[n++] = f->addr[f->addr_len - 1 - i];
+      for (uint8_t i = 0; i < HS6200_GUARD_LEN; i++) f->known[n++] = f->addr[0];
+      f->sync_len = 4;
+      break;
+
+    case FRAME_RF2500:
+      if (f->addr_len != RF2500_ADDR_LEN || (f->crc_len && f->crc_len != 2) || f->prefix_len)
+        return false;
+      f->known[n++] = GFSK1M_PREAMBLE;
+      memcpy(f->known + n, f->addr, RF2500_ADDR_LEN);
+      n += RF2500_ADDR_LEN;
+      f->known[n++] = RF2500_SYNC;
+      f->known[n++] = RF2500_SYNC;
+      f->sync_len = 4;
+      break;
 
     default:
       return false;
@@ -958,7 +1082,7 @@ bool frame_init(frame_t* f)
     uint16_t pos = 8 * n;
     uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);  // bit 0
     _put_bits(f->known, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
-    _put_chips(f->known, &pos, code, CYRF_SYNC_CHIPS);
+    _put_chips(f, f->known, &pos, code, CYRF_SYNC_CHIPS);
     f->known_len = pos / 8;
     f->rx_sync = _sync_word(f->known + f->known_len - f->sync_len, f->sync_len);
     f->rx_sync_alt = f->rx_sync ^ ((1u << CYRF_SYNC_CHIPS) - 1);
@@ -982,7 +1106,8 @@ bool frame_rx_sync_weak(const frame_t* f) { return f->rx_sync_errors * 2 < SYNC_
 
 static bool _has_pid(const frame_t* f)
 {
-  return (f->type == FRAME_XN297 && f->enhanced) || (f->type == FRAME_NRF && f->esb);
+  return (f->type == FRAME_XN297 && f->enhanced) || (f->type == FRAME_NRF && f->esb) ||
+         f->type == FRAME_HS6200;
 }
 
 uint16_t frame_tx_data(frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* data)
@@ -1027,7 +1152,8 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     // match the received ones
     uint16_t sym = 8 * f->hdr_len + CYRF_GAP_CHIPS;
     if (f->rx_sync_alt && 8 * avail >= sym + CYRF_SDR_CHIPS) {
-      uint64_t diff = _get_chips(buf, sym, CYRF_SDR_CHIPS) ^ _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
+      uint64_t diff =
+          _get_chips(f, buf, sym, CYRF_SDR_CHIPS) ^ _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
       if (__builtin_popcountll(diff >> CYRF_SYNC_CHIPS) > (CYRF_SDR_CHIPS - CYRF_SYNC_CHIPS) / 2)
         for (uint16_t p = sym; p < sym + CYRF_SYNC_CHIPS; p++) buf[p >> 3] ^= 0x80 >> (p & 7);
     }
@@ -1037,6 +1163,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     if (f->type == FRAME_NRF) res = _decode_nrf(f, buf, len, payload);
     else if (f->type == FRAME_XN297) res = _decode_xn297(f, buf, len, payload);
     else if (f->type == FRAME_A7105) res = _decode_a7105(f, buf, len, payload);
+    else if (f->type == FRAME_RF2500) res = _decode_rf2500(f, buf, len, payload);
     else {
       memcpy(payload, buf + f->hdr_len, len);
       res = FRAME_OK;
