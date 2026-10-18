@@ -7,7 +7,7 @@
 // preamble + sync word + fixed length payload, no HW CRC and no whitening.
 // Protocol framing (address bytes, CRC, scrambling) is left to the caller.
 
-#define RADIO_MAX_PKT_LEN 64
+#define RADIO_MAX_PKT_LEN 128
 
 typedef struct {
   uint32_t symbol_rate;   // bps

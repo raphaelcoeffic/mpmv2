@@ -16,7 +16,7 @@
 //   preset <name>                load a PHY preset (and its channel plan):
 //                                nrf1m nrf2m nrf250k xn250k, CC2500 ones with
 //                                their framing: frskyd frskyx frskyx2 frskyxeu
-//                                frskyx2eu
+//                                frskyx2eu hott
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -32,10 +32,12 @@
 //   xaddr <hex>                  XN297 address (as for XN297_SetTXAddr), 3..5 bytes
 //   prefix [hex]                 known first payload bytes (none to clear): the RX
 //                                sync word moves into them, see frame.h
-//   cc2500 <sync> [crc] [var]    CC2500 framing: sync word SYNC1 SYNC0 (twice for
-//                                SYNC_MODE 3), CC2500 CRC (default 1), variable
-//                                length (default 1): the payload starts with the
-//                                length byte, as the CC2500 FIFO content
+//   cc2500 <sync> [crc] [var] [white] [fec] [msk]  CC2500 framing: sync word
+//                                SYNC1 SYNC0 (twice for SYNC_MODE 3), CC2500 CRC
+//                                (default 1), variable length (default 1): the
+//                                payload starts with the length byte, as the
+//                                CC2500 FIFO content. PN9 whitening, FEC (fixed
+//                                length), MSK bit inversion (default 0)
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
@@ -59,7 +61,7 @@
 //         @ev txdone <n>
 
 #define BENCH_BAUDRATE 921600
-#define LINE_MAX_LEN 200
+#define LINE_MAX_LEN 300
 #define SEQ_OFF 255
 
 typedef enum { JOB_IDLE, JOB_TXP, JOB_RX } job_t;
@@ -357,8 +359,14 @@ typedef struct {
   uint32_t ch_base_hz;
   uint32_t ch_spacing_hz;
   uint8_t sync_len;  // CC2500 framing: 2, 4 = sync word sent twice, 0 = keep the framing
-  bool crc;
+  uint8_t cc2500;    // CC2500 framing options, CC_*
 } preset_t;
+
+#define CC_CRC 0x01
+#define CC_VAR 0x02    // variable length
+#define CC_WHITE 0x04  // whitening
+#define CC_FEC 0x08
+#define CC_MSK 0x10    // MSK: bits inverted
 
 #define NRF_CH_BASE 2400000000
 #define NRF_CH_SPACING 1000000
@@ -371,24 +379,31 @@ static const preset_t _presets[] = {
     {"nrf250k", 250000, 160000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},    // 784 kHz
     {"xn250k", 250000, 127000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},     // 784 kHz
     // FrSky D: 31.04 kbps GFSK, 31.7 kHz deviation, CRC, sync 15/16
-    {"frskyd", 31044, 31750, 85, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 2, true},  // 175 kHz
+    {"frskyd", 31044, 31750, 85, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 2, CC_CRC | CC_VAR},  // 175 kHz
     // FrSky X (D16 v1): 70.0 kbps GFSK, 57.1 kHz deviation, sync 30/32, no CRC
-    {"frskyx", 70023, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, false},  // 265 kHz
+    {"frskyx", 70023, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, CC_VAR},  // 265 kHz
     // FrSky X v2: 77.0 kbps, CRC
-    {"frskyx2", 76965, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, true},
+    {"frskyx2", 76965, 57000, 87, false, FRSKY_CH_BASE, FRSKY_CH_SPACING, 4, CC_CRC | CC_VAR},
     // FrSky X LBT (EU): 100 kbps 2-FSK, 69.8 kHz deviation, 2405 MHz base. X v2
     // LBT: the same with CRC
-    {"frskyxeu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, false},  // 307 kHz
-    {"frskyx2eu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, true},
+    {"frskyxeu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, CC_VAR},  // 307 kHz
+    {"frskyx2eu", 99976, 69750, 88, true, 2405000000, FRSKY_CH_SPACING, 4, CC_CRC | CC_VAR},
+    // HoTT: 250 kbps MSK (as 2-FSK, 62.5 kHz), fixed length, CRC, whitening, FEC.
+    // ch = CC2500 CHANNR ((hop + 1) * 3)
+    {"hott", 249939, 62500, 91, true, 2403012390, 338013, 4,
+     CC_CRC | CC_WHITE | CC_FEC | CC_MSK},  // 530 kHz
 };
 
-static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, bool crc, bool var_len)
+static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
 {
   _frame.type = FRAME_CC2500;
   memcpy(_frame.addr, sync, sync_len);
   _frame.addr_len = sync_len;
-  _frame.crc_len = crc ? 2 : 0;
-  _frame.var_len = var_len;
+  _frame.crc_len = options & CC_CRC ? 2 : 0;
+  _frame.var_len = options & CC_VAR;
+  _frame.whitening = options & CC_WHITE;
+  _frame.fec = options & CC_FEC;
+  _frame.invert = options & CC_MSK;
   _frame.prefix_len = 0;
   _frame_ok = frame_init(&_frame);
   _ack_on = false;
@@ -426,7 +441,7 @@ static bool _load_preset(const char* name)
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
   if (p->sync_len) {
     static const uint8_t sync[] = {0xD3, 0x91, 0xD3, 0x91};  // CC2500 default
-    _set_cc2500_frame(sync, p->sync_len, p->crc, true);
+    _set_cc2500_frame(sync, p->sync_len, p->cc2500);
   }
   if (!_apply_phy()) {
     _report_radio_error("radio init");
@@ -439,7 +454,7 @@ static void _cmd_preset(char* args)
 {
   char* name = _next_arg(&args);
   if (!name) {
-    _print("@err usage: preset <nrf1m|nrf2m|nrf250k|xn250k|frskyd|frskyx|frskyx2|frskyxeu|frskyx2eu>\r\n");
+    _print("@err usage: preset <nrf1m|nrf2m|nrf250k|xn250k|frskyd|frskyx|frskyx2|frskyxeu|frskyx2eu|hott>\r\n");
     return;
   }
   if (_load_preset(name)) _printf("@ok preset=%s\r\n", name);
@@ -587,21 +602,31 @@ static void _cmd_cc2500(char* args)
   char* sync = _next_arg(&args);
   uint8_t buf[4];
   int len = sync ? _hex(sync, buf, sizeof(buf)) : -1;
-  uint32_t crc = _number_or(&args, 1);
-  uint32_t var_len = _number_or(&args, 1);
+  uint8_t options = 0;
+  if (_number_or(&args, 1)) options |= CC_CRC;
+  if (_number_or(&args, 1)) options |= CC_VAR;
+  if (_number_or(&args, 0)) options |= CC_WHITE;
+  if (_number_or(&args, 0)) options |= CC_FEC;
+  if (_number_or(&args, 0)) options |= CC_MSK;
   if (len != 2 && len != 4) {
-    _print("@err usage: cc2500 <sync: 2 bytes, 4 for SYNC_MODE 3> [crc] [var]\r\n");
+    _print("@err usage: cc2500 <sync: 2 bytes, 4 for SYNC_MODE 3> [crc] [var] [white] [fec] "
+           "[msk]\r\n");
     return;
   }
 
   _job_stop();
-  _set_cc2500_frame(buf, len, crc, var_len);
+  _set_cc2500_frame(buf, len, options);
+  if (!_frame_ok) {
+    _print("@err bad cc2500 framing (fec needs a fixed length)\r\n");
+    return;
+  }
   if (_phy_ok && !_apply_phy()) {
     _report_radio_error("radio init");
     return;
   }
-  _printf("@ok framing=cc2500 sync=%08lx crc=%lu var=%lu rx_sync=%08lx\r\n",
-          frame_tx_sync(&_frame), crc, var_len, frame_rx_sync(&_frame));
+  _printf("@ok framing=cc2500 sync=%08lx crc=%d var=%d white=%d fec=%d msk=%d rx_sync=%08lx\r\n",
+          frame_tx_sync(&_frame), _frame.crc_len != 0, _frame.var_len, _frame.whitening,
+          _frame.fec, _frame.invert, frame_rx_sync(&_frame));
 }
 
 static void _cmd_esb(char* args)

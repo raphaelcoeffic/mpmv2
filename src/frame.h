@@ -16,8 +16,9 @@
 
 #define FRAME_ADDR_MAX 5
 #define FRAME_PREFIX_MAX 8
-#define FRAME_PAYLOAD_MAX 48
+#define FRAME_PAYLOAD_MAX 120
 #define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
+#define FRAME_FEC_DATA_MAX 64     // CC2500 FEC: payload + CRC + padding, 2 air bytes each
 #define FRAME_HDR_MAX (4 + FRAME_ADDR_MAX)
 
 typedef enum {
@@ -45,6 +46,11 @@ typedef struct {
   // CC2500: variable packet length (PKTCTRL0.LENGTH_CONFIG 1), the first
   // payload byte is the length of the rest (CRC excluded)
   bool var_len;
+  bool whitening;  // CC2500 PKTCTRL0.WHITE_DATA: PN9 over the payload and CRC
+  bool fec;        // CC2500 MDMCFG1.FEC_EN (fixed length only, no prefix)
+  // CC2500 MSK (MDMCFG2.MOD_FORMAT 7): received as 2-FSK with a 0.5 modulation
+  // index, all bits inverted (preamble and sync word included)
+  bool invert;
   uint8_t sync_bytes;  // NRF: address bytes used as sync word (2 to 4)
   // Known first payload bytes (not with a packet control field)
   uint8_t prefix[FRAME_PREFIX_MAX];

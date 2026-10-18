@@ -14,6 +14,12 @@
 #define CC2500_PREAMBLE 0xAA
 #define CC2500_PREAMBLE_LEN 2
 
+// CC2500 FEC (TI DN504): rate 1/2 convolutional code (K=4, 2 bit symbol per
+// data bit) and 4x4 interleaving of the symbols, by blocks of 2 data bytes. The
+// data is padded to an even length with 1 or 2 trellis terminator bytes.
+#define CC2500_FEC_TERM 0x0B
+static const uint8_t _fec_table[16] = {0, 3, 1, 2, 3, 0, 2, 1, 3, 0, 2, 1, 0, 3, 1, 2};
+
 // nRF24L01+ packet control field: 6 bit length, 2 bit pid, 1 bit "ack
 // requested" (the datasheet's NO_ACK flag, sent inverted). Without dynamic
 // payload length, the length field is 0x33 (measured).
@@ -149,9 +155,13 @@ static uint16_t _xn297_xorout_for(const frame_t* f, uint8_t len)
   return f->scramble ? _xn297_xorout_scrambled[idx] : _xn297_xorout[idx];
 }
 
+// CC2500 FEC: data bytes encoded for n bytes of payload and CRC
+static uint8_t _fec_data_len(uint8_t n) { return n + (n & 1 ? 1 : 2); }
+
 // Total frame length for a payload of len bytes
 static uint8_t _frame_len(const frame_t* f, uint8_t len)
 {
+  if (f->type == FRAME_CC2500 && f->fec) return f->hdr_len + 2 * _fec_data_len(len + f->crc_len);
   if (f->type == FRAME_XN297 && f->enhanced)
     return f->hdr_len + len + (f->crc_len ? 4 : 2);  // 10 bit pcf, CRC shifted by 2 bits
   if (f->type == FRAME_NRF && f->esb)
@@ -163,6 +173,8 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
 {
   if (len > FRAME_PAYLOAD_MAX) return false;
   if (f->type == FRAME_NRF) return len <= FRAME_NRF_PAYLOAD_MAX;
+  if (f->type == FRAME_CC2500 && f->fec)
+    return _fec_data_len(len + f->crc_len) <= FRAME_FEC_DATA_MAX;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -256,20 +268,105 @@ static uint8_t _encode_xn297_enhanced(const frame_t* f, const uint8_t* payload, 
   return n;
 }
 
+// CC2500 data whitening: PN9 (x^9 + x^5 + 1, all ones at start)
+static void _pn9_whiten(uint8_t* data, uint8_t len)
+{
+  uint16_t reg = 0x1FF;
+  for (uint8_t i = 0; i < len; i++) {
+    data[i] ^= reg & 0xFF;
+    for (int j = 0; j < 8; j++) reg = (reg >> 1) | (((reg ^ (reg >> 5)) & 1) << 8);
+  }
+}
+
+// n data bytes (even) to 2n interleaved bytes
+static void _fec_encode(const uint8_t* data, uint8_t n, uint8_t* out)
+{
+  uint16_t reg = 0;
+  for (uint8_t i = 0; i < n; i += 2) {
+    uint8_t fec[4];
+    for (uint8_t k = 0; k < 2; k++) {
+      reg = (reg & 0x700) | data[i + k];
+      uint16_t sym = 0;
+      for (int j = 0; j < 8; j++) {
+        sym = (sym << 2) | _fec_table[reg >> 7];
+        reg = (reg << 1) & 0x7FF;
+      }
+      fec[2 * k] = sym >> 8;
+      fec[2 * k + 1] = sym & 0xFF;
+    }
+    uint32_t v = 0;
+    for (int j = 0; j < 16; j++) v = (v << 2) | ((fec[~j & 3] >> (2 * (j >> 2))) & 3);
+    for (int j = 0; j < 4; j++) out[2 * i + j] = v >> (24 - 8 * j);
+  }
+}
+
+// 2n interleaved bytes to n data bytes: hard decision Viterbi decoder. The
+// state is the last 3 data bits, newest in bit 0.
+static void _fec_decode(const uint8_t* in, uint8_t n, uint8_t* data)
+{
+  uint8_t survivors[8 * FRAME_FEC_DATA_MAX];  // per bit: bit s = state s came from s>>1 | 4
+  uint16_t metric[8] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  uint16_t bits = 0;
+
+  for (uint16_t i = 0; i < 2 * n; i += 4) {
+    uint32_t v = (uint32_t)in[i] << 24 | (uint32_t)in[i + 1] << 16 | in[i + 2] << 8 | in[i + 3];
+    uint8_t fec[4] = {0};
+    for (int j = 0; j < 16; j++) fec[~j & 3] |= ((v >> (30 - 2 * j)) & 3) << (2 * (j >> 2));
+
+    for (int k = 0; k < 16; k++, bits++) {
+      uint8_t sym = (fec[k >> 2] >> (6 - 2 * (k & 3))) & 3;
+      uint16_t next[8];
+      uint8_t surv = 0;
+      for (uint8_t s = 0; s < 8; s++) {
+        uint8_t p0 = s >> 1, p1 = p0 | 4, b = s & 1;
+        uint8_t d0 = _fec_table[p0 << 1 | b] ^ sym, d1 = _fec_table[p1 << 1 | b] ^ sym;
+        uint16_t m0 = metric[p0] + (d0 & 1) + (d0 >> 1);
+        uint16_t m1 = metric[p1] + (d1 & 1) + (d1 >> 1);
+        next[s] = m1 < m0 ? m1 : m0;
+        if (m1 < m0) surv |= 1 << s;
+      }
+      survivors[bits] = surv;
+      memcpy(metric, next, sizeof(metric));
+    }
+  }
+
+  uint8_t s = 0;
+  for (uint8_t i = 1; i < 8; i++)
+    if (metric[i] < metric[s]) s = i;
+  memset(data, 0, n);
+  while (bits--) {
+    data[bits >> 3] |= (s & 1) << (7 - (bits & 7));
+    s = (survivors[bits] >> s) & 1 ? (s >> 1) | 4 : s >> 1;
+  }
+}
+
 // The payload includes the length byte with a variable length
 static uint8_t _encode_cc2500(const frame_t* f, const uint8_t* payload, uint8_t len,
                               uint8_t* buf)
 {
-  uint8_t n = f->hdr_len;
-  memcpy(buf + n, payload, len);
-  n += len;
+  uint8_t body[FRAME_BUF_LEN];
+  uint8_t n = len;
+  memcpy(body, payload, len);
 
   if (f->crc_len) {
     uint16_t crc = _cc2500_crc_buf(CC2500_CRC_INIT, payload, len);
-    buf[n++] = crc >> 8;
-    buf[n++] = crc & 0xFF;
+    body[n++] = crc >> 8;
+    body[n++] = crc & 0xFF;
   }
-  return n;
+  if (f->whitening) _pn9_whiten(body, n);
+
+  uint8_t* air = buf + f->hdr_len;
+  if (f->fec) {
+    uint8_t m = _fec_data_len(n);
+    memset(body + n, CC2500_FEC_TERM, m - n);
+    _fec_encode(body, m, air);
+    n = 2 * m;
+  } else {
+    memcpy(air, body, n);
+  }
+  if (f->invert)
+    for (uint8_t i = 0; i < n; i++) air[i] ^= 0xFF;
+  return f->hdr_len + n;
 }
 
 static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
@@ -383,10 +480,21 @@ static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* bu
 static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8_t avail,
                                      uint8_t len, uint8_t* payload, uint8_t* payload_len)
 {
-  const uint8_t* b = buf + f->hdr_len;
+  uint8_t b[FRAME_BUF_LEN];
+  uint8_t n = avail - f->hdr_len;
+  memcpy(b, buf + f->hdr_len, n);
+  if (f->invert)
+    for (uint8_t i = 0; i < n; i++) b[i] ^= 0xFF;
+  if (f->fec) {
+    if (avail < _frame_len(f, len)) return FRAME_SHORT;
+    n = _fec_data_len(len + f->crc_len);
+    _fec_decode(b, n, b);
+  }
+  if (f->whitening) _pn9_whiten(b, n);
+
   uint8_t size = len;
   if (f->var_len) {
-    if (avail <= f->hdr_len) return FRAME_SHORT;
+    if (n == 0) return FRAME_SHORT;
     size = b[0] + 1;
     if (size > len) {
       *payload_len = 0;
@@ -509,10 +617,14 @@ bool frame_init(frame_t* f)
       break;
 
     case FRAME_CC2500:
-      if (f->addr_len < 1 || f->addr_len > 4 || (f->crc_len && f->crc_len != 2)) return false;
+      if (f->addr_len < 1 || f->addr_len > 4 || (f->crc_len && f->crc_len != 2) ||
+          (f->fec && (f->var_len || f->prefix_len)))
+        return false;
       for (uint8_t i = 0; i < CC2500_PREAMBLE_LEN; i++) f->known[n++] = CC2500_PREAMBLE;
       memcpy(f->known + n, f->addr, f->addr_len);
       n += f->addr_len;
+      if (f->invert)
+        for (uint8_t i = 0; i < n; i++) f->known[i] ^= 0xFF;
       f->sync_len = 4;
       break;
 
