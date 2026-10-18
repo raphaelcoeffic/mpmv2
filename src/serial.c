@@ -42,6 +42,13 @@ void serial_init(uint32_t baudrate, uart_mode_t mode)
   uart_enable_tx_irq(UART0, tx_buf, TX_BUFFER_SIZE);
 }
 
+void serial_stop()
+{
+  uart_disable_rx_irq(UART0);
+  uart_reset_rx_len(UART0);
+  serial_frame_received = false;
+}
+
 void serial_print(const char* str)
 {
   uart_print_irq(UART0, str);

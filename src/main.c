@@ -177,6 +177,24 @@ static void init_signal_receiver(signal_type_t t)
   }  
 }
 
+static void stop_signal_receiver(signal_type_t t)
+{
+  switch (t) {
+    case SIGNAL_TYPE_PPM:
+      ppm_timer_set_timeout(0, 0);
+      ppm_timer_stop();
+      ppm_frame_received = false;
+      break;
+
+    case SIGNAL_TYPE_SERIAL:
+      serial_stop();
+      break;
+
+    default:
+      break;
+  }
+}
+
 static void main_loop()
 {
   signal_type_t signal = SIGNAL_TYPE_NONE;
@@ -222,9 +240,10 @@ static void main_loop()
 
     if (frame_received) {
       timeout = millis() + 50;
-    } else if (millis_after(timeout)) {
-      signal = SIGNAL_TYPE_NONE;
+    } else if (signal != SIGNAL_TYPE_NONE && millis_after(timeout)) {
       debugln("signal timeout");
+      stop_signal_receiver(signal);
+      signal = SIGNAL_TYPE_NONE;
     }
   }
 }

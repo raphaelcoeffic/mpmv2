@@ -19,6 +19,9 @@ extern volatile uint32_t rx_len;
 
 void serial_init(uint32_t baudrate, uart_mode_t mode);
 
+// Stop receiving (the RX pin can then be used for signal detection)
+void serial_stop();
+
 void serial_print(const char* str);
 void serial_write(const uint8_t* data, uint32_t len);
 
