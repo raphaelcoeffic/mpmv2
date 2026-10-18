@@ -365,12 +365,15 @@ payload. Two MPM bugs showed up:
   for 3% of the E012 bind packets, 100% of the E015 bind packets (by chance)
   and 0% of the E015 data packets. Either the models don't check it or E01X
   doesn't work. The CC2652 sends the CRC as intended (`msg[pos]`). Without an
-  E01X model nobody can tell which one it accepts.
+  E01X model nobody can tell which one it accepts. The MPM fix,
+  `crc16_update(msg[pos], 1)`, is documented in the bench README; it is not
+  applied until someone tests it with a model.
 - E010R5: the callback changes the channel right after
   `RF2500_SendPayload()`, while the CYRF6936 still sends the last bytes
   (`CYRF_GFSK1M_SendPayload()` returns when its FIFO is filled). The last
-  packet before each hop, 1 in 6, arrives corrupted. The CC2652 `radio_send()`
-  waits for the end of the packet.
+  packet before each hop, 1 in 6, arrived corrupted. Fixed in the MPM (the
+  hop waits for the end of the packet): 100%. The CC2652 `radio_send()` waits
+  for the end of the packet anyway.
 
 ## What any candidate chip must show
 
