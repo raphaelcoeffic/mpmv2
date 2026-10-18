@@ -340,6 +340,15 @@ static void _fec_decode(const uint8_t* in, uint8_t n, uint8_t* data)
   }
 }
 
+// CRC_EN with CC2400_EN (measured): CRC-16 0x8005 from 0 over all bytes but
+// the last 2, which are added to it unprocessed
+static uint16_t _cc2500_crc(const frame_t* f, const uint8_t* data, uint8_t len)
+{
+  if (!f->cc2400_crc) return _cc2500_crc_buf(CC2500_CRC_INIT, data, len);
+  if (len < 2) return 0;
+  return _cc2500_crc_buf(0, data, len - 2) ^ (data[len - 2] << 8 | data[len - 1]);
+}
+
 // The payload includes the length byte with a variable length
 static uint8_t _encode_cc2500(const frame_t* f, const uint8_t* payload, uint8_t len,
                               uint8_t* buf)
@@ -349,7 +358,7 @@ static uint8_t _encode_cc2500(const frame_t* f, const uint8_t* payload, uint8_t 
   memcpy(body, payload, len);
 
   if (f->crc_len) {
-    uint16_t crc = _cc2500_crc_buf(CC2500_CRC_INIT, payload, len);
+    uint16_t crc = _cc2500_crc(f, payload, len);
     body[n++] = crc >> 8;
     body[n++] = crc & 0xFF;
   }
@@ -487,8 +496,17 @@ static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8
     for (uint8_t i = 0; i < n; i++) b[i] ^= 0xFF;
   if (f->fec) {
     if (avail < _frame_len(f, len)) return FRAME_SHORT;
-    n = _fec_data_len(len + f->crc_len);
-    _fec_decode(b, n, b);
+    uint8_t m = _fec_data_len(len + f->crc_len);
+    if (f->var_len) {
+      // Length byte first (first PN9 byte: 0xFF), then the packet only: noise
+      // follows it
+      uint8_t first[2];
+      _fec_decode(b, 2, first);
+      uint8_t size = (f->whitening ? first[0] ^ 0xFF : first[0]) + 1;
+      if (size <= len) m = _fec_data_len(size + f->crc_len);
+    }
+    _fec_decode(b, m, b);
+    n = m;
   }
   if (f->whitening) _pn9_whiten(b, n);
 
@@ -507,7 +525,7 @@ static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8
   *payload_len = size;
 
   if (!f->crc_len) return FRAME_OK;
-  uint16_t crc = _cc2500_crc_buf(CC2500_CRC_INIT, b, size);
+  uint16_t crc = _cc2500_crc(f, b, size);
   return b[size] == crc >> 8 && b[size + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
 }
 
@@ -618,7 +636,7 @@ bool frame_init(frame_t* f)
 
     case FRAME_CC2500:
       if (f->addr_len < 1 || f->addr_len > 4 || (f->crc_len && f->crc_len != 2) ||
-          (f->fec && (f->var_len || f->prefix_len)))
+          (f->fec && f->prefix_len))
         return false;
       for (uint8_t i = 0; i < CC2500_PREAMBLE_LEN; i++) f->known[n++] = CC2500_PREAMBLE;
       memcpy(f->known + n, f->addr, f->addr_len);

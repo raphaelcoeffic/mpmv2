@@ -16,7 +16,9 @@
 //   preset <name>                load a PHY preset (and its channel plan):
 //                                nrf1m nrf2m nrf250k xn250k, CC2500 ones with
 //                                their framing: frskyd frskyx frskyx2 frskyxeu
-//                                frskyx2eu hott
+//                                frskyx2eu hott hitec redpine
+//                                redpineslow skyartec frskyv corona coronav2
+//                                fdv3 ares radiolink ikea sfhss
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -34,10 +36,11 @@
 //                                sync word moves into them, see frame.h
 //   cc2500 <sync> [crc] [var] [white] [fec] [msk]  CC2500 framing: sync word
 //                                SYNC1 SYNC0 (twice for SYNC_MODE 3), CC2500 CRC
-//                                (default 1), variable length (default 1): the
+//                                (default 1, 2 = CC2400_EN), variable length
+//                                (default 1): the
 //                                payload starts with the length byte, as the
-//                                CC2500 FIFO content. PN9 whitening, FEC (fixed
-//                                length), MSK bit inversion (default 0)
+//                                CC2500 FIFO content. PN9 whitening, FEC, MSK
+//                                bit inversion (default 0)
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
@@ -63,6 +66,8 @@
 #define BENCH_BAUDRATE 921600
 #define LINE_MAX_LEN 300
 #define SEQ_OFF 255
+// TI specifies 2360 to 2500 MHz, Redpine hops up to 2502 MHz
+#define FREQ_MAX_KHZ 2510000
 
 typedef enum { JOB_IDLE, JOB_TXP, JOB_RX } job_t;
 
@@ -360,6 +365,8 @@ typedef struct {
   uint32_t ch_spacing_hz;
   uint8_t sync_len;  // CC2500 framing: 2, 4 = sync word sent twice, 0 = keep the framing
   uint8_t cc2500;    // CC2500 framing options, CC_*
+  uint8_t preamble;  // preamble bytes, 0 = 4
+  uint16_t sync;     // CC2500 SYNC1 SYNC0, 0 = 0xD391
 } preset_t;
 
 #define CC_CRC 0x01
@@ -367,6 +374,7 @@ typedef struct {
 #define CC_WHITE 0x04  // whitening
 #define CC_FEC 0x08
 #define CC_MSK 0x10    // MSK: bits inverted
+#define CC_CRC2400 0x20  // CRC_EN with CC2400_EN
 
 #define NRF_CH_BASE 2400000000
 #define NRF_CH_SPACING 1000000
@@ -392,6 +400,38 @@ static const preset_t _presets[] = {
     // ch = CC2500 CHANNR ((hop + 1) * 3)
     {"hott", 249939, 62500, 91, true, 2403012390, 338013, 4,
      CC_CRC | CC_WHITE | CC_FEC | CC_MSK},  // 530 kHz
+    // MSK with a partial phase step (DEVIATN M < 7: Hitec, Redpine, Skyartec)
+    // as 2-FSK: the CC2500 wants more than the MSK deviation (rate / 4, Hitec:
+    // 99.5%, 0.2 x rate: 71%, 0.3 to 0.64 x rate: 100%), the CC2652 receiver
+    // less than 0.4 x rate (Skyartec), with a 311 kHz filter: 0.32 x rate.
+    // Hitec: 250 kbps MSK (2/8 phase step), 24 byte preamble, length, CRC,
+    // whitening. Data packets: sync word from the ID (cc2500 command)
+    {"hitec", 249939, 80000, 89, true, 2405599854, FRSKY_CH_SPACING, 4,
+     CC_CRC | CC_VAR | CC_WHITE | CC_MSK, 24},  // 311 kHz
+    // Redpine fast: 250 kbps MSK (1/8 phase step), length, CRC. Slow: 10 kbps
+    // 2-FSK, 38 kHz deviation, other channel spacing
+    {"redpine", 249939, 80000, 89, true, 2432999908, 271362, 4, CC_CRC | CC_VAR | CC_MSK},
+    {"redpineslow", 9993, 38000, 85, true, 2432999908, 199951, 4, CC_CRC | CC_VAR},
+    // Skyartec: 229 kbps MSK (1/8 phase step), length, CRC. Sync word: 7d7d
+    // to bind, from the ID for data (cc2500 command)
+    {"skyartec", 228516, 75000, 89, true, 2432999908, 199951, 4, CC_CRC | CC_VAR | CC_MSK, 0,
+     0x7D7D},
+    // FrSky V8: 27 kbps GFSK, 28.6 kHz deviation, 32 bit sync, length, CRC
+    {"frskyv", 26978, 28500, 85, false, 2400999786, FRSKY_CH_SPACING, 4, CC_CRC | CC_VAR},
+    // Corona V1 / V2 / Flydream V3: 100 kbps 2-FSK, length, CRC
+    {"corona", 99976, 47500, 88, true, 2399999634, 399902, 4, CC_CRC | CC_VAR},
+    {"coronav2", 99976, 50750, 88, true, 2405000000, 399902, 4, CC_CRC | CC_VAR},
+    {"fdv3", 99976, 50750, 88, true, 2399999634, 399902, 4, CC_CRC | CC_VAR},
+    // Ares: 50 kbps 2-FSK, 38 kHz deviation, length, CRC
+    {"ares", 49988, 38000, 86, true, 2409999969, FRSKY_CH_SPACING, 4, CC_CRC | CC_VAR, 0, 0x5A60},
+    // RadioLink: 38 kbps GFSK, 38 kHz deviation, length, CRC, whitening. Sync
+    // DumboRC: badc, RC4G: aba5
+    {"radiolink", 37987, 38000, 86, false, 2401999939, 399902, 4, CC_CRC | CC_VAR | CC_WHITE, 0,
+     0xABCD},
+    // IKEA Ansluta: 250 kbps MSK (2/8 phase step), length, CRC, FEC. ch 16
+    {"ikea", 249939, 80000, 89, true, 2432999908, 199951, 4, CC_CRC | CC_VAR | CC_FEC | CC_MSK},
+    // Futaba SFHSS: 128 kbps 2-FSK, 38 kHz deviation, fixed length, CC2400 CRC
+    {"sfhss", 128143, 38000, 86, true, 2399999634, 249939, 4, CC_CRC2400},  // 220 kHz
 };
 
 static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
@@ -404,6 +444,8 @@ static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t opt
   _frame.whitening = options & CC_WHITE;
   _frame.fec = options & CC_FEC;
   _frame.invert = options & CC_MSK;
+  _frame.cc2400_crc = options & CC_CRC2400;
+  if (_frame.cc2400_crc) _frame.crc_len = 2;
   _frame.prefix_len = 0;
   _frame_ok = frame_init(&_frame);
   _ack_on = false;
@@ -431,7 +473,7 @@ static bool _load_preset(const char* name)
       .symbol_rate = p->rate,
       .deviation = p->deviation,
       .rx_bw = p->rx_bw,
-      .preamble_bytes = 4,
+      .preamble_bytes = p->preamble ? p->preamble : 4,
       .if_freq = 0x8000,  // RF core default
       .fsk = p->fsk,
   };
@@ -440,7 +482,8 @@ static bool _load_preset(const char* name)
   _ch_spacing_hz = p->ch_spacing_hz;
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
   if (p->sync_len) {
-    static const uint8_t sync[] = {0xD3, 0x91, 0xD3, 0x91};  // CC2500 default
+    uint16_t sw = p->sync ? p->sync : 0xD391;  // CC2500 default
+    const uint8_t sync[] = {sw >> 8, sw & 0xFF, sw >> 8, sw & 0xFF};
     _set_cc2500_frame(sync, p->sync_len, p->cc2500);
   }
   if (!_apply_phy()) {
@@ -454,7 +497,10 @@ static void _cmd_preset(char* args)
 {
   char* name = _next_arg(&args);
   if (!name) {
-    _print("@err usage: preset <nrf1m|nrf2m|nrf250k|xn250k|frskyd|frskyx|frskyx2|frskyxeu|frskyx2eu|hott>\r\n");
+    _print("@err usage: preset <name>:");
+    for (uint32_t i = 0; i < sizeof(_presets) / sizeof(_presets[0]); i++)
+      _printf(" %s", _presets[i].name);
+    _print("\r\n");
     return;
   }
   if (_load_preset(name)) _printf("@ok preset=%s\r\n", name);
@@ -603,7 +649,9 @@ static void _cmd_cc2500(char* args)
   uint8_t buf[4];
   int len = sync ? _hex(sync, buf, sizeof(buf)) : -1;
   uint8_t options = 0;
-  if (_number_or(&args, 1)) options |= CC_CRC;
+  uint32_t crc = _number_or(&args, 1);
+  if (crc == 1) options |= CC_CRC;
+  if (crc == 2) options |= CC_CRC2400;
   if (_number_or(&args, 1)) options |= CC_VAR;
   if (_number_or(&args, 0)) options |= CC_WHITE;
   if (_number_or(&args, 0)) options |= CC_FEC;
@@ -617,7 +665,7 @@ static void _cmd_cc2500(char* args)
   _job_stop();
   _set_cc2500_frame(buf, len, options);
   if (!_frame_ok) {
-    _print("@err bad cc2500 framing (fec needs a fixed length)\r\n");
+    _print("@err bad cc2500 framing\r\n");
     return;
   }
   if (_phy_ok && !_apply_phy()) {
@@ -625,7 +673,8 @@ static void _cmd_cc2500(char* args)
     return;
   }
   _printf("@ok framing=cc2500 sync=%08lx crc=%d var=%d white=%d fec=%d msk=%d rx_sync=%08lx\r\n",
-          frame_tx_sync(&_frame), _frame.crc_len != 0, _frame.var_len, _frame.whitening,
+          frame_tx_sync(&_frame), _frame.cc2400_crc ? 2 : _frame.crc_len != 0, _frame.var_len,
+          _frame.whitening,
           _frame.fec, _frame.invert, frame_rx_sync(&_frame));
 }
 
@@ -692,8 +741,8 @@ static bool _set_frequency(uint32_t khz)
 static void _cmd_ch(char* args)
 {
   uint32_t ch;
-  if (!_number(&args, &ch) || ch > 255 || _ch_khz(ch) > 2500000) {
-    _print("@err usage: ch <n>, up to 2500 MHz\r\n");
+  if (!_number(&args, &ch) || ch > 255 || _ch_khz(ch) > FREQ_MAX_KHZ) {
+    _print("@err usage: ch <n>, up to 2510 MHz\r\n");
     return;
   }
   uint32_t khz = _ch_khz(ch);
@@ -727,8 +776,8 @@ static void _cmd_chplan(char* args)
 static void _cmd_freq(char* args)
 {
   uint32_t khz;
-  if (!_number(&args, &khz) || khz < 2360000 || khz > 2500000) {
-    _print("@err usage: freq <2360000..2500000 kHz>\r\n");
+  if (!_number(&args, &khz) || khz < 2360000 || khz > FREQ_MAX_KHZ) {
+    _print("@err usage: freq <2360000..2510000 kHz>\r\n");
     return;
   }
   _channel = -1;

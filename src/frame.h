@@ -47,7 +47,8 @@ typedef struct {
   // payload byte is the length of the rest (CRC excluded)
   bool var_len;
   bool whitening;  // CC2500 PKTCTRL0.WHITE_DATA: PN9 over the payload and CRC
-  bool fec;        // CC2500 MDMCFG1.FEC_EN (fixed length only, no prefix)
+  bool fec;        // CC2500 MDMCFG1.FEC_EN (no prefix)
+  bool cc2400_crc; // CC2500 PKTCTRL0.CC2400_EN: CC2400 compatible CRC
   // CC2500 MSK (MDMCFG2.MOD_FORMAT 7): received as 2-FSK with a 0.5 modulation
   // index, all bits inverted (preamble and sync word included)
   bool invert;

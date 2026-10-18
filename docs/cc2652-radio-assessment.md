@@ -17,16 +17,17 @@ with `-DBENCH=ON`.
   ack payloads. Bare-metal, with two TI files (`rfc.c`/`rfc.h` and the
   proprietary CPE patch).
 - Hard limit: no 2 Mbps reception. CFlie models set to 2 Mbps would not work.
-- Works: the FrSky CC2500 PHYs (D8, D16 v1 and v2, FCC and LBT) and HoTT
-  (MSK, whitening, FEC), both directions, with a per-board frequency trim like
-  the MPM `option`. FrSky
+- Works: every MPM CC2500 protocol tried, both directions: FrSky D8/V8/D16
+  (FCC and LBT), HoTT, Hitec, Redpine, Skyartec, Corona, Flydream, Ares,
+  RadioLink, IKEA, SFHSS. That covers 2-FSK, GFSK and MSK from 10 to 250 kbps,
+  whitening, FEC and the CC2400 CRC, with a per-board frequency trim like the
+  MPM `option`. Only FrSky L (TX only, raw chip stream) is untested. FrSky
   itself runs ACCST and ACCESS on CC26xx chips in its receivers and transmitter
   modules (information from the project owner, not a bench result).
 - Mitigated in software: repeated address patterns. Degenerate addresses such
   as `5555555555` still fail.
-- Biggest unknowns: the A7105 and CYRF6936 families (FlySky, Hubsan, DSM),
-  receiver sensitivity, and MSK with a partial phase step (Hitec, Redpine fast,
-  Skyartec, IKEA).
+- Biggest unknowns: the A7105 and CYRF6936 families (FlySky, Hubsan, DSM), and
+  receiver sensitivity.
 
 ## Measured status
 
@@ -43,7 +44,9 @@ with `-DBENCH=ON`.
 | CC2500 FrSky D8 (31 kbps GFSK, CRC, 16 bit sync) | works | 100% both ways, with a 35 kHz trim for CC2652 -> CC2500 |
 | CC2500 FrSky X / X2 (70 / 77 kbps GFSK), X / X2 LBT (100 kbps 2-FSK) | works | 100% both ways |
 | CC2500 HoTT (250 kbps MSK, whitening, FEC), data and telemetry formats | works | 100% both ways, no trim needed |
-| Other CC2500 protocols | not tested | see "CC2500 protocol family" |
+| CC2500 MSK with a partial phase step: Hitec, Redpine fast, Skyartec, IKEA | works | 100% both ways with 0.32 x rate deviation |
+| CC2500 2-FSK / GFSK: FrSky V8, Corona, Flydream, Ares, RadioLink, SFHSS, Redpine slow | works | 99.6 to 100% both ways |
+| CC2500 FrSky L (raw chip stream) | not tested | |
 | A7105, CYRF6936 protocols | not tested | |
 | Sensitivity, range, blocking | not measured | no attenuator on the bench |
 
@@ -130,20 +133,20 @@ Every MPM CC2500 protocol decoded from its registers (26 MHz crystal):
 | Protocols | PHY | Framing | CC2652 status |
 |---|---|---|---|
 | FrSky D8 | 31 kbps GFSK, 32 kHz dev | 16 bit sync D391, length, CRC | works |
+| FrSky V8 | 27 kbps GFSK, 29 kHz dev | 32 bit sync, length, CRC | works |
 | FrSky X / X2, FrSky RX | 70 / 77 kbps GFSK, 57 kHz dev | 32 bit sync, length, CRC (X2) | works |
 | FrSky X / X2 LBT | 100 kbps 2-FSK, 70 kHz dev | 32 bit sync, length, CRC (X2) | works |
-| FrSky V8 | 27 kbps GFSK, 29 kHz dev | 32 bit sync, length, CRC | expected to work (same as D8) |
-| Corona V1/V2, Flydream V3 | 100 kbps 2-FSK, 48 to 51 kHz dev | 32 bit sync, length, CRC | expected to work. V1/FDV3 bind at 2483.6 MHz |
-| Ares | 50 kbps 2-FSK, 38 kHz dev | 32 bit sync 5A60, length, CRC | expected to work |
-| Futaba SFHSS | 128 kbps 2-FSK, 38 kHz dev | 32 bit sync, fixed 13, CC2400 style CRC | CRC to identify (`CC2400_EN`) |
-| Redpine slow | 10 kbps 2-FSK, 38 kHz dev | 32 bit sync, length, CRC | expected to work |
-| RadioLink (all) | 38 kbps GFSK, 38 kHz dev | 32 bit sync ABCD / BADC / ABA5, length, CRC, whitening | expected to work (whitening done for HoTT) |
+| Corona V1/V2, Flydream V3 | 100 kbps 2-FSK, 48 to 51 kHz dev | 32 bit sync, length, CRC | works, bind up to 2483.6 MHz |
+| Ares | 50 kbps 2-FSK, 38 kHz dev | 32 bit sync 5A60, length, CRC | works |
+| Futaba SFHSS | 128 kbps 2-FSK, 38 kHz dev | 32 bit sync, fixed 13, CC2400 CRC | works (CRC measured, see below) |
+| Redpine slow | 10 kbps 2-FSK, 38 kHz dev | 32 bit sync, length, CRC | works |
+| RadioLink (all) | 38 kbps GFSK, 38 kHz dev | 32 bit sync ABCD / BADC / ABA5, length, CRC, whitening | works |
 | HoTT | 250 kbps MSK | 32 bit sync, fixed length, CRC, whitening, FEC | works |
-| Hitec | 250 kbps MSK (2/8 phase step), 24 byte preamble | 32 bit sync from the ID, length, CRC, whitening | MSK phase step to check |
-| Redpine fast | 250 kbps MSK | 32 bit sync, length, CRC | MSK, and channels up to 2502 MHz, above the CC2652 range (2500 MHz) |
-| Skyartec | 229 kbps MSK | 32 bit sync from the ID, length, CRC | MSK |
-| IKEA Ansluta | 250 kbps MSK | length, CRC, FEC | MSK, FEC |
-| FrSky L (LR12) | 125 kchip/s 2-FSK, no sync | raw 256 byte chip stream, 11 chips per bit | raw continuous TX of a precomputed stream |
+| Hitec | 250 kbps MSK (2/8 phase step), 24 byte preamble | 32 bit sync from the ID, length, CRC, whitening | works |
+| Redpine fast | 250 kbps MSK (1/8) | 32 bit sync, length, CRC | works, up to 2502.2 MHz (above TI's 2500 MHz spec, this sample) |
+| Skyartec | 229 kbps MSK (1/8) | 32 bit sync from the ID, length, CRC | works |
+| IKEA Ansluta | 250 kbps MSK (2/8) | length, CRC, FEC | works |
+| FrSky L (LR12) | 125 kchip/s 2-FSK, no sync | raw 256 byte chip stream, 11 chips per bit | not tested: TX only, fits a 32 bit sync + 252 byte packet |
 | XN297L / NRF250K emulations (Bumblebee, MT99xx, OMP, V911S, ESky150 v2...) | 250 kbps GFSK, 127 kHz dev | software (XN297 / NRF framing) | works (XN297 250 kbps tested) |
 
 Measured with HoTT:
@@ -157,12 +160,23 @@ Measured with HoTT:
   isolated bit errors are corrected, as on the CC2500. The packet doubles on
   air: 108 bytes for HoTT's 50, received as fixed length raw data.
 
-What remains risky:
+MSK with a partial phase step (`DEVIATN` M below 7: Hitec, IKEA 2/8, Redpine
+fast and Skyartec 1/8) works as 2-FSK too, with one deviation for both
+directions: the CC2500 wants more than true MSK (Hitec: 50 kHz 71%, 62.5 kHz
+99.5%, 75 to 160 kHz 100%), the CC2652 receiver less than about 0.4 x rate
+(Skyartec: 100 kHz 0%) with a 311 kHz filter. 0.32 x rate gives 100% both ways
+for all four.
 
-- MSK with a partial phase step (`DEVIATN` M below 7: Hitec, IKEA 2/8,
-  Redpine fast and Skyartec 1/8): the frequency peaks are higher than with
-  2-FSK, the net phase per symbol the same. Needs measuring.
-- Redpine fast hops up to 2502 MHz, above the CC2652R synthesizer range.
+Other findings:
+
+- The `CC2400_EN` CRC (SFHSS) is not documented: measured as CRC-16 0x8005
+  from 0 over all bytes but the last 2, XORed into it unprocessed.
+- FEC with a variable length (IKEA) works on the CC2500, unlike what its
+  datasheet says, and on the CC2652 (length decoded first).
+- Redpine fast hops up to 2502.2 MHz: this CC2652R sample works there (100%),
+  outside TI's 2360 to 2500 MHz specification. Not guaranteed.
+- Corona V2 freezes the CC2500 AGC: at bench signal levels (-18 dBm) the
+  CC2500 then receives nothing, from any transmitter. Not a CC2652 issue.
 
 ## What any candidate chip must show
 
@@ -177,8 +191,8 @@ Requirements that came out of these tests, to check on each alternative:
    and XN297 formats.
 5. A way to emulate the CC2500, A7105 and CYRF6936 PHYs, DSM's DSSS included:
    2-FSK and GFSK from 10 to 250 kbps, MSK, a 16 or 32 bit sync word after a
-   2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: FrSky
-   done, MSK and the A7105 / CYRF6936 PHYs open.
+   2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: the
+   CC2500 family done, the A7105 / CYRF6936 PHYs open.
 6. Documentation or vendor support good enough to tune the demodulator without
    reverse engineering.
 7. A per-module frequency trim, a few kHz steps over at least +-100 kHz.
