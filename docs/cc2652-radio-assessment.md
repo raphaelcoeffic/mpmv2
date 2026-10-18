@@ -7,7 +7,7 @@ Measured 2026-10-18: CC2652R1 LaunchPad (PCB antenna) next to an iRangeX IRX4
 Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
 -24 dBm. Test commands and per-test results: `Bench/README.md` in
 DIY-Multiprotocol-TX-Module (branch `bench-mode`). CC2652 code: `src/radio.c`
-(RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 framing), built
+(RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 framing), built
 with `-DBENCH=ON`.
 
 ## Summary
@@ -24,10 +24,13 @@ with `-DBENCH=ON`.
   MPM `option`. Only FrSky L (TX only, raw chip stream) is untested. FrSky
   itself runs ACCST and ACCESS on CC26xx chips in its receivers and transmitter
   modules (information from the project owner, not a bench result).
+- Works: the A7105 protocols tried, FlySky, AFHDS2A (FEC) and Hubsan: 100%
+  from the A7105, 99 to 100% to it (A7105 CRC errors at 500 kbps), with a
+  90 kHz trim on this board.
 - Mitigated in software: repeated address patterns. Degenerate addresses such
   as `5555555555` still fail.
-- Biggest unknowns: the A7105 and CYRF6936 families (FlySky, Hubsan, DSM), and
-  receiver sensitivity.
+- Biggest unknowns: the CYRF6936 family (DSM, Walkera Devo), and receiver
+  sensitivity.
 
 ## Measured status
 
@@ -47,7 +50,9 @@ with `-DBENCH=ON`.
 | CC2500 MSK with a partial phase step: Hitec, Redpine fast, Skyartec, IKEA | works | 100% both ways with 0.32 x rate deviation |
 | CC2500 2-FSK / GFSK: FrSky V8, Corona, Flydream, Ares, RadioLink, SFHSS, Redpine slow | works | 99.6 to 100% both ways |
 | CC2500 FrSky L (raw chip stream) | not tested | |
-| A7105, CYRF6936 protocols | not tested | |
+| A7105 FlySky, AFHDS2A (500 kbps, CRC, FEC), Hubsan (100 kbps) | works | 100% A7105 -> CC2652, 99 to 99.8% (500 kbps) and 100% (Hubsan) CC2652 -> A7105, with a 90 kHz trim |
+| Other A7105 protocols (Bugs, Height, Pelikan, Kyosho, WFLY2, Joysway) | not tested | same PHY family, 250 or 500 kbps |
+| CYRF6936 protocols | not tested | |
 | Sensitivity, range, blocking | not measured | no attenuator on the bench |
 
 ## Weaknesses, by impact
@@ -108,10 +113,8 @@ with `-DBENCH=ON`.
 
 ### 5. Not evaluated yet
 
-- Protocols: the rest of the CC2500 family (below), the A7105 (FlySky
-  AFHDS/AFHDS2A, Hubsan) and CYRF6936 (DSM) families haven't been run on the
-  CC2652. DSM uses DSSS codes, the most likely to be a problem for a GFSK
-  packet radio. The MPM bench already has A7105 presets for these tests.
+- Protocols: the CYRF6936 (DSM) family hasn't been run on the CC2652. DSM
+  uses DSSS codes, the most likely to be a problem for a GFSK packet radio.
 - RF: sensitivity, range and blocking are unmeasured. Frequency tolerance at 1
   Mbps: 100% at 250 kHz offset, 0% at 350 kHz (about 100 ppm at 2.44 GHz: fine
   for normal crystals, but a limit).
@@ -125,6 +128,8 @@ with `-DBENCH=ON`.
   (`option` = CC2500 `FSCTRL0`), so the CC2652 firmware needs a per-module
   frequency correction, settable the same way. The CC2652 RX (175 kHz filter
   for D8) takes the CC2500 without correction.
+- The A7105 needs it too: this one is about 90 kHz above the CC2652 (37 ppm).
+  Without trim the A7105 loses 25 to 45% at 500 kbps (FlySky, AFHDS2A).
 
 ## CC2500 protocol family
 
@@ -164,7 +169,7 @@ MSK with a partial phase step (`DEVIATN` M below 7: Hitec, IKEA 2/8, Redpine
 fast and Skyartec 1/8) works as 2-FSK too, with one deviation for both
 directions: the CC2500 wants more than true MSK (Hitec: 50 kHz 71%, 62.5 kHz
 99.5%, 75 to 160 kHz 100%), the CC2652 receiver less than about 0.4 x rate
-(Skyartec: 100 kHz 0%) with a 311 kHz filter. 0.32 x rate gives 100% both ways
+(Skyartec: 100 kHz 0%) with a 350 kHz filter. 0.32 x rate gives 100% both ways
 for all four.
 
 Other findings:
@@ -178,6 +183,32 @@ Other findings:
 - Corona V2 freezes the CC2500 AGC: at bench signal levels (-18 dBm) the
   CC2500 then receives nothing, from any transmitter. Not a CC2652 issue.
 
+## A7105 protocol family
+
+| Protocols | PHY (`DATA_RATE`, `CODE_I`) | Framing | CC2652 status |
+|---|---|---|---|
+| FlySky (AFHDS) | 500 kbps GFSK | ID sync, fixed 21, CRC | works |
+| AFHDS2A (+RX) | 500 kbps GFSK | ID sync, fixed 38, CRC, FEC | works |
+| Hubsan | 100 kbps GFSK | ID 55201041, fixed 16, no CRC | works |
+| Kyosho FHSS / Syncro, WFLY2, Joysway | 500 kbps | ID sync, CRC (Kyosho: FEC) | not tested, same PHY as FlySky |
+| Bugs, Height, Pelikan, Kyosho Hype | 250 kbps | ID sync, CRC (Height, Hype: FEC, Pelikan: no CRC) | not tested |
+
+Measured on raw captures of the A7105 (bit exact): preamble, the 4 byte ID
+(as given to `A7105_WriteID()`) as the sync word, the fixed length payload,
+MSB first, no whitening. CRC-16 CCITT (0x1021) from 0x1D0F over the payload.
+FEC: each nibble (high first) as a Hamming (7,4) code word, data bits first,
+14 bits per byte, padded to a byte at the end; the CC2652 decodes to the
+nearest code word (1 bit error corrected per word, as the A7105). 500 kbps /
+(`DATA_RATE` + 1), channels 2400 MHz + `PLL_I` x 500 kHz.
+
+The A7105 receives the CC2652 best with a 250 kHz deviation (`TX_II` 0x2B):
+FlySky without FEC 2.4% CRC errors at 186 kHz, 0.6% at 250 kHz, worse at 140
+and 300 kHz; the CC2652 receives the A7105 at all of them. The 0.2 to 1% left at
+500 kbps doesn't depend on the CC2652 power; without a second A7105 there is
+no reference to compare it to. At 2410 MHz (Wi-Fi channel 1) the A7105
+also lost about one packet per 100 ms, likely Wi-Fi beacons; the CC2652
+receiver did not.
+
 ## What any candidate chip must show
 
 Requirements that came out of these tests, to check on each alternative:
@@ -190,9 +221,9 @@ Requirements that came out of these tests, to check on each alternative:
 4. A raw mode without forced whitening or CRC, to emulate the CC2500, A7105
    and XN297 formats.
 5. A way to emulate the CC2500, A7105 and CYRF6936 PHYs, DSM's DSSS included:
-   2-FSK and GFSK from 10 to 250 kbps, MSK, a 16 or 32 bit sync word after a
+   2-FSK and GFSK from 10 to 500 kbps, MSK, a 16 or 32 bit sync word after a
    2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: the
-   CC2500 family done, the A7105 / CYRF6936 PHYs open.
+   CC2500 and A7105 families done, the CYRF6936 PHYs open.
 6. Documentation or vendor support good enough to tune the demodulator without
    reverse engineering.
 7. A per-module frequency trim, a few kHz steps over at least +-100 kHz.

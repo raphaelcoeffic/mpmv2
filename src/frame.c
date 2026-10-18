@@ -9,6 +9,12 @@
 #define NRF_CRC8_INIT 0xFF
 #define XN297_CRC_INIT 0xB5D2
 #define CC2500_CRC_INIT 0xFFFF
+#define A7105_CRC_INIT 0x1D0F  // CRC-16 CCITT, over the payload (measured)
+
+// A7105 FEC (measured): each nibble, high one first, as a 7 bit Hamming code
+// word, its data bits first
+static const uint8_t _a7105_fec[16] = {0x00, 0x0B, 0x16, 0x1D, 0x27, 0x2C, 0x31, 0x3A,
+                                       0x45, 0x4E, 0x53, 0x58, 0x62, 0x69, 0x74, 0x7F};
 
 // CC2500: last preamble bytes before the sync word (at least 2 are sent)
 #define CC2500_PREAMBLE 0xAA
@@ -158,9 +164,16 @@ static uint16_t _xn297_xorout_for(const frame_t* f, uint8_t len)
 // CC2500 FEC: data bytes encoded for n bytes of payload and CRC
 static uint8_t _fec_data_len(uint8_t n) { return n + (n & 1 ? 1 : 2); }
 
+// A7105: bytes after the ID for n bytes of payload and CRC
+static uint8_t _a7105_air_len(const frame_t* f, uint8_t n)
+{
+  return f->fec ? (n * 14 + 7) / 8 : n;
+}
+
 // Total frame length for a payload of len bytes
 static uint8_t _frame_len(const frame_t* f, uint8_t len)
 {
+  if (f->type == FRAME_A7105) return f->hdr_len + _a7105_air_len(f, len + f->crc_len);
   if (f->type == FRAME_CC2500 && f->fec) return f->hdr_len + 2 * _fec_data_len(len + f->crc_len);
   if (f->type == FRAME_XN297 && f->enhanced)
     return f->hdr_len + len + (f->crc_len ? 4 : 2);  // 10 bit pcf, CRC shifted by 2 bits
@@ -175,6 +188,7 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
   if (f->type == FRAME_NRF) return len <= FRAME_NRF_PAYLOAD_MAX;
   if (f->type == FRAME_CC2500 && f->fec)
     return _fec_data_len(len + f->crc_len) <= FRAME_FEC_DATA_MAX;
+  if (f->type == FRAME_A7105) return _frame_len(f, len) <= FRAME_BUF_LEN - FRAME_PREFIX_MAX;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -378,6 +392,32 @@ static uint8_t _encode_cc2500(const frame_t* f, const uint8_t* payload, uint8_t 
   return f->hdr_len + n;
 }
 
+static uint8_t _encode_a7105(const frame_t* f, const uint8_t* payload, uint8_t len,
+                             uint8_t* buf)
+{
+  uint8_t body[FRAME_BUF_LEN];
+  uint8_t n = len;
+  memcpy(body, payload, len);
+  if (f->crc_len) {
+    uint16_t crc = _crc16_buf(A7105_CRC_INIT, payload, len);
+    body[n++] = crc >> 8;
+    body[n++] = crc & 0xFF;
+  }
+
+  uint8_t* air = buf + f->hdr_len;
+  if (!f->fec) {
+    memcpy(air, body, n);
+    return f->hdr_len + n;
+  }
+  uint16_t pos = 0;
+  for (uint8_t i = 0; i < n; i++) {
+    _put_bits(air, &pos, _a7105_fec[body[i] >> 4], 7);
+    _put_bits(air, &pos, _a7105_fec[body[i] & 0x0F], 7);
+  }
+  while (pos & 7) _put_bits(air, &pos, 0, 1);
+  return f->hdr_len + pos / 8;
+}
+
 static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
   memcpy(buf, f->known, f->hdr_len);
@@ -390,6 +430,8 @@ static uint8_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, ui
       return _encode_xn297(f, payload, len, buf);
     case FRAME_CC2500:
       return _encode_cc2500(f, payload, len, buf);
+    case FRAME_A7105:
+      return _encode_a7105(f, payload, len, buf);
     default:
       memcpy(buf + f->hdr_len, payload, len);
       return f->hdr_len + len;
@@ -529,6 +571,35 @@ static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint8
   return b[size] == crc >> 8 && b[size + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
 }
 
+static frame_result_t _decode_a7105(const frame_t* f, const uint8_t* buf, uint8_t len,
+                                    uint8_t* payload)
+{
+  const uint8_t* air = buf + f->hdr_len;
+  uint8_t n = len + f->crc_len;
+  uint8_t body[FRAME_BUF_LEN];
+  if (f->fec) {
+    // Nearest code word: corrects 1 bit error per nibble
+    for (uint16_t i = 0; i < 2 * n; i++) {
+      uint8_t w = _get_bits(air, i * 7, 7), best = 0, best_d = 8;
+      for (uint8_t v = 0; v < 16; v++) {
+        uint8_t d = __builtin_popcount(w ^ _a7105_fec[v]);
+        if (d < best_d) {
+          best_d = d;
+          best = v;
+        }
+      }
+      body[i / 2] = i & 1 ? body[i / 2] | best : best << 4;
+    }
+  } else {
+    memcpy(body, air, n);
+  }
+
+  memcpy(payload, body, len);
+  if (!f->crc_len) return FRAME_OK;
+  uint16_t crc = _crc16_buf(A7105_CRC_INIT, body, len);
+  return body[len] == crc >> 8 && body[len + 1] == (crc & 0xFF) ? FRAME_OK : FRAME_BAD;
+}
+
 //
 // API
 //
@@ -646,6 +717,15 @@ bool frame_init(frame_t* f)
       f->sync_len = 4;
       break;
 
+    case FRAME_A7105:
+      if ((f->addr_len != 2 && f->addr_len != 4) || (f->crc_len && f->crc_len != 2) ||
+          (f->fec && f->prefix_len))
+        return false;
+      memcpy(f->known, f->addr, f->addr_len);
+      n = f->addr_len;
+      f->sync_len = n;
+      break;
+
     default:
       return false;
   }
@@ -718,6 +798,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     if (avail < _frame_len(f, len)) return FRAME_SHORT;
     if (f->type == FRAME_NRF) res = _decode_nrf(f, buf, len, payload);
     else if (f->type == FRAME_XN297) res = _decode_xn297(f, buf, len, payload);
+    else if (f->type == FRAME_A7105) res = _decode_a7105(f, buf, len, payload);
     else {
       memcpy(payload, buf + f->hdr_len, len);
       res = FRAME_OK;

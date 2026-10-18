@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 // On-air packet formats of the MULTI-Module 2.4 GHz chips (NRF24L01, XN297,
-// CC2500), emulated on top of the raw radio (preamble + sync word + fixed
-// length data, see radio.h).
+// CC2500, A7105), emulated on top of the raw radio (preamble + sync word +
+// fixed length data, see radio.h).
 //
 // A frame is: header (bytes known in advance: XN297 preamble, address, CC2500
 // last 2 preamble bytes and sync word) | encoded payload | CRC. TX sends the
@@ -26,6 +26,7 @@ typedef enum {
   FRAME_NRF,    // NRF24L01 ShockBurst, or Enhanced ShockBurst (esb)
   FRAME_XN297,  // XN297, standard or enhanced mode
   FRAME_CC2500, // CC2500 packet: preamble, sync word, payload, CRC
+  FRAME_A7105,  // A7105 packet: preamble, ID, fixed length payload, CRC, FEC
 } frame_type_t;
 
 typedef struct {
@@ -33,9 +34,10 @@ typedef struct {
   // Address as given to the NRF24L01 TX_ADDR register or XN297_SetTXAddr()
   // (sent last byte first), 3 to 5 bytes. Raw: the sync word, MSB first.
   // CC2500: SYNC1, SYNC0, twice (4 bytes) for MDMCFG2.SYNC_MODE 3 or 7.
+  // A7105: the ID, 2 or 4 bytes (CODE I IDL), as given to A7105_WriteID().
   uint8_t addr[FRAME_ADDR_MAX];
   uint8_t addr_len;
-  uint8_t crc_len;     // NRF: 0 to 2, XN297 and CC2500: 0 or 2
+  uint8_t crc_len;     // NRF: 0 to 2, XN297, CC2500 and A7105: 0 or 2
   // NRF: 9 bit packet control field, sent by the nRF24L01+ when EN_AA or
   // dynamic payload length (DYNPD) is enabled
   bool esb;
@@ -47,7 +49,7 @@ typedef struct {
   // payload byte is the length of the rest (CRC excluded)
   bool var_len;
   bool whitening;  // CC2500 PKTCTRL0.WHITE_DATA: PN9 over the payload and CRC
-  bool fec;        // CC2500 MDMCFG1.FEC_EN (no prefix)
+  bool fec;        // CC2500 MDMCFG1.FEC_EN, A7105 CODE I FECS (no prefix)
   bool cc2400_crc; // CC2500 PKTCTRL0.CC2400_EN: CC2400 compatible CRC
   // CC2500 MSK (MDMCFG2.MOD_FORMAT 7): received as 2-FSK with a 0.5 modulation
   // index, all bits inverted (preamble and sync word included)
