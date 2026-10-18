@@ -20,7 +20,7 @@
 #define FRAME_PAYLOAD_MAX 200
 #define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
 #define FRAME_FEC_DATA_MAX 64     // CC2500 FEC: payload + CRC + padding, 2 air bytes each
-#define FRAME_HDR_MAX 25  // CYRF6936: preamble, SOP code twice
+#define FRAME_HDR_MAX 66  // FrSky L: 6 header bytes, 11 chips per bit
 #define FRAME_AIR_MAX 1100  // longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR
 
 typedef enum {
@@ -32,6 +32,7 @@ typedef enum {
   FRAME_CYRF,   // CYRF6936 8DR or SDR packet, 64 chip codes: SOP, length, payload, CRC
   FRAME_HS6200, // HS6200 (E01X): address, guard bytes, packet control field, payload, CRC
   FRAME_RF2500, // RF2500 (E129, E010R5): address, sync, payload and CRC 4x coded
+  FRAME_FRSKYL, // FrSky L: header and payload, 11 chips per bit, no sync word
 } frame_type_t;
 
 typedef struct {

@@ -114,6 +114,17 @@ static const uint8_t _rf2500_scramble[] = {0xD0, 0x9E, 0x53, 0x33, 0xD8, 0xBA, 0
 #define RF2500_XOROUT_16 0xAEE4
 #define RF2500_XOROUT_19 0xE7C5
 
+// FrSky L (MULTI-Module FrSkyL_cc2500.ino): the CC2500 sends a chip stream, no
+// sync word or CRC: 6 header bytes 0xAA, the payload, then 3 bytes 0x55 not
+// coded. Each bit, LSB first, is sent as 11 chips (MSB first): 0x0ED for 0,
+// its complement 0x712 for 1. The packet has its own CRC (FrSkyX_crc()).
+#define FRSKYL_CHIPS 11
+#define FRSKYL_BIT0 0x0ED
+#define FRSKYL_HDR 0xAA
+#define FRSKYL_HDR_LEN 6
+#define FRSKYL_TRAILER 0x55
+#define FRSKYL_TRAILER_LEN 3
+
 static uint8_t _bit_reverse(uint8_t b)
 {
 #if defined(__ARM_ARCH) && !defined(__aarch64__)
@@ -330,6 +341,7 @@ static uint16_t _frame_len(const frame_t* f, uint8_t len)
   if ((f->type == FRAME_NRF && f->esb) || f->type == FRAME_HS6200)
     return f->hdr_len + len + f->crc_len + 2;  // 9 bit pcf, CRC shifted by 1 bit
   if (f->type == FRAME_RF2500) return f->hdr_len + 4 * (len + f->crc_len);
+  if (f->type == FRAME_FRSKYL) return f->hdr_len + len * FRSKYL_CHIPS + FRSKYL_TRAILER_LEN;
   return f->hdr_len + len + f->crc_len;
 }
 
@@ -344,6 +356,7 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
   if (f->type == FRAME_HS6200)
     return len <= (f->scramble ? sizeof(_hs6200_scramble) : FRAME_NRF_PAYLOAD_MAX);
   if (f->type == FRAME_RF2500) return !f->scramble || len == 16 || len == 19;
+  if (f->type == FRAME_FRSKYL) return _frame_len(f, len) <= FRAME_AIR_MAX;
   if (f->type != FRAME_XN297) return true;
   // Scramble and xorout tables
   uint8_t extra = f->enhanced ? 2 : 0;
@@ -607,6 +620,25 @@ static uint16_t _encode_rf2500(const frame_t* f, const uint8_t* payload, uint8_t
   return pos / 8;
 }
 
+// n bytes, 11 chips per bit: 11 air bytes per byte
+static void _frskyl_code(const uint8_t* data, uint8_t n, uint8_t* air)
+{
+  uint16_t pos = 0;
+  for (uint8_t i = 0; i < n; i++)
+    for (uint8_t b = 0; b < 8; b++)
+      _put_bits(air, &pos, (data[i] >> b) & 1 ? ~FRSKYL_BIT0 : FRSKYL_BIT0, FRSKYL_CHIPS);
+}
+
+static uint16_t _encode_frskyl(const frame_t* f, const uint8_t* payload, uint8_t len,
+                               uint8_t* buf)
+{
+  uint16_t n = f->hdr_len;
+  _frskyl_code(payload, len, buf + n);
+  n += len * FRSKYL_CHIPS;
+  memset(buf + n, FRSKYL_TRAILER, FRSKYL_TRAILER_LEN);
+  return n + FRSKYL_TRAILER_LEN;
+}
+
 static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* buf)
 {
   uint8_t body[FRAME_BUF_LEN];
@@ -655,6 +687,8 @@ static uint16_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, u
       return _encode_esb(f, payload, len, buf);
     case FRAME_RF2500:
       return _encode_rf2500(f, payload, len, buf);
+    case FRAME_FRSKYL:
+      return _encode_frskyl(f, payload, len, buf);
     default:
       memcpy(buf + f->hdr_len, payload, len);
       return f->hdr_len + len;
@@ -840,6 +874,20 @@ static frame_result_t _decode_rf2500(const frame_t* f, const uint8_t* buf, uint8
   if (!f->crc_len) return FRAME_OK;
   _rf2500_body(f, payload, len, check);
   return memcmp(check + len, body + len, 2) ? FRAME_BAD : FRAME_OK;
+}
+
+// Nearest code per bit: up to 5 chip errors corrected
+static frame_result_t _decode_frskyl(const frame_t* f, const uint8_t* buf, uint8_t len,
+                                     uint8_t* payload)
+{
+  uint16_t pos = 8 * f->hdr_len;
+  for (uint8_t i = 0; i < len; i++) {
+    payload[i] = 0;
+    for (uint8_t b = 0; b < 8; b++, pos += FRSKYL_CHIPS)
+      if (__builtin_popcount(_get_bits(buf, pos, FRSKYL_CHIPS) ^ FRSKYL_BIT0) > FRSKYL_CHIPS / 2)
+        payload[i] |= 1 << b;
+  }
+  return FRAME_OK;
 }
 
 // len: maximum payload length with a length field
@@ -1054,6 +1102,16 @@ bool frame_init(frame_t* f)
       f->sync_len = 4;
       break;
 
+    case FRAME_FRSKYL: {
+      if (f->crc_len) return false;
+      const uint8_t hdr[FRSKYL_HDR_LEN] = {FRSKYL_HDR, FRSKYL_HDR, FRSKYL_HDR,
+                                           FRSKYL_HDR, FRSKYL_HDR, FRSKYL_HDR};
+      _frskyl_code(hdr, FRSKYL_HDR_LEN, f->known);
+      n = FRSKYL_HDR_LEN * FRSKYL_CHIPS;
+      f->sync_len = 4;
+      break;
+    }
+
     default:
       return false;
   }
@@ -1067,6 +1125,7 @@ bool frame_init(frame_t* f)
     _encode(f, f->prefix, f->prefix_len, buf);
     uint16_t known = f->prefix_len;
     if (f->type == FRAME_CYRF) known = (CYRF_GAP_CHIPS + _cyrf_chips(f, f->prefix_len)) / 8;
+    if (f->type == FRAME_FRSKYL) known = f->prefix_len * FRSKYL_CHIPS;
     if (n + known > sizeof(f->known)) known = sizeof(f->known) - n;
     memcpy(f->known + n, buf + n, known);
     n += known;
@@ -1164,6 +1223,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     else if (f->type == FRAME_XN297) res = _decode_xn297(f, buf, len, payload);
     else if (f->type == FRAME_A7105) res = _decode_a7105(f, buf, len, payload);
     else if (f->type == FRAME_RF2500) res = _decode_rf2500(f, buf, len, payload);
+    else if (f->type == FRAME_FRSKYL) res = _decode_frskyl(f, buf, len, payload);
     else {
       memcpy(payload, buf + f->hdr_len, len);
       res = FRAME_OK;

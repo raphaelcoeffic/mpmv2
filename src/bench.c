@@ -23,7 +23,8 @@
 //                                kyosho kyoshohype wfly2 joysway, CYRF6936: dsm (data
 //                                packets), dsmbind (bind packets: SDR), devo
 //                                (32 chip SOP and data codes), gfsk1m (GFSK mode:
-//                                PHY only, for hs6200 and rf2500)
+//                                PHY only, for hs6200 and rf2500), frskyl (FrSky L
+//                                chip stream, prefix 4e: its first payload byte)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -143,8 +144,8 @@ static frame_t _ack_frame;
 static uint32_t _stat_acked;
 static uint32_t _stat_retries;
 
-static const char* const _frame_names[] = {"raw",   "nrf",  "xn297",  "cc2500",
-                                           "a7105", "cyrf", "hs6200", "rf2500"};
+static const char* const _frame_names[] = {"raw",  "nrf",    "xn297",  "cc2500", "a7105",
+                                           "cyrf", "hs6200", "rf2500", "frskyl"};
 
 //
 // Output
@@ -518,6 +519,9 @@ static const preset_t _presets[] = {
     // CYRF6936 GFSK mode (E01X, E129, E010R5): 1 Mbps, CHANNEL n at 2400 + n
     // MHz (measured, TX_OFFSET 0). The 0xAA preamble byte is in the frame
     {"gfsk1m", 1000000, 250000, 97, false, NRF_CH_BASE, NRF_CH_SPACING, 0, 0, 1},
+    // FrSky L: 125 kbaud 2-FSK, 47.6 kHz deviation, no sync word: the frame is a
+    // chip stream (frskyl framing), FrSky channels
+    {"frskyl", 124969, 47500, 88, true, FRSKY_CH_BASE, FRSKY_CH_SPACING},
 };
 
 static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
@@ -573,6 +577,17 @@ static void _set_cyrf_frame(const uint8_t* sop, const uint8_t* data_code, uint16
   _ack_on = false;
 }
 
+// FrSky L packets start with 0x4E: a known prefix for the RX sync word
+static void _set_frskyl_frame()
+{
+  _frame.type = FRAME_FRSKYL;
+  _frame.crc_len = 0;
+  _frame.prefix[0] = 0x4E;
+  _frame.prefix_len = 1;
+  _frame_ok = frame_init(&_frame);
+  _ack_on = false;
+}
+
 static bool _set_frequency(uint32_t khz);
 
 static uint32_t _ch_khz(uint32_t ch)
@@ -603,7 +618,9 @@ static bool _load_preset(const char* name)
   _ch_base_hz = p->ch_base_hz;
   _ch_spacing_hz = p->ch_spacing_hz;
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
-  if (p->cc2500 & CC_CYRF) {
+  if (!strcmp(name, "frskyl")) {
+    _set_frskyl_frame();
+  } else if (p->cc2500 & CC_CYRF) {
     if (p->cc2500 & CC_FEC) _set_cyrf_frame(NULL, DSM_BIND_CODE, 0, p->cc2500, false);
     else if (p->cc2500 & CC_DATA32)
       _set_cyrf_frame(_devo_sop_code, _cyrf_default_code, 0, p->cc2500, false);

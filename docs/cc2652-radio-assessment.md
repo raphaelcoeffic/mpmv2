@@ -8,7 +8,7 @@ Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
 -24 dBm. Test commands and per-test results: `Bench/README.md` in
 DIY-Multiprotocol-TX-Module (branch `bench-mode`). CC2652 code: `src/radio.c`
 (RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
-CYRF6936 / HS6200 / RF2500 framing), built with `-DBENCH=ON`.
+CYRF6936 / HS6200 / RF2500 / FrSky L framing), built with `-DBENCH=ON`.
 
 ## Summary
 
@@ -19,9 +19,9 @@ CYRF6936 / HS6200 / RF2500 framing), built with `-DBENCH=ON`.
 - Hard limit: no 2 Mbps reception. CFlie models set to 2 Mbps would not work.
 - Works: every MPM CC2500 protocol tried, both directions: FrSky D8/V8/D16
   (FCC and LBT), HoTT, Hitec, Redpine, Skyartec, Corona, Flydream, Ares,
-  RadioLink, IKEA, SFHSS. That covers 2-FSK, GFSK and MSK from 10 to 250 kbps,
-  whitening, FEC and the CC2400 CRC, with a per-board frequency trim like the
-  MPM `option`. Only FrSky L (TX only, raw chip stream) is untested. FrSky
+  RadioLink, IKEA, SFHSS, FrSky L (a 125 kbaud chip stream). That covers
+  2-FSK, GFSK and MSK from 10 to 250 kbps, whitening, FEC and the CC2400 CRC,
+  with a per-board frequency trim like the MPM `option`. FrSky
   itself runs ACCST and ACCESS on CC26xx chips in its receivers and transmitter
   modules (information from the project owner, not a bench result).
 - Works: every MPM A7105 protocol: FlySky, AFHDS2A (FEC), Hubsan, Bugs,
@@ -59,7 +59,7 @@ CYRF6936 / HS6200 / RF2500 framing), built with `-DBENCH=ON`.
 | CC2500 HoTT (250 kbps MSK, whitening, FEC), data and telemetry formats | works | 100% both ways, no trim needed |
 | CC2500 MSK with a partial phase step: Hitec, Redpine fast, Skyartec, IKEA | works | 100% both ways with 0.32 x rate deviation |
 | CC2500 2-FSK / GFSK: FrSky V8, Corona, Flydream, Ares, RadioLink, SFHSS, Redpine slow | works | 99.6 to 100% both ways |
-| CC2500 FrSky L (raw chip stream) | not tested | |
+| CC2500 FrSky L (125 kbaud 2-FSK chip stream, 256 bytes) | works | 100% CC2500 -> CC2652; CC2652 -> CC2500 bit exact in 60 byte chunks (the CC2500 can't receive the whole stream) |
 | A7105 FlySky, AFHDS2A (500 kbps, CRC, FEC), Hubsan (100 kbps) | works | 100% A7105 -> CC2652, 99 to 99.8% (500 kbps) and 100% (Hubsan) CC2652 -> A7105, with a 90 kHz trim |
 | Other A7105 protocols (Bugs, Height, Pelikan, Kyosho, Kyosho Hype, WFLY2, Joysway) | works | 100% A7105 -> CC2652, 88 to 100% CC2652 -> A7105 (see A7105 section) |
 | CYRF6936 DSM data packets (8DR, SOP, length, CRC), 10 and 16 bytes, 4 channels | works | 100% both ways |
@@ -128,7 +128,8 @@ CYRF6936 / HS6200 / RF2500 framing), built with `-DBENCH=ON`.
 
 ### 5. Not evaluated yet
 
-- Protocols: only FrSky L (CC2500, TX only, raw chip stream) is left.
+- Protocols: none left, every MPM protocol of the four chips has been run
+  (CFlie at 2 Mbps excepted, weakness 1).
 - RF: sensitivity, range and blocking are unmeasured. The CC2652 receives the
   CYRF6936 chips as plain 1 Mbps GFSK bits and correlates the codes in
   software: the CYRF6936 DSSS processing gain is only partly kept (up to 20
@@ -169,7 +170,7 @@ Every MPM CC2500 protocol decoded from its registers (26 MHz crystal):
 | Redpine fast | 250 kbps MSK (1/8) | 32 bit sync, length, CRC | works, up to 2502.2 MHz (above TI's 2500 MHz spec, this sample) |
 | Skyartec | 229 kbps MSK (1/8) | 32 bit sync from the ID, length, CRC | works |
 | IKEA Ansluta | 250 kbps MSK (2/8) | length, CRC, FEC | works |
-| FrSky L (LR12) | 125 kchip/s 2-FSK, no sync | raw 256 byte chip stream, 11 chips per bit | not tested: TX only, fits a 32 bit sync + 252 byte packet |
+| FrSky L (LR12) | 125 kchip/s 2-FSK, no sync | raw 256 byte chip stream, 11 chips per bit | works |
 | XN297L / NRF250K emulations (Bumblebee, MT99xx, OMP, V911S, ESky150 v2...) | 250 kbps GFSK, 127 kHz dev | software (XN297 / NRF framing) | works (XN297 250 kbps tested) |
 
 Measured with HoTT:
@@ -198,6 +199,16 @@ Other findings:
   datasheet says, and on the CC2652 (length decoded first).
 - Redpine fast hops up to 2502.2 MHz: this CC2652R sample works there (100%),
   outside TI's 2360 to 2500 MHz specification. Not guaranteed.
+- FrSky L sends a 256 byte chip stream with no sync word: 6 header bytes 0xAA
+  and the packet, each bit (LSB first) as 11 chips (`0x0ED` / `0x712`), then
+  `55 55 55`, at 125 kbaud 2-FSK (47.6 kHz deviation). The CC2652 `frskyl`
+  framing sends it bit exact (`FrSkyL_encode_packet()`); for RX it syncs on
+  the header end and the constant first byte (0x4E) and decodes each bit to
+  the nearest code. The CC2500 sends no preamble before it (none found); the
+  CC2652 sends 4 bytes.
+- While receiving FrSky L on one channel, the CC2652 also got the packets of
+  the channel 48 MHz higher or lower (its crystal frequency), about 80 dB
+  weaker. A spurious response to keep in mind for blocking tests.
 - Corona V2 freezes the CC2500 AGC: at bench signal levels (-18 dBm) the
   CC2500 then receives nothing, from any transmitter. Not a CC2652 issue.
 
@@ -375,7 +386,7 @@ Requirements that came out of these tests, to check on each alternative:
 5. A way to emulate the CC2500, A7105 and CYRF6936 PHYs, DSM's DSSS included:
    2-FSK and GFSK from 10 kbps to 1 Mbps, MSK, a 16 or 32 bit sync word after
    a 2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: the
-   CC2500 (but FrSky L), A7105 and CYRF6936 families done.
+   CC2500, A7105 and CYRF6936 families done.
 6. Raw packets of at least 1029 bytes at 1 Mbps (DSM bind: 128 SDR bits of 64
    chips), or a streaming RX/TX mode, and an alternative RX sync word (or a
    sync word placed anywhere in the known bits) for the DSM bind packets.
