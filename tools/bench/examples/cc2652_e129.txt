@@ -1,0 +1,8 @@
+# CC2652 (mpm-v2 bench) receiving the MPM E129 protocol (bind packets:
+# "proto 83 0" on the MPM, C186: "proto 83 1" and "rx 19"): CYRF6936 GFSK
+# mode, RF2500 framing, scrambled, bind address, bind channel 45. "rx 16".
+# E010R5: "rf2500 0e5496ee 0", ch 48 (bind: 48, 56, 64, 72), "proto 81", "rx 14"
+preset gfsk1m
+rf2500 e232e0c8 1
+trim 0
+ch 45

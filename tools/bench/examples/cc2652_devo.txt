@@ -1,0 +1,7 @@
+# CC2652 (mpm-v2 bench) counterpart of devo.txt: 32 chip SOP and data codes,
+# length, CRC seed 0. Other codes, seeds or chip lengths with "cyrf", e.g. WFLY
+# (64 chip SOP): cyrf <8 byte SOP> 6fbe3201dbf12b01e35cfa029793f902 <seed> 1 1 0 32
+# "rx 16"
+preset devo
+trim 0
+ch 30

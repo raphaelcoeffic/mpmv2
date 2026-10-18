@@ -5,8 +5,9 @@ measured over the air against a 4-in-1 module, as input for the chip choice.
 
 Measured 2026-10-18: CC2652R1 LaunchPad (PCB antenna) next to an iRangeX IRX4
 Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
--24 dBm. Test commands and per-test results: `Bench/README.md` in
-DIY-Multiprotocol-TX-Module (branch `bench-mode`). CC2652 code: `src/radio.c`
+-24 dBm. Test rig: [bench.md](bench.md), per-test results:
+[interop-results.md](interop-results.md), status and next steps:
+[status.md](status.md). CC2652 code: `src/radio.c`
 (RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
 CYRF6936 / HS6200 / RF2500 / FrSky L framing), built with `-DBENCH=ON`.
 
@@ -362,17 +363,19 @@ payload. Two MPM bugs showed up:
   yet: it holds stack contents. `crc16_update()` also mixes all 8 bits of it
   into the CRC, not one. Each MPM CRC was explained by exactly one value of
   that byte, and the value changed from packet to packet. The CRC was right
-  for 3% of the E012 bind packets, 100% of the E015 bind packets (by chance)
-  and 0% of the E015 data packets. Either the models don't check it or E01X
+  for 3 to 4% of the E012 bind packets, 95 to 100% of the E015 bind packets
+  (by chance) and 0% of the E015 data packets. Either the models don't check it or E01X
   doesn't work. The CC2652 sends the CRC as intended (`msg[pos]`). Without an
   E01X model nobody can tell which one it accepts. The MPM fix,
-  `crc16_update(msg[pos], 1)`, is documented in the bench README; it is not
-  applied until someone tests it with a model.
+  `crc16_update(msg[pos], 1)`, is documented in
+  [interop-results.md](interop-results.md); it is not applied until someone
+  tests it with a model.
 - E010R5: the callback changes the channel right after
   `RF2500_SendPayload()`, while the CYRF6936 still sends the last bytes
   (`CYRF_GFSK1M_SendPayload()` returns when its FIFO is filled). The last
   packet before each hop, 1 in 6, arrived corrupted. Fixed in the MPM (the
-  hop waits for the end of the packet): 100%. The CC2652 `radio_send()` waits
+  hop waits for the end of the packet,
+  [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197)): 100%. The CC2652 `radio_send()` waits
   for the end of the packet anyway.
 
 ## What any candidate chip must show
@@ -396,3 +399,41 @@ Requirements that came out of these tests, to check on each alternative:
 7. Documentation or vendor support good enough to tune the demodulator without
    reverse engineering.
 8. A per-module frequency trim, a few kHz steps over at least +-100 kHz.
+
+## Next candidate: CC2745R10
+
+Since every protocol but one works on the CC2652, a newer chip of the same
+vendor is the natural next step: the CC2745R10-Q1 (LaunchPad
+LP-EM-CC2745R10-Q1). From its datasheet (SWRS304D) and product page, not
+measured:
+
+- Arm Cortex-M33 at 96 MHz, 1 MB flash, 162 KB SRAM. Up to +10 dBm (R
+  variant); the P variant has a +20 dBm PA, which an MPM needs anyway.
+  2360 to 2500 MHz.
+- Bluetooth LE 1M, 2M and Coded PHYs, with -93 dBm sensitivity at 2 Mbps (LE
+  2M): the demodulator does run at 2 Mbps. That is the CC2652's one blocking
+  gap (weakness 1), if 2 Mbps is usable outside the BLE packet format.
+- A new radio core (LRF): a "software-defined digital radio" with a
+  command-based API, whose modem "is not programmable by customers but is
+  instead loaded with precompiled images" from the SimpleLink Low Power F3
+  SDK. The datasheet only describes BLE. The LaunchPad page also lists 2.4 GHz
+  proprietary RF, through the SDK's radio driver (RCL).
+
+What carries over: `frame.c`, `bench.c` and the whole rig are chip-agnostic.
+The framings are software over a raw "preamble + sync word + fixed length"
+radio. Only `radio.c` (the RF core commands, the sync threshold register, the
+CPE patch) would have to be rewritten for the LRF. The rig's suites would then
+give the same interoperability tables for the new chip.
+
+What to check first, in this order:
+
+1. A raw proprietary mode at 2 Mbps in RX: GFSK with a free 32 bit sync word
+   and no BLE access address, whitening or length field forced. This decides
+   CFlie.
+2. Free symbol rate and deviation from 10 kbps to 1 Mbps, 2-FSK and GFSK
+   (the CC2500, A7105 and CYRF6936 PHYs), and frequencies up to 2502 MHz.
+3. Packets above 1 KB or a streaming mode (DSM bind), and an alternative RX
+   sync word.
+4. Control over the sync correlation threshold: the CC2652 needed it for
+   repeated addresses and DSM bind. Closed modem images may hide it.
+5. TX to RX turnaround for ESB acks, and the channel change time.

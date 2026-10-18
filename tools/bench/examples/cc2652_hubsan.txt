@@ -1,0 +1,5 @@
+# CC2652 (mpm-v2 bench) counterpart of hubsan.txt: 100 kbps, ID 55201041, no CRC.
+# "rx 16"
+preset hubsan
+trim 90
+ch 20

@@ -1,0 +1,6 @@
+# CC2652 (mpm-v2 bench) counterpart of hott.txt: MSK as 2-FSK with inverted bits,
+# whitening and FEC in software. "rx 50". Telemetry format:
+# cc2500 2c6e2c6e 1 0 1 1 1, "rx 22"
+preset hott
+trim -35
+ch 0

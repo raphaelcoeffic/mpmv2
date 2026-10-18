@@ -1,0 +1,4 @@
+# A7105 with the Hubsan radio configuration and calibration: 100 kbps, ID
+# 55201041, no CRC, FIFO length 16 bytes. "rx 16"
+preset hubsan
+ch 20

@@ -1,0 +1,7 @@
+# CC2500 with the RadioLink registers (RLINK_init_values): 38 kbps GFSK, sync
+# abcdabcd (DumboRC: w 0x04 badc, RC4G: w 0x05 0xa5), length, CRC, whitening.
+# CC2652: preset radiolink (cc2500 badcbadc 1 1 1 / aba5aba5 1 1 1)
+preset frskyd
+w 0x00 5b065c07abcd4004 45000006005c6276 7a7f1323f8440730 18166c434091876b f85610a90a0011
+w 0x3e ff
+ch 0

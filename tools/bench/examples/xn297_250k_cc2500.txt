@@ -1,0 +1,4 @@
+# XN297L emulation at 250kbps, implemented on the CC2500.
+xn 1 1 1
+xaddr 6545a5e7c3
+ch 40

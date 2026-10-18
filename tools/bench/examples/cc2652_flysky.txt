@@ -1,0 +1,5 @@
+# CC2652 (mpm-v2 bench) counterpart of flysky_rx.txt: A7105 ID sync word, CRC in
+# software. "rx 21". trim: this A7105 is about 90 kHz above the CC2652
+preset flysky
+trim 90
+ch 20

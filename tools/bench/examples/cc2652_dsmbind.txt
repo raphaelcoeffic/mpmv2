@@ -1,0 +1,5 @@
+# CC2652 (mpm-v2 bench) counterpart of dsmbind.txt: DSM bind packets, 16 bytes
+# (1029 bytes on air). "rx 16"
+preset dsmbind
+trim 0
+ch 30

@@ -1,0 +1,8 @@
+# CC2500 with the Corona V1 registers (CORONA_init_values): 100 kbps 2-FSK,
+# length, CRC. V2: w 0x0e 8000, w 0x15 0x50 (and AGC 0x1b-0x1d: 67 fb dc, which
+# freezes the gain: lower the CC2652 power on the bench). Flydream V3: w 0x15
+# 0x50. CC2652: preset corona / coronav2 / fdv3
+preset frskyd
+w 0x00 292e0607d391ff04 0500d106005c4ec4 5bf80323f8470730 18166c434091876b f85610a90a001141 00597f3f81350b
+w 0x3e ff
+ch 0

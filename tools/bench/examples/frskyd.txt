@@ -1,0 +1,5 @@
+# CC2500 with the FrSky D radio configuration (GFSK ~250kbps, sync word 0xD391,
+# variable length + CRC, RSSI/LQI appended).
+# FIFO content of a FrSky D packet: len(0x11) + 17 bytes + RSSI + LQI|CRC_OK = 20 bytes -> "rx 20"
+preset frskyd
+ch 0

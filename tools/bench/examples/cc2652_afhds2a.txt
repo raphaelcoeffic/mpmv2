@@ -1,0 +1,5 @@
+# CC2652 (mpm-v2 bench) counterpart of afhds2a.txt: A7105 ID sync word, CRC and
+# FEC in software. "rx 38". trim: this A7105 is about 90 kHz above the CC2652
+preset afhds2a
+trim 90
+ch 20

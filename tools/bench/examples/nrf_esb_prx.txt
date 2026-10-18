@@ -1,0 +1,13 @@
+# NRF24L01 Enhanced ShockBurst receiver (PRX) with auto-ack: 250kbps, address
+# a1b2c3d4e5, CRC16, dynamic payload length, ack payloads. Counterpart of
+# examples/cc2652_esb_ptx.txt. Use "w 0x06 02" for 1Mbps.
+preset nrf
+w 0x06 22        # RF_SETUP: 250kbps
+w 0x00 0e        # CONFIG: EN_CRC | CRCO | PWR_UP
+w 0x0a a1b2c3d4e5  # RX_ADDR_P0
+w 0x10 a1b2c3d4e5  # TX_ADDR
+w 0x01 01        # EN_AA: pipe 0
+w 0x1d 06        # FEATURE: EN_DPL | EN_ACK_PAY
+w 0x1c 01        # DYNPD: pipe 0
+ch 40
+ackpl 00a1a2a3   # ack payload, byte 0 counts when "seq 0"

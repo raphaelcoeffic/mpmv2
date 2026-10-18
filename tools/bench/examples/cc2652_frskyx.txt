@@ -1,0 +1,7 @@
+# CC2652 (mpm-v2 bench) counterpart of the MPM "preset frskyx": FrSky D16 PHY,
+# CC2500 framing (sync d391d391, length byte, no CRC: FrSky X has it in the
+# payload). "rx 30" for 0x1d + 29 bytes. Other FrSky PHYs: preset frskyx2,
+# frskyxeu, frskyx2eu
+preset frskyx
+trim -35
+ch 0

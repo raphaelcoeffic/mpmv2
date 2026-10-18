@@ -1,0 +1,6 @@
+# CC2652 (mpm-v2 bench) counterpart of frskyd.txt: FrSky D8 PHY, CC2500 framing
+# (sync d391, length byte, CRC). The payload is the CC2500 FIFO content: "rx 18"
+# for 0x11 + 17 bytes. trim: frequency offset between the two boards (MPM option)
+preset frskyd
+trim -35
+ch 0

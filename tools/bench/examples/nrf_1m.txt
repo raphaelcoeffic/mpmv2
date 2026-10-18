@@ -1,0 +1,7 @@
+# Plain NRF24L01: 1Mbps, 5 byte address, CRC16, fixed 16 byte payload.
+preset nrf
+w 0x00 0e        # CONFIG: EN_CRC | CRCO | PWR_UP
+w 0x0a c3c3c3c3c3  # RX_ADDR_P0
+w 0x10 c3c3c3c3c3  # TX_ADDR
+w 0x11 10        # RX_PW_P0 = 16
+ch 40

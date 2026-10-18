@@ -1,0 +1,7 @@
+# A7105 receiving FlySky packets: the FlySky register table is TX only (it
+# receives nothing), use the AFHDS2A one with FEC off (CODE_I 0x0F) and a 21 byte
+# FIFO. "rx 21". To send FlySky: "preset flysky"
+preset afhds2a
+w 0x1F 0x0F
+w 0x03 0x14
+ch 20

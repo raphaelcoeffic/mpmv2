@@ -1,0 +1,8 @@
+# CC2652 (mpm-v2 bench) receiving the MPM E01X protocol (E012 bind packets:
+# "proto 45 0" on the MPM): CYRF6936 GFSK mode, HS6200 framing, E012 bind
+# address, 15 bytes, on the bind channel 60. "rx 15": the MPM CRCs are wrong
+# (see docs/interop-results.md). E015: "hs6200 6254793853", ch 45, "proto 45 1", "rx 10"
+preset gfsk1m
+hs6200 55429c8fc9
+trim 0
+ch 60

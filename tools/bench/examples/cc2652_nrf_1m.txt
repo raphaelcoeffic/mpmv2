@@ -1,0 +1,7 @@
+# mpm-v2 (CC2652) side of examples/nrf_1m.txt: NRF24L01 1Mbps,
+# address c3c3c3c3c3 (TX_ADDR order), CRC16, channel 40.
+# The RX sync word is chosen to differ from the bits sent before it (here:
+# the NRF preamble aa and c3c3c3), the "rx" reply shows it.
+preset nrf1m
+nrf c3c3c3c3c3 2
+ch 40

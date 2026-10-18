@@ -1,0 +1,5 @@
+# CYRF6936 DSM data packets (DSM_cyrf_config + DSM_cyrf_configdata): 1 Mchip/s,
+# 8DR 64 chip codes, SOP, length field, CRC-16. PN row 0, SOP column 0 codes,
+# CRC seed 0. Payload of any length up to 16 bytes, "rx" (RX_COUNT bytes)
+preset dsm
+ch 30

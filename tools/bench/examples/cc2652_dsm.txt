@@ -1,0 +1,5 @@
+# CC2652 (mpm-v2 bench) counterpart of dsm.txt: DSM data packets, same codes and
+# CRC seed. "rx 16" receives up to 16 bytes (length field)
+preset dsm
+trim 0
+ch 30

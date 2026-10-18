@@ -7,3 +7,4 @@ doc
 *.bin
 *.o
 build-*/
+__pycache__/

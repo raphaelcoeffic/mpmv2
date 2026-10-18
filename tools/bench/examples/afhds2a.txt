@@ -1,0 +1,3 @@
+# A7105 with the AFHDS2A radio configuration and calibration, FIFO length 38 bytes.
+preset afhds2a
+ch 20

@@ -1,0 +1,6 @@
+# MPM CC2500 receiving FrSky D: one packet per FIFO read (RXOFF_MODE=IDLE),
+# RSSI and LQI|CRC_OK appended
+preset frskyd
+ch 0
+w 0x17 0x00
+rx 0

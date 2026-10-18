@@ -1,0 +1,9 @@
+# CC2500 with the Hitec registers (HITEC_init_values): 250 kbps MSK (2/8 phase
+# step), 24 byte preamble, sync d391d391 (bind; data: SYNC1 SYNC0 from the ID),
+# length, CRC, whitening. No autocalibration: SCAL after each channel change.
+# CC2652: preset hitec
+preset frskyd
+w 0x00 2f2e2f07d391ff04 45000012005c85e8 3d3b73737a010730 081d1cc740b0876b f8b610ea0a0011
+w 0x3e ff
+ch 0
+s 0x33

@@ -1,0 +1,9 @@
+# CC2500 with the Skyartec registers (SKYARTEC_init_values from 0x04): 229 kbps
+# MSK (1/8 phase step), length, CRC, bind sync 7d7d. Address check off (ADDR
+# 0x43 otherwise). CC2652: preset skyartec, cc2500 7d7d7d7d 1 1 0 0 1
+preset frskyd
+w 0x04 1318ff0505 43cd09005d93b12d207322f850073018 1d1cc700b2876bf8b610ea0a001141 00597f3f88310b
+w 0x3e ff
+w 0x04 7d7d
+w 0x07 0x04
+ch 0

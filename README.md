@@ -1,3 +1,25 @@
+# mpm-v2
+
+Firmware for a MULTI-Module built around a single 2.4 GHz SoC (CC2652 for
+now) instead of the four radio chips of the 4-in-1.
+
+Radio work so far, see `docs/`:
+
+- [docs/status.md](docs/status.md): what has been done, where things are, next steps toward MPM v2
+- [docs/cc2652-radio-assessment.md](docs/cc2652-radio-assessment.md): what the CC2652 radio can and cannot do for the MPM protocols, requirements for any other chip
+- [docs/interop-results.md](docs/interop-results.md): over-the-air results against the CC2500, NRF24L01, A7105 and CYRF6936 of a 4-in-1 module
+- [docs/bench.md](docs/bench.md): the test rig (bench firmwares, host tools in `tools/bench`, unit tests in `tests/frame`)
+
+Radio bench build (LaunchPad, `src/bench.c` command shell on UART0 at 921600
+baud instead of the MPM):
+
+```bash
+cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
+ninja -C build-bench
+openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
+make -C tests/frame    # host unit tests of the framings
+```
+
 # Compilation Instructions
 
 This README provides instructions for compiling the project using CMake with the
@@ -20,6 +42,7 @@ disabled during the build process:
 | `USE_CCFG` | Include MCU user configuration (CCFG). | ON |
 | `USE_XOSC` | Use external oscillator (or HPOSC on CC2652RB). | ON |
 | `DRIVERLIB_NOROM` | Use compiled driverlib instead of ROM. | OFF |
+| `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see `docs/bench.md`). | OFF |
 
 ## Building the Project
 

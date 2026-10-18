@@ -1,0 +1,8 @@
+# CC2500 with the Futaba SFHSS registers (SFHSS_init_values): 128 kbps 2-FSK,
+# sync d391d391, fixed length 13, CRC with CC2400_EN. No autocalibration.
+# CC2652: preset sfhss
+preset frskyd
+w 0x00 2f2e2f07d3910d04 0c291006005c4ec4 7c4383233b44070c 081d1c434091576b f8b610ea0a1111
+w 0x3e ff
+ch 0
+s 0x33

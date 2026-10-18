@@ -1,0 +1,6 @@
+# CYRF6936 DSM bind response (receiver -> TX): as dsmbind.txt with the data code
+# 98881be430790384 (DSM_cyrf6936.ino DSM_BIND_CHECK). The data code buffer takes
+# 16 bytes even in SDR mode: with 8 the CYRF6936 doesn't use them. 10 byte payload
+preset dsmbind
+w 0x23 98881be43079038498881be430790384
+ch 30

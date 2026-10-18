@@ -1,0 +1,8 @@
+# CC2652 (mpm-v2 bench) receiving the MPM FrSky L protocol (bind packets:
+# "proto 67 0 0 0 1" on the MPM): 125 kbaud 2-FSK chip stream, 11 chips per
+# bit, decoded by the frskyl framing (prefix 4e: the first packet byte).
+# "rx 17"; the packet CRC (FrSkyX_crc()) is left to the host.
+# Data packets: ch = one of the hop channels, "proto 67"
+preset frskyl
+trim 0
+ch 0

@@ -1,0 +1,5 @@
+# XN297 emulation on the NRF24L01: 1Mbps, scrambled, CRC on, 5 byte address.
+# The XN297 payload length must be given to "rx", ex: "rx 16".
+xn 1 1 0
+xaddr 6545a5e7c3
+ch 40

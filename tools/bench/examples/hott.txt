@@ -1,0 +1,9 @@
+# CC2500 with the HoTT registers (HOTT_init_values): 250 kbps MSK, sync d391d391,
+# fixed length 50, CRC, whitening, FEC. MCSM0 has no autocalibration: SCAL after
+# each channel change. FIFO content = the 50 byte packet; rx 0 reads 50 + RSSI,
+# LQI|CRC_OK. Telemetry format: w 0x04 2c6e (sync), w 0x06 0x16 (22 bytes)
+preset frskyd
+w 0x00 2f2e2f00d391320444000009005c6c6e2d3b73a3aa47070008 1d1cc709f0876bf0b610ea0a0011
+w 0x3e ff
+ch 0
+s 0x33

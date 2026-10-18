@@ -1,0 +1,6 @@
+# CC2500 with the Ares registers (ARES_init_values): 50 kbps 2-FSK, sync
+# 5a605a60, length, CRC. CC2652: preset ares
+preset frskyd
+w 0x00 062e2e075a603004 0500000600 5cb13b 6af803237a440730 18166c434091876b f85610a90a0011
+w 0x3e ff
+ch 0

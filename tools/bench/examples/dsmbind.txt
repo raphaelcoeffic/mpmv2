@@ -1,0 +1,4 @@
+# CYRF6936 DSM bind packets (DSM_cyrf_config): SDR (1 bit per 64 chips), no SOP,
+# length field or CRC, data code PN row 0 column 8. 16 byte payload
+preset dsmbind
+ch 30

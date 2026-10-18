@@ -1,0 +1,7 @@
+# CC2500 with the IKEA Ansluta registers (IKEAANSLUTA_init_values from 0x06):
+# 250 kbps MSK (2/8 phase step), length, CRC, FEC (with a variable length: only
+# length + 1 bytes are sent). CC2652: preset ikea, ch 16
+preset frskyd
+w 0x06 ff04050010 09005d93b12d3b73a2f801073018 1d1cc700b2876bf8b610ea0a00114100
+w 0x3e ff
+ch 16

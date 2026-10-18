@@ -1,0 +1,10 @@
+# mpm-v2 (CC2652) Enhanced ShockBurst transmitter (PTX), as an nRF24L01+ with
+# EN_AA and dynamic payload length: each packet waits for an ack, up to 3
+# retransmissions, 500 us ack window, ack payloads up to 32 bytes (@ack lines).
+# Counterpart of examples/nrf_esb_prx.txt ("rx 0" on the MPM). Use "preset
+# nrf1m" for 1Mbps.
+preset nrf250k
+nrf a1b2c3d4e5 2
+esb 1 1
+ack 1 3 500 32
+ch 40

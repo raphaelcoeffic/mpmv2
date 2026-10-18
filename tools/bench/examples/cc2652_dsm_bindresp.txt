@@ -1,0 +1,7 @@
+# CC2652 (mpm-v2 bench) counterpart of dsm_bindresp.txt: SDR, no SOP, length or
+# CRC, data code 98881be430790384. The first 4 bytes (the inverted
+# manufacturer id of the TX) are known to the TX: "prefix" them, then "rx 10"
+preset dsmbind
+cyrf 0 98881be430790384 0 0 0 1
+trim 0
+ch 30
