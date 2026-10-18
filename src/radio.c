@@ -26,19 +26,18 @@
 
 // Overrides from the TI radio configuration database
 // (cc2652r_prop_pg21, setting tc901: 250 kbps 2-GFSK, 2.4 GHz)
-static uint32_t _overrides[] = {
+static const uint32_t _base_overrides[] = {
     // DC/DC regulator: In Tx, use DCDCCTL5[3:0]=0x3 (DITHER_EN=0 and IPEAK=3).
     0x00F388D3,
     // Tx: Configure PA ramp time, PACTL2.RC=0x1 (in ADI0, set PACTL2[4:3]=0x1)
     ADI_2HALFREG_OVERRIDE(0, 16, 0x8, 0x8, 17, 0x1, 0x0),
     // Rx: Set AGC reference level to 0x22 (default: 0x2E)
     HW_REG_OVERRIDE(0x609C, 0x0022),
-    // Rx: Set anti-aliasing filter bandwidth to 0x5 (in ADI0, set IFAMPCTL3[7:4]=0x5)
-    // Only for narrow RX bandwidths: replaced by the end marker otherwise.
-    ADI_HALFREG_OVERRIDE(0, 61, 0xF, 0x5),
-    0xFFFFFFFF,
 };
-#define OVERRIDE_AAF_INDEX 3
+#define BASE_OVERRIDES (sizeof(_base_overrides) / sizeof(_base_overrides[0]))
+
+// Base + anti-aliasing filter + sync threshold + end marker
+static uint32_t _overrides[BASE_OVERRIDES + 3];
 
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_FS_t _fs;
@@ -184,9 +183,15 @@ static void _init_setup(const radio_phy_t* phy)
   _setup.intFreq = phy->if_freq;
   _setup.loDivider = 0;
 
-  // The narrow anti-aliasing filter of the reference PHY only suits slow rates
-  _overrides[OVERRIDE_AAF_INDEX] =
-      phy->symbol_rate <= 250000 ? ADI_HALFREG_OVERRIDE(0, 61, 0xF, 0x5) : 0xFFFFFFFF;
+  uint32_t n = BASE_OVERRIDES;
+  memcpy(_overrides, _base_overrides, sizeof(_base_overrides));
+  // Rx: Set anti-aliasing filter bandwidth to 0x5 (in ADI0, set IFAMPCTL3[7:4]=0x5)
+  // The narrow filter of the reference PHY only suits slow rates
+  if (phy->symbol_rate <= 250000) _overrides[n++] = ADI_HALFREG_OVERRIDE(0, 61, 0xF, 0x5);
+  // Rx: sync word correlation threshold (MDM register 0x5114, default 0x1F)
+  if (phy->sync_threshold)
+    _overrides[n++] = HW_REG_OVERRIDE(0x5114, phy->sync_threshold << 8 | phy->sync_threshold);
+  _overrides[n] = 0xFFFFFFFF;
   _setup.pRegOverride = _overrides;
 }
 

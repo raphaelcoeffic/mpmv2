@@ -16,6 +16,8 @@
 //   preset <nrf1m|nrf2m|nrf250k|xn250k>  load a PHY preset
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq]   custom 2-GFSK PHY
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
+//   syncthr <n>                  sync correlation threshold, 0 = auto: default
+//                                (0x1F), strict (0x32) for weak RX sync words
 //   sync <hex>                   raw framing: sync word, 1 to 4 bytes
 //   nrf <addr> [crc_bytes] [sync_bytes]  NRF24L01 framing, addr as written to
 //                                TX_ADDR (LSByte first), 3 to 5 bytes, crc 0..2
@@ -57,6 +59,8 @@ static radio_phy_t _phy;
 static char _phy_name[16] = "none";
 static bool _phy_ok;
 static uint16_t _tx_power = 0x7217;  // TI default for 2.4 GHz prop (+5 dBm)
+static uint8_t _sync_threshold;
+#define SYNC_THRESHOLD_STRICT 0x32
 
 static uint32_t _freq_khz = 2440000;
 static int _channel = 40;
@@ -194,6 +198,10 @@ static bool _apply_phy()
 {
   _phy.sync_bits = frame_sync_bits(&_frame);
   _phy.tx_power = _tx_power;
+  // Measured at 1 Mbps: 0x32 instead of 0x1F gets address 6565656565 from 50%
+  // to 100%. Its sensitivity cost is not measured: only used when needed.
+  _phy.sync_threshold = _sync_threshold ? _sync_threshold
+                        : frame_rx_sync_weak(&_frame) ? SYNC_THRESHOLD_STRICT : 0;
   _phy_ok = radio_init(&_phy) == RADIO_OK && radio_set_frequency(_freq_khz) == RADIO_OK;
   _set_sync_word();
   return _phy_ok;
@@ -388,6 +396,13 @@ static void _cmd_phy(char* args)
     return;
   }
   _print("@ok phy=custom\r\n");
+}
+
+static void _cmd_syncthr(char* args)
+{
+  uint32_t thr;
+  if (_number(&args, &thr) && thr < 0x80) _sync_threshold = thr;
+  _printf("@ok syncthr=0x%02x\r\n", _sync_threshold);
 }
 
 static void _cmd_pwr(char* args)
@@ -667,7 +682,8 @@ static void _cmd_rx(char* args)
     return;
   }
   _job = JOB_RX;
-  _printf("@ok rx len=%lu\r\n", len);
+  _printf("@ok rx len=%lu sync=%08lx syncthr=0x%02x\r\n", len, frame_rx_sync(&_frame),
+          _phy.sync_threshold);
 }
 
 static void _cmd_stop()
@@ -694,6 +710,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "preset")) _cmd_preset(args);
   else if (!strcmp(cmd, "phy")) _cmd_phy(args);
   else if (!strcmp(cmd, "pwr")) _cmd_pwr(args);
+  else if (!strcmp(cmd, "syncthr")) _cmd_syncthr(args);
   else if (!strcmp(cmd, "sync")) _cmd_sync(args);
   else if (!strcmp(cmd, "nrf")) _cmd_nrf(args);
   else if (!strcmp(cmd, "xn")) _cmd_xn(args);

@@ -17,6 +17,7 @@ typedef struct {
   uint8_t sync_bits;      // 8..32
   int16_t if_freq;        // MHz in 4.12 signed format, 0x8000 = default
   uint16_t tx_power;      // RF core TX power word
+  uint8_t sync_threshold; // sync word correlation threshold, 0 = default (0x1F)
 } radio_phy_t;
 
 typedef struct {

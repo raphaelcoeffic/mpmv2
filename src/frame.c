@@ -349,6 +349,74 @@ static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* bu
 // API
 //
 
+static uint32_t _sync_word(const uint8_t* b, uint8_t len)
+{
+  uint32_t sw = 0;
+  while (len--) sw = (sw << 8) | *b++;
+  return sw;
+}
+
+// RX sync word choice. The RF core sync detection tolerates bit errors: a sync
+// word that nearly matches the bits sent before it can trigger early (packet
+// lost) or not at all. Measured with an nRF24L01 at 1 Mbps, address e7e7e7e7e7:
+// 33% received with the sync on its first 4 bytes, 100% with the preamble and
+// the first 3 bytes. So the sync word is the window of the known bytes (with
+// the NRF preamble) that differs the most from the bits before it, the latest
+// one when several are good enough.
+#define SYNC_SCORE_GOOD 16  // in half bits: 8 bit errors, measured: 7 is enough
+
+// Smallest distance between the window at byte 'pos' and the earlier bits, in
+// half bits (bits before the stream are noise: 1/2 error)
+static uint8_t _sync_score(const uint8_t* stream, uint8_t pos, uint8_t len)
+{
+  uint8_t best = 0xFF;
+  int16_t first = 8 * pos;
+  for (int16_t at = first - 8 * len + 1; at < first; at++) {
+    uint8_t errors = 0;
+    for (int16_t i = 0; i < 8 * len && errors < best; i++) {
+      int16_t j = at + i;
+      if (j < 0) errors += 1;
+      else if (_get_bits(stream, first + i, 1) != _get_bits(stream, j, 1)) errors += 2;
+    }
+    if (errors < best) best = errors;
+  }
+  return best;
+}
+
+static void _choose_rx_sync(frame_t* f)
+{
+  // NRF: the 1 byte preamble before the address is known too
+  uint8_t stream[1 + sizeof(f->known)];
+  uint8_t lead = 0;
+  if (f->type == FRAME_NRF) stream[lead++] = f->known[0] & 0x80 ? 0xAA : 0x55;
+  memcpy(stream + lead, f->known, f->known_len);
+  uint8_t stream_len = lead + f->known_len;
+
+  uint8_t best_pos = stream_len - f->sync_len;
+  uint8_t best_score = 0;
+  for (uint8_t pos = 0; pos + f->sync_len <= stream_len; pos++) {
+    uint8_t score = _sync_score(stream, pos, f->sync_len);
+    if (score > SYNC_SCORE_GOOD) score = SYNC_SCORE_GOOD;
+    if (score >= best_score) {
+      best_score = score;
+      best_pos = pos;
+    }
+  }
+  f->rx_sync = _sync_word(stream + best_pos, f->sync_len);
+  f->rx_sync_errors = best_score / 2;
+  f->rx_start = best_pos + f->sync_len - lead;
+
+  // Same sync word earlier in the frame (all windows repeat, e.g. address
+  // 5555555555): receive enough for the earliest one
+  f->rx_first_start = f->rx_start;
+  for (uint8_t pos = lead; pos < best_pos; pos++) {
+    if (_sync_word(stream + pos, f->sync_len) == f->rx_sync) {
+      f->rx_first_start = pos + f->sync_len - lead;
+      break;
+    }
+  }
+}
+
 bool frame_init(frame_t* f)
 {
   uint8_t n = 0;
@@ -396,24 +464,17 @@ bool frame_init(frame_t* f)
     n += f->prefix_len;
   }
   f->known_len = n;
+  _choose_rx_sync(f);
   return true;
 }
 
 uint8_t frame_sync_bits(const frame_t* f) { return f->sync_len * 8; }
 
-static uint32_t _sync_word(const uint8_t* b, uint8_t len)
-{
-  uint32_t sw = 0;
-  while (len--) sw = (sw << 8) | *b++;
-  return sw;
-}
-
 uint32_t frame_tx_sync(const frame_t* f) { return _sync_word(f->known, f->sync_len); }
 
-uint32_t frame_rx_sync(const frame_t* f)
-{
-  return _sync_word(f->known + f->known_len - f->sync_len, f->sync_len);
-}
+uint32_t frame_rx_sync(const frame_t* f) { return f->rx_sync; }
+
+bool frame_rx_sync_weak(const frame_t* f) { return f->rx_sync_errors * 2 < SYNC_SCORE_GOOD; }
 
 static bool _has_pid(const frame_t* f)
 {
@@ -435,8 +496,7 @@ uint8_t frame_tx_data(frame_t* f, const uint8_t* payload, uint8_t len, uint8_t* 
 uint8_t frame_rx_len(const frame_t* f, uint8_t len)
 {
   if (!frame_len_ok(f, len) || len < f->prefix_len) return 0;
-  // From the RX sync word, which can be early by up to known_len - sync_len bytes
-  return _frame_len(f, len) - f->sync_len;
+  return _frame_len(f, len) - f->rx_first_start;
 }
 
 static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t* data,
@@ -477,15 +537,16 @@ frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint8_t r
                                 uint8_t len, uint8_t* payload, uint8_t* payload_len,
                                 uint16_t* pcf)
 {
-  // Normal sync on the last known bytes first, then earlier ones
-  frame_result_t res =
-      _decode_at(f, f->known_len, data, rx_len, len, payload, payload_len, pcf);
-  for (uint8_t k = 1; k <= f->known_len - f->sync_len && res != FRAME_OK; k++) {
+  // Normal sync position first, then earlier copies of the sync word
+  frame_result_t res = _decode_at(f, f->rx_start, data, rx_len, len, payload, payload_len, pcf);
+  for (uint8_t start = f->rx_start - 1; start >= f->rx_first_start && res != FRAME_OK; start--) {
+    if (start < f->sync_len ||
+        _sync_word(f->known + start - f->sync_len, f->sync_len) != f->rx_sync)
+      continue;
     uint8_t other[FRAME_PAYLOAD_MAX];
     uint8_t other_len;
     uint16_t other_pcf;
-    if (_decode_at(f, f->known_len - k, data, rx_len, len, other, &other_len, &other_pcf) ==
-        FRAME_OK) {
+    if (_decode_at(f, start, data, rx_len, len, other, &other_len, &other_pcf) == FRAME_OK) {
       memcpy(payload, other, other_len);
       *payload_len = other_len;
       *pcf = other_pcf;

@@ -9,11 +9,9 @@
 //
 // A frame is: header (bytes known in advance: XN297 preamble, address) |
 // encoded payload | CRC. TX sends the first header bytes as the sync word and
-// the rest as data. RX syncs on the last bytes known in advance (header and
-// payload prefix): the CC2652 needs about 40 us of signal before its sync word
-// and the first bytes give it this time (an NRF24L01 sends a 1 byte preamble
-// only: 8 us at 1 Mbps). Patterns repeated in the known bytes (e.g. address
-// c3c3c3c3c3) can sync early: the decoder checks every possible alignment.
+// the rest as data. RX syncs on the bytes known in advance (NRF preamble,
+// header and payload prefix) that differ the most from the bits before them:
+// repeated patterns (e.g. address e7e7e7e7e7) make the CC2652 miss packets.
 
 #define FRAME_ADDR_MAX 5
 #define FRAME_PREFIX_MAX 8
@@ -50,6 +48,10 @@ typedef struct {
   uint8_t hdr_len;
   uint8_t known_len;
   uint8_t sync_len;
+  uint32_t rx_sync;        // RX sync word, see frame.c
+  uint8_t rx_sync_errors;  // bit errors from the bits before it (max 8)
+  uint8_t rx_start;        // frame byte after the RX sync word
+  uint8_t rx_first_start;  // earliest one if the sync word repeats
   uint8_t pid;     // packet id of the next packet (packet control field)
   uint8_t tx_pid;  // packet id of the last packet encoded
 } frame_t;
@@ -63,6 +65,10 @@ bool frame_init(frame_t* f);
 uint8_t frame_sync_bits(const frame_t* f);
 uint32_t frame_tx_sync(const frame_t* f);
 uint32_t frame_rx_sync(const frame_t* f);
+
+// True if the RX sync word is too close to the bits sent before it (repeated
+// patterns, e.g. address 6565656565): use a stricter sync threshold
+bool frame_rx_sync_weak(const frame_t* f);
 
 // True if a payload of len bytes can be sent / received
 bool frame_len_ok(const frame_t* f, uint8_t len);
