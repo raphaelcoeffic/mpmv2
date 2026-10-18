@@ -28,14 +28,14 @@ with `-DBENCH=ON`.
   from the A7105, 99 to 100% to it (A7105 CRC errors at 500 kbps), with a
   90 kHz trim on this board.
 - Works: DSM (CYRF6936, 1 Mchip/s DSSS with 64 chip codes), data, bind and
-  bind response packets, 100% both ways without trim. The chip codes are sent
+  bind response packets, and Walkera Devo (32 chip codes), 100% both ways
+  without trim. Every CYRF6936 DSSS format of the MPM protocols has been run. The chip codes are sent
   and correlated in software; the 8.2 ms bind packet (1029 bytes on air) needs
   the advanced RF core commands, above 255 bytes.
 - Mitigated in software: repeated address patterns. Degenerate addresses such
   as `5555555555` still fail.
-- Biggest unknowns: receiver sensitivity (sync thresholds raised for weak sync
-  words, DSSS processing gain lost: see below), and the CYRF6936 32 chip code
-  protocols (Walkera Devo, WFLY, Traxxas).
+- Biggest unknown: receiver sensitivity (sync thresholds raised for weak sync
+  words, DSSS processing gain lost: see below).
 
 ## Measured status
 
@@ -59,8 +59,10 @@ with `-DBENCH=ON`.
 | Other A7105 protocols (Bugs, Height, Pelikan, Kyosho, WFLY2, Joysway) | not tested | same PHY family, 250 or 500 kbps |
 | CYRF6936 DSM data packets (8DR, SOP, length, CRC), 10 and 16 bytes, 4 channels | works | 100% both ways |
 | CYRF6936 DSM bind and bind response (SDR, no SOP) | works | 100% both ways (bind TX -> CC2652 RX needs a sync word on the preamble end, see below) |
-| Other CYRF6936 protocols: 64 chip codes (Kyosho3, J6Pro, WK2x01, Scorpio, MLINK, Losi) | not tested | same chip formats as DSM |
-| CYRF6936 32 chip codes (Devo, WFLY, Traxxas) | not tested | |
+| CYRF6936 Devo (32 chip SOP and data codes, 32 chip preamble) | works | 100% both ways, 3 SOP codes, CRC seeds 0 and 0xa55a |
+| CYRF6936 64 chip SOP + 32 chip data (WFLY), 32 chip SOP + 64 chip data (Kyosho3) | works | 100% both ways (Devo register setup with the WFLY / Kyosho3 framing) |
+| Other CYRF6936 protocols (J6Pro, WK2x01, Scorpio, MLINK, Losi, Traxxas) | not tested with their registers | same chip formats as DSM or Devo |
+| CYRF6936 GFSK mode (E01X, E129, E010R5) | not tested | 1 Mbps GFSK with software framing (HS6200...) |
 | Sensitivity, range, blocking | not measured | no attenuator on the bench |
 
 ## Weaknesses, by impact
@@ -121,8 +123,8 @@ with `-DBENCH=ON`.
 
 ### 5. Not evaluated yet
 
-- Protocols: the CYRF6936 32 chip codes (Devo, WFLY, Traxxas) and the
-  CYRF6936 protocols other than DSM.
+- Protocols: the CYRF6936 protocols other than DSM and Devo with their own
+  register setups, and the HS6200 framing of the CYRF6936 GFSK mode (E01X).
 - RF: sensitivity, range and blocking are unmeasured. The CC2652 receives the
   CYRF6936 chips as plain 1 Mbps GFSK bits and correlates the codes in
   software: the CYRF6936 DSSS processing gain is only partly kept (up to 20
@@ -228,26 +230,42 @@ receiver did not.
 | DSM2 / DSMX data and telemetry | 64 chip 8DR | SOP, length, CRC-16 with seed | works |
 | DSM bind, bind response | 64 chip SDR | no SOP, length or CRC, 16 / 10 bytes | works |
 | J6Pro, WK2x01, Scorpio | 64 chip 8DR | SOP, length | not tested, same format as DSM data |
-| Kyosho3 | 64 chip 8DR | 32 chip SOP (`FRAMING_CFG` 0xA4), length | not tested: 32 chip SOP to add |
-| MLINK, Losi | 64 chip SDR | MLINK: no SOP; Losi: as DSM bind | not tested |
-| Devo, WFLY, Traxxas | 32 chip 8DR | SOP (Devo: 32 chips), length | not tested: 32 chip symbols to add |
+| Kyosho3 | 64 chip 8DR | 32 chip SOP (`FRAMING_CFG` 0xA4), length | format works (Devo registers, Kyosho3 framing) |
+| MLINK, Losi | 64 chip SDR | MLINK: no SOP; Losi: as DSM bind | not tested, same format as DSM bind |
+| Devo, Traxxas | 32 chip 8DR | 32 chip SOP, length | Devo works, Traxxas not tested (same framing) |
+| WFLY | 32 chip 8DR | 64 chip SOP, length | format works (Devo registers, WFLY framing) |
 | E01X, E129, E010R5 | GFSK 1 Mbps (no DSSS) | HS6200 / XN297 like | not tested, a plain 1 Mbps GFSK PHY |
 
 Measured on raw captures of the CYRF6936 (bit exact), at 1 Mchip/s, in CC2652
-bits: preamble `1100` x 16, SOP code (as given to `CYRF_ConfigSOPCode()`, LSB
-first), `0101`, SOP code inverted, a `1` gap chip, then the data. 8DR: one 64
-chip symbol per byte, the data code (bit 6: the second one) rotated by bits
-0-5, inverted unless bit 7. SDR: one code per bit, LSB first, inverted for a 0.
-The length byte first, then the payload and a CRC-16 (0xA001 reflected, from
-the bit-reversed seed, xorout 0xFFFF), low byte first. No end of packet code.
+bits:
+
+- Preamble `1100`, 16 chips per count (DSM: 4, the default and Devo: 2).
+- SOP code (as given to `CYRF_ConfigSOPCode()`, LSB first; 32 chip SOP: its
+  first 4 bytes), 4 alternating chips starting with the last one inverted, the
+  SOP code again, inverted only with 64 chip data codes.
+- A gap chip (the last chip inverted), then the data. 8DR, 64 chip codes: one
+  symbol per byte, the data code (bit 6: the second one) rotated by bits 0-5,
+  inverted unless bit 7. 32 chip codes: 4 data codes (bits 5-6) rotated by bits
+  0-4. SDR: one 64 chip code per bit, LSB first, inverted for a 0.
+- The length byte first, then the payload and a CRC-16 (0xA001 reflected, from
+  the bit-reversed seed, xorout 0xFFFF), low byte first. No end of packet code.
+- Devo doesn't set the data codes: the CYRF6936 default is
+  `6fbe3201dbf12b01e35cfa029793f902`.
+
 Channels 2401 MHz + n x 1 MHz (`CYRF_ConfigRFChannel()`), 250 kHz deviation
 (the CYRF6936 still receives with the CC2652 250 kHz off, not at 500 kHz).
 
 The CC2652 side:
 
-- 8DR packets: sync on the SOP code (a sync on the preamble missed most). Each
-  symbol is decoded against the 2 codes x 64 rotations x 2 polarities, the
-  nearest wins; 8 chip errors per symbol are corrected in the unit tests.
+- 8DR packets: sync in the SOP part (a sync on the preamble missed most). Each
+  symbol is decoded against all the codes, rotations and polarities, the
+  nearest wins: 8 chip errors per 64 chip symbol and 4 per 32 chip symbol are
+  corrected in the unit tests.
+- With 32 chip data codes the two SOP copies are the same, 36 chips apart: a
+  sync word on the second also matched the first and no packet decoded. Sync
+  windows are scored against all the earlier known bits, not only the 32
+  before them (the same weakness as weakness 2): the sync word then spans the
+  separator. The Devo 32 chip preamble is enough for the CC2652.
 - SDR packets without SOP (DSM bind): only the repetitive preamble is known
   before the data, and a sync word on it got 25 to 35% at any threshold. The
   sync word is the preamble end, the gap and the first 23 chips of the first
@@ -273,7 +291,7 @@ Requirements that came out of these tests, to check on each alternative:
 5. A way to emulate the CC2500, A7105 and CYRF6936 PHYs, DSM's DSSS included:
    2-FSK and GFSK from 10 kbps to 1 Mbps, MSK, a 16 or 32 bit sync word after
    a 2 byte preamble, frequencies up to 2502 MHz (Redpine). On the CC2652: the
-   CC2500 and A7105 families and DSM done, the 32 chip CYRF6936 codes open.
+   CC2500, A7105 and CYRF6936 families done.
 6. Raw packets of at least 1029 bytes at 1 Mbps (DSM bind: 128 SDR bits of 64
    chips), or a streaming RX/TX mode, and an alternative RX sync word (or a
    sync word placed anywhere in the known bits) for the DSM bind packets.

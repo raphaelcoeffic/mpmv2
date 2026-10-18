@@ -20,7 +20,8 @@
 //                                redpineslow skyartec frskyv corona coronav2
 //                                fdv3 ares radiolink ikea sfhss, A7105 ones:
 //                                flysky afhds2a hubsan, CYRF6936: dsm (data
-//                                packets), dsmbind (bind packets: SDR)
+//                                packets), dsmbind (bind packets: SDR), devo
+//                                (32 chip SOP and data codes)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
 //   pwr <word>                   RF core TX power word (applied by next preset/phy)
@@ -45,13 +46,15 @@
 //                                bit inversion (default 0)
 //   a7105 <id> [crc] [fec]       A7105 framing: ID (2 or 4 bytes, as given to
 //                                A7105_WriteID), CRC (default 1), FEC (default 0)
-//   cyrf <sop> <data_code> [seed] [crc] [len] [sdr]  CYRF6936 framing (64
-//                                chip codes): SOP code (8 bytes, 0 = no SOP)
-//                                and data codes (16 bytes, SDR: 8) as given to
-//                                CYRF_ConfigSOPCode() / CYRF_ConfigDataCode(),
-//                                CRC seed (default 0), CRC16 (default 1),
-//                                length field (default 1), SDR instead of 8DR
-//                                (default 0). 8DR needs the SOP code
+//   cyrf <sop> <data_code> [seed] [crc] [len] [sdr] [data_chips]  CYRF6936
+//                                framing: SOP code (8 bytes, 4 = 32 chip SOP,
+//                                0 = no SOP) and data codes (16 bytes, SDR: 8)
+//                                as given to CYRF_ConfigSOPCode() /
+//                                CYRF_ConfigDataCode(), CRC seed (default 0),
+//                                CRC16 (default 1), length field (default 1),
+//                                SDR instead of 8DR (default 0), data code
+//                                length 32 or 64 (default). 8DR needs the SOP
+//                                code, SDR 64 chips
 //   esb <0|1> [dpl] [noack]      NRF Enhanced ShockBurst: packet control field, as
 //                                sent by the nRF24L01+ with EN_AA or DYNPD set
 //   ack <0|1> [retries] [window_us] [ack_max_len]  wait for an acknowledgment
@@ -390,6 +393,8 @@ typedef struct {
 #define CC_CRC2400 0x20  // CRC_EN with CC2400_EN
 #define CC_A7105 0x40    // A7105 framing (CC_CRC, CC_FEC)
 #define CC_CYRF 0x80     // CYRF6936 framing (CC_CRC, CC_VAR), CC_FEC: SDR without SOP
+#define CC_SOP32 CC_WHITE  // CYRF6936: 32 chip SOP code
+#define CC_DATA32 CC_MSK   // CYRF6936: 32 chip data codes
 
 #define NRF_CH_BASE 2400000000
 #define NRF_CH_SPACING 1000000
@@ -406,6 +411,11 @@ static const uint8_t _dsm_data_code[16] = {0x40, 0xBA, 0x97, 0xD5, 0x86, 0x4F, 0
                                            0xD7, 0xA1, 0x54, 0xB1, 0x5E, 0x89, 0xAE, 0x86};
 // DSM bind packets: data code of PN row 0, column 8 (DSM_initialize_bind_phase())
 #define DSM_BIND_CODE (_dsm_data_code + 8)
+// Devo bind: SOP code DEVO_j6pro_sopcodes[0], the CYRF6936 default data codes
+// (measured: Devo doesn't set them)
+static const uint8_t _devo_sop_code[8] = {0x3C, 0x37, 0xCC, 0x91, 0xE2, 0xF8, 0xCC, 0x91};
+static const uint8_t _cyrf_default_code[16] = {0x6F, 0xBE, 0x32, 0x01, 0xDB, 0xF1, 0x2B, 0x01,
+                                               0xE3, 0x5C, 0xFA, 0x02, 0x97, 0x93, 0xF9, 0x02};
 
 static const preset_t _presets[] = {
     {"nrf1m", 1000000, 160000, 97, false, NRF_CH_BASE, NRF_CH_SPACING},     // 1399 kHz
@@ -475,6 +485,9 @@ static const preset_t _presets[] = {
      CC_CYRF | CC_CRC | CC_VAR, 1},  // the CYRF preamble is in the frame
     // DSM bind: SDR (1 bit per 64 chips), no SOP, length or CRC: 16 bytes = 1 KB
     {"dsmbind", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8, CC_CYRF | CC_FEC, 1},
+    // Walkera Devo: 32 chip SOP and data codes, length, CRC (seed 0 as in bind)
+    {"devo", 1000000, 250000, 97, false, CYRF_CH_BASE, CYRF_CH_SPACING, 8,
+     CC_CYRF | CC_CRC | CC_VAR | CC_SOP32 | CC_DATA32, 1},
 };
 
 static void _set_cc2500_frame(const uint8_t* sync, uint8_t sync_len, uint8_t options)
@@ -514,6 +527,8 @@ static void _set_cyrf_frame(const uint8_t* sop, const uint8_t* data_code, uint16
   _frame.type = FRAME_CYRF;
   _frame.sop = sop != NULL;
   _frame.sdr = options & CC_FEC;
+  _frame.sop32 = options & CC_SOP32;
+  _frame.data32 = options & CC_DATA32;
   memset(_frame.sop_code, 0, sizeof(_frame.sop_code));
   if (sop) memcpy(_frame.sop_code, sop, sizeof(_frame.sop_code));
   memset(_frame.data_code, 0, sizeof(_frame.data_code));
@@ -559,6 +574,7 @@ static bool _load_preset(const char* name)
   if (_channel >= 0) _freq_khz = _ch_khz(_channel);
   if (p->cc2500 & CC_CYRF) {
     if (p->cc2500 & CC_FEC) _set_cyrf_frame(NULL, DSM_BIND_CODE, 0, p->cc2500);
+    else if (p->cc2500 & CC_DATA32) _set_cyrf_frame(_devo_sop_code, _cyrf_default_code, 0, p->cc2500);
     else _set_cyrf_frame(_dsm_sop_code, _dsm_data_code, 0, p->cc2500);
   } else if (p->sync_len && (p->cc2500 & CC_A7105)) {
     const uint8_t id[] = {p->sync >> 24, p->sync >> 16, p->sync >> 8, p->sync};
@@ -798,16 +814,20 @@ static void _cmd_cyrf(char* args)
   char* data = _next_arg(&args);
   uint8_t sop_buf[8], data_buf[16];
   bool no_sop = sop && !strcmp(sop, "0");
+  memset(sop_buf, 0, sizeof(sop_buf));
   int sop_len = no_sop ? 8 : sop ? _hex(sop, sop_buf, sizeof(sop_buf)) : -1;
   int data_len = data ? _hex(data, data_buf, sizeof(data_buf)) : -1;
   uint32_t seed = _number_or(&args, 0);
-  uint8_t options = 0;
+  uint8_t options = sop_len == 4 ? CC_SOP32 : 0;
   if (_number_or(&args, 1)) options |= CC_CRC;
   if (_number_or(&args, 1)) options |= CC_VAR;
   if (_number_or(&args, 0)) options |= CC_FEC;
-  if (sop_len != 8 || data_len != (options & CC_FEC ? 8 : 16) || seed > 0xFFFF) {
-    _print("@err usage: cyrf <sop: 8 bytes, 0: none> <data code: 16 bytes, sdr: 8> [seed] [crc] "
-           "[len] [sdr]\r\n");
+  uint32_t chips = _number_or(&args, 64);
+  if (chips == 32) options |= CC_DATA32;
+  if ((sop_len != 8 && sop_len != 4) || data_len != (options & CC_FEC ? 8 : 16) ||
+      seed > 0xFFFF || (chips != 32 && chips != 64)) {
+    _print("@err usage: cyrf <sop: 8 bytes, 4: 32 chips, 0: none> <data code: 16 bytes, sdr: 8> "
+           "[seed] [crc] [len] [sdr] [data_chips]\r\n");
     return;
   }
 
@@ -821,8 +841,10 @@ static void _cmd_cyrf(char* args)
     _report_radio_error("radio init");
     return;
   }
-  _printf("@ok framing=cyrf sop=%d seed=%04x crc=%d len=%d sdr=%d tx_sync=%08lx rx_sync=%08lx\r\n",
-          _frame.sop, _frame.crc_seed, _frame.crc_len != 0, _frame.var_len, _frame.sdr,
+  _printf("@ok framing=cyrf sop=%d seed=%04x crc=%d len=%d sdr=%d chips=%d tx_sync=%08lx "
+          "rx_sync=%08lx\r\n",
+          _frame.sop ? (_frame.sop32 ? 32 : 64) : 0, _frame.crc_seed, _frame.crc_len != 0,
+          _frame.var_len, _frame.sdr, _frame.data32 ? 32 : 64,
           frame_tx_sync(&_frame), frame_rx_sync(&_frame));
 }
 

@@ -61,10 +61,12 @@ typedef struct {
   // CYRF_ConfigSOPCode() / CYRF_ConfigDataCode() (sent LSB first), the CRC seed
   // (CRC_SEED_MSB << 8 | CRC_SEED_LSB). crc_len 2: CRC16 (TX/RX_OVERRIDE)
   uint8_t sop_code[8];
-  uint8_t data_code[16];  // SDR: the first 8 bytes
+  uint8_t data_code[16];  // SDR: the first 8 bytes. 32 chips: 4 codes of 4 bytes
   uint16_t crc_seed;
-  bool sop;  // FRAMING_CFG.SOP_EN
-  bool sdr;  // TX_CFG.DATA_MODE SDR: 1 bit per 64 chips, else 8DR: 1 byte
+  bool sop;    // FRAMING_CFG.SOP_EN
+  bool sop32;  // FRAMING_CFG.SOP_LEN 0: 32 chip SOP code (first 4 bytes)
+  bool sdr;    // TX_CFG.DATA_MODE SDR: 1 bit per 64 chips, else 8DR: 1 byte
+  bool data32; // TX_CFG.DATA_CODE_LENGTH 0: 32 chip data codes (8DR only)
   uint8_t sync_bytes;  // NRF: address bytes used as sync word (2 to 4)
   // Known first payload bytes (not with a packet control field)
   uint8_t prefix[FRAME_PREFIX_MAX];

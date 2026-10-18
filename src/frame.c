@@ -12,13 +12,17 @@
 #define A7105_CRC_INIT 0x1D0F  // CRC-16 CCITT, over the payload (measured)
 
 // CYRF6936 (measured), as CC2652 bits: preamble (1100 repeated, 64 chips), the
-// SOP code (bytes sent LSB first), 0101, the inverted SOP code, a 1, then one
-// 8DR symbol of 64 chips per byte: the data code rotated left by bits 0-5, the
-// second data code if bit 6, inverted unless bit 7. SDR (DSM bind, no SOP): one
-// symbol per bit, LSB first: the data code for 1, inverted for 0. CRC-16/ARC (0x8005
-// reflected, xorout 0xFFFF) over the length and payload, from the bit reversed
-// seed, sent low byte first. _put_chips() / _get_chips(): CC2652 bit = !chip.
-#define CYRF_SYMBOL_CHIPS 64
+// SOP code (bytes sent LSB first), 4 alternating chips (0101 or 1010: the last
+// chip inverted first), the SOP code again (inverted with 64 chip data codes), a
+// gap chip (the last chip inverted), then one 8DR symbol per
+// byte: the data code rotated left by bits 0-5, the second data code if bit 6,
+// inverted unless bit 7. 32 chip data codes: 4 of them (bits 5-6), rotated by
+// bits 0-4. 32 chip SOP: the first 4 code bytes. SDR (DSM bind, no SOP): one 64
+// chip symbol per bit, LSB first: the data code for 1, inverted for 0.
+// CRC-16/ARC (0x8005 reflected, xorout 0xFFFF) over the length and payload,
+// from the bit reversed seed, sent low byte first.
+// _put_chips() / _get_chips(): CC2652 bit = !chip.
+#define CYRF_SDR_CHIPS 64  // SDR: 64 chip codes only
 #define CYRF_GAP_CHIPS 1
 #define CYRF_SYNC_CHIPS 23  // chips of the first symbol in the RX sync word (no SOP)
 #define CYRF_PREAMBLE_NIBBLES 17  // 68 chips: header on whole bytes (with SOP)
@@ -173,20 +177,32 @@ static uint16_t _xn297_xorout_for(const frame_t* f, uint8_t len)
   return f->scramble ? _xn297_xorout_scrambled[idx] : _xn297_xorout[idx];
 }
 
-// CYRF6936 chips: bit k = chip k (code bytes sent LSB first)
-static uint64_t _cyrf_code(const uint8_t* code)
+// CYRF6936 data symbol length: TX_CFG.DATA_CODE_LENGTH
+static uint8_t _cyrf_n(const frame_t* f) { return f->data32 ? 32 : 64; }
+
+static uint64_t _chip_mask(uint8_t n) { return n == 64 ? ~0ULL : (1ULL << n) - 1; }
+
+// CYRF6936 chips: bit k = chip k (code bytes sent LSB first), n chips
+static uint64_t _cyrf_code(const uint8_t* code, uint8_t n)
 {
   uint64_t c = 0;
-  for (int8_t i = 7; i >= 0; i--) c = (c << 8) | code[i];
+  for (int8_t i = n / 8 - 1; i >= 0; i--) c = (c << 8) | code[i];
   return c;
 }
 
+static uint64_t _rotate(uint64_t c, uint8_t r, uint8_t n)
+{
+  return r ? ((c >> r) | (c << (n - r))) & _chip_mask(n) : c;
+}
+
+// 8DR symbol: data code (64 chips: 2 codes, bit 6; 32 chips: 4 codes, bits 5-6)
+// rotated by the low bits, inverted if bit 7
 static uint64_t _cyrf_symbol(const frame_t* f, uint8_t v)
 {
-  uint64_t c = _cyrf_code(f->data_code + (v & 0x40 ? 8 : 0));
-  uint8_t r = v & 0x3F;
-  if (r) c = (c >> r) | (c << (64 - r));
-  return v & 0x80 ? ~c : c;
+  uint8_t n = _cyrf_n(f);
+  uint8_t code = (v & 0x7F) / n;
+  uint64_t c = _rotate(_cyrf_code(f->data_code + code * n / 8, n), v & (n - 1), n);
+  return v & 0x80 ? ~c & _chip_mask(n) : c;
 }
 
 static void _put_chips(uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
@@ -194,10 +210,10 @@ static void _put_chips(uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
   for (uint8_t k = 0; k < n; k++) _put_bits(buf, pos, !((chips >> k) & 1), 1);
 }
 
-static uint64_t _get_chips(const uint8_t* buf, uint16_t pos)
+static uint64_t _get_chips(const uint8_t* buf, uint16_t pos, uint8_t n)
 {
   uint64_t chips = 0;
-  for (uint8_t k = 0; k < CYRF_SYMBOL_CHIPS; k++)
+  for (uint8_t k = 0; k < n; k++)
     if (!_get_bits(buf, pos + k, 1)) chips |= 1ULL << k;
   return chips;
 }
@@ -205,15 +221,15 @@ static uint64_t _get_chips(const uint8_t* buf, uint16_t pos)
 // Nearest symbol value
 static uint8_t _cyrf_decode_symbol(const frame_t* f, uint64_t chips)
 {
+  uint8_t n = _cyrf_n(f);
   uint8_t best = 0, best_d = 0xFF;
-  for (uint8_t code = 0; code < 2; code++) {
-    uint64_t c = _cyrf_code(f->data_code + 8 * code);
-    for (uint8_t r = 0; r < 64; r++) {
-      uint64_t s = r ? (c >> r) | (c << (64 - r)) : c;
-      uint8_t d = __builtin_popcountll(chips ^ s);
-      uint8_t v = (code << 6) | r;
-      if (d > 32) {
-        d = 64 - d;
+  for (uint8_t code = 0; code < 128 / n; code++) {
+    uint64_t c = _cyrf_code(f->data_code + code * n / 8, n);
+    for (uint8_t r = 0; r < n; r++) {
+      uint8_t d = __builtin_popcountll(chips ^ _rotate(c, r, n));
+      uint8_t v = code * n + r;
+      if (d > n / 2) {
+        d = n - d;
         v |= 0x80;
       }
       if (d < best_d) {
@@ -237,10 +253,13 @@ static uint16_t _cyrf_crc(const frame_t* f, const uint8_t* data, uint8_t len)
   return crc ^ 0xFFFF;
 }
 
+// CYRF6936 gap chip after the header: the last header chip inverted (measured)
+static uint8_t _cyrf_gap(const frame_t* f) { return !_get_bits(f->known, 8 * f->hdr_len - 1, 1); }
+
 // CYRF6936: chips for n bytes (length, payload, CRC)
 static uint16_t _cyrf_chips(const frame_t* f, uint8_t n)
 {
-  return (f->sdr ? 8 * n : n) * CYRF_SYMBOL_CHIPS;
+  return (f->sdr ? 8 * n : n) * _cyrf_n(f);
 }
 
 // CYRF6936: bytes after the header for n bytes
@@ -522,15 +541,15 @@ static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t l
   }
 
   uint16_t pos = 8 * f->hdr_len;
-  uint64_t code = _cyrf_code(f->data_code);
-  _put_chips(buf, &pos, 0, CYRF_GAP_CHIPS);
+  uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
+  _put_bits(buf, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
   for (uint8_t i = 0; i < n; i++) {
     if (!f->sdr) {
-      _put_chips(buf, &pos, _cyrf_symbol(f, body[i]), CYRF_SYMBOL_CHIPS);
+      _put_chips(buf, &pos, _cyrf_symbol(f, body[i]), _cyrf_n(f));
       continue;
     }
     for (uint8_t b = 0; b < 8; b++)
-      _put_chips(buf, &pos, (body[i] >> b) & 1 ? ~code : code, CYRF_SYMBOL_CHIPS);
+      _put_chips(buf, &pos, (body[i] >> b) & 1 ? ~code : code, CYRF_SDR_CHIPS);
   }
   while (pos & 7) _put_bits(buf, &pos, 1, 1);  // idle chips (0)
   return pos / 8;
@@ -724,14 +743,14 @@ static frame_result_t _decode_a7105(const frame_t* f, const uint8_t* buf, uint8_
 static uint8_t _cyrf_decode_byte(const frame_t* f, const uint8_t* buf, uint16_t* pos)
 {
   if (!f->sdr) {
-    uint8_t v = _cyrf_decode_symbol(f, _get_chips(buf, *pos));
-    *pos += CYRF_SYMBOL_CHIPS;
+    uint8_t v = _cyrf_decode_symbol(f, _get_chips(buf, *pos, _cyrf_n(f)));
+    *pos += _cyrf_n(f);
     return v;
   }
-  uint64_t code = _cyrf_code(f->data_code);
+  uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
   uint8_t v = 0;
-  for (uint8_t b = 0; b < 8; b++, *pos += CYRF_SYMBOL_CHIPS)
-    if (__builtin_popcountll(_get_chips(buf, *pos) ^ code) > 32) v |= 1 << b;
+  for (uint8_t b = 0; b < 8; b++, *pos += CYRF_SDR_CHIPS)
+    if (__builtin_popcountll(_get_chips(buf, *pos, CYRF_SDR_CHIPS) ^ code) > 32) v |= 1 << b;
   return v;
 }
 
@@ -782,12 +801,14 @@ static uint32_t _sync_word(const uint8_t* b, uint8_t len)
 #define SYNC_SCORE_GOOD 16  // in half bits: 8 bit errors, measured: 7 is enough
 
 // Smallest distance between the window at byte 'pos' and the earlier bits, in
-// half bits (bits before the stream are noise: 1/2 error)
+// half bits (bits before the stream are noise: 1/2 error). All the earlier
+// bits: the CYRF6936 SOP code repeats 36 chips later
 static uint8_t _sync_score(const uint8_t* stream, uint8_t pos, uint8_t len)
 {
   uint8_t best = 0xFF;
   int16_t first = 8 * pos;
-  for (int16_t at = first - 8 * len + 1; at < first; at++) {
+  int16_t from = first < 8 * len ? first - 8 * len + 1 : 0;
+  for (int16_t at = from; at < first; at++) {
     uint8_t errors = 0;
     for (int16_t i = 0; i < 8 * len && errors < best; i++) {
       int16_t j = at + i;
@@ -888,17 +909,21 @@ bool frame_init(frame_t* f)
       break;
 
     case FRAME_CYRF: {
-      // 8DR needs the SOP code (no MULTI-Module protocol goes without)
-      if ((f->crc_len && f->crc_len != 2) || (f->var_len && f->prefix_len) || (!f->sop && !f->sdr))
+      // 8DR needs the SOP code, SDR 64 chip codes (as the MULTI-Module protocols)
+      if ((f->crc_len && f->crc_len != 2) || (f->var_len && f->prefix_len) ||
+          (!f->sop && !f->sdr) || (f->sdr && f->data32))
         return false;
       uint16_t pos = 0;
-      uint64_t sop = _cyrf_code(f->sop_code);
+      uint8_t sop_n = f->sop32 ? 32 : 64;
+      uint64_t sop = _cyrf_code(f->sop_code, sop_n);
       for (uint8_t i = 0; i < (f->sop ? CYRF_PREAMBLE_NIBBLES : 16); i++)
         _put_bits(f->known, &pos, 0xC, 4);
       if (f->sop) {
-        _put_chips(f->known, &pos, ~sop, 64);
-        _put_bits(f->known, &pos, 0x5, 4);
-        _put_chips(f->known, &pos, sop, 64);
+        // 4 alternating chips between the copies, from the last one inverted.
+        // The second copy is inverted with 64 chip data codes only (measured)
+        _put_chips(f->known, &pos, ~sop, sop_n);
+        _put_bits(f->known, &pos, _get_bits(f->known, pos - 1, 1) ? 0x5 : 0xA, 4);
+        _put_chips(f->known, &pos, f->data32 ? ~sop : sop, sop_n);
       }
       n = pos / 8;
       f->sync_len = 4;
@@ -931,8 +956,8 @@ bool frame_init(frame_t* f)
     // first chips of the first data bit instead: one sync word per bit value.
     // The first symbol is decoded with these known chips (23 of 64).
     uint16_t pos = 8 * n;
-    uint64_t code = _cyrf_code(f->data_code);  // bit 0
-    _put_chips(f->known, &pos, 0, CYRF_GAP_CHIPS);
+    uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);  // bit 0
+    _put_bits(f->known, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
     _put_chips(f->known, &pos, code, CYRF_SYNC_CHIPS);
     f->known_len = pos / 8;
     f->rx_sync = _sync_word(f->known + f->known_len - f->sync_len, f->sync_len);
@@ -1001,9 +1026,9 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     // Synced with either polarity of the first data bit: the known chips must
     // match the received ones
     uint16_t sym = 8 * f->hdr_len + CYRF_GAP_CHIPS;
-    if (f->rx_sync_alt && 8 * avail >= sym + CYRF_SYMBOL_CHIPS) {
-      uint64_t diff = _get_chips(buf, sym) ^ _cyrf_code(f->data_code);
-      if (__builtin_popcountll(diff >> CYRF_SYNC_CHIPS) > (CYRF_SYMBOL_CHIPS - CYRF_SYNC_CHIPS) / 2)
+    if (f->rx_sync_alt && 8 * avail >= sym + CYRF_SDR_CHIPS) {
+      uint64_t diff = _get_chips(buf, sym, CYRF_SDR_CHIPS) ^ _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
+      if (__builtin_popcountll(diff >> CYRF_SYNC_CHIPS) > (CYRF_SDR_CHIPS - CYRF_SYNC_CHIPS) / 2)
         for (uint16_t p = sym; p < sym + CYRF_SYNC_CHIPS; p++) buf[p >> 3] ^= 0x80 >> (p & 7);
     }
     res = _decode_cyrf(f, buf, avail, len, payload, payload_len);
