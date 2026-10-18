@@ -77,7 +77,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 
 | Repository, branch | Content |
 |---|---|
-| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `radio-tests` | `src/radio.c`, `src/frame.c`, `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/` (unit tests), `docs/` |
+| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/` (unit tests), `docs/` |
 | [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware only (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`) |
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix |
 | same, `e010r5-hop-fix` | The E010R5 fix, PR #1197 |
