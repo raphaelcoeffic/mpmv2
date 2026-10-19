@@ -11,6 +11,12 @@ Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
 (RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
 CYRF6936 / HS6200 / RF2500 / FrSky L framing), built with `-DBENCH=ON`.
 
+The same suites later ran on the MPM v2 prototype (CC2652RB with a SKY66112
+PA/LNA) with the same results: [interop-results.md](interop-results.md#mpm-v2).
+Its HPOSC oscillator is corrected from TI's factory calibration, so the board
+itself needs no frequency calibration; the trims below are for the 4-in-1
+chips' crystals and stay needed, as the MPM `option` is today.
+
 ## Summary
 
 - Works: NRF24L01 and XN297 protocols at 250 kbps and 1 Mbps, both

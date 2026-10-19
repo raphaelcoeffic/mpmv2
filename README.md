@@ -21,6 +21,13 @@ openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf ve
 make -C tests/frame    # host unit tests of the framings
 ```
 
+On the MPM v2 board (console on the USB-C port, J-Link on J10):
+
+```bash
+cmake -S . -B build-v2 -G Ninja -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
+ninja -C build-v2 flash
+```
+
 # Compilation Instructions
 
 This README provides instructions for compiling the project using CMake with the

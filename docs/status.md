@@ -3,14 +3,16 @@
 The goal: a MULTI-Module built around one 2.4 GHz SoC instead of the four
 chips of the 4-in-1 (CC2500, NRF24L01, A7105, CYRF6936), running the MPM
 protocols with the same functionality: TX, telemetry and bind RX, and the RX
-protocols. The chip isn't chosen yet. The CC2652R was the first dev board at
-hand, so it is the first candidate assessed.
+protocols. The CC2652 is the first candidate assessed: first on a CC2652R1
+LaunchPad, now on an MPM v2 prototype board (CC2652RB, SKY66112 PA/LNA, see
+[hardware.md](hardware.md)). Neither the chip nor the board is settled.
 
 Status in October 2026: on the bench, the CC2652 sends and receives the
 on-air format of every MPM protocol of the four chips, against the chips of a
-real 4-in-1 module. The one exception is CFlie at 2 Mbps. No protocol runs on
-the CC2652 yet: what exists is the radio driver, the framing layer and the
-test rig.
+real 4-in-1 module, from the LaunchPad and from the MPM v2 board. The one
+exception is CFlie at 2 Mbps. No protocol runs on the CC2652 yet: what exists
+is the radio driver, the framing layer, the MPM v2 board support and the test
+rig.
 
 ## Done
 
@@ -19,7 +21,17 @@ bare-metal. Only `rfc.c`/`rfc.h` and the proprietary CPE patch come from TI's
 radio code. It is a raw packet engine: preamble, a 32 bit sync word (plus an
 alternative one), fixed-length data up to 1100 bytes (the advanced commands
 above 255). It also has chained TX -> RX for Enhanced ShockBurst acks, a
-settable sync correlation threshold and a frequency trim.
+settable sync correlation threshold and a frequency trim. On the CC2652RB it
+corrects the BAW oscillator (HPOSC) from TI's factory calibration and the chip
+temperature: about 98 ppm fast on the MPM v2 board, within about 10 kHz of the
+LaunchPad once corrected, no per-board calibration.
+
+**MPM v2 board support** (`src/board.c`, `src/board.h`): the pinout from the
+schematic and the RF front end set up at boot: RF switch to the CC2652, the
+PA/LNA switched by the RF core (`RFC_GPO1`), antenna 1, SX1281 held in reset,
+module inverters idle. TX power default `0x2853` (0 dBm into the PA, about
++20 dBm out, within the SKY66112 input limit). Pins, RF chain and the changes
+for the next revision: [hardware.md](hardware.md).
 
 **Framing layer** (`src/frame.c`): the packet formats of the MPM chips, built
 and decoded in software over the raw radio:
@@ -48,6 +60,9 @@ measured on air, because the datasheets don't give it:
 set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
 
 - On the MPM side, the bench firmware is branch `mpm-bench` of the MPM fork.
+- The CC2652 side runs on the LaunchPad or the MPM v2 board (`-p v2`,
+  `CC_PORT=v2`): USB-C console, flashing with a J-Link on J10 through OpenOCD
+  (`ninja flash`).
 - The rig has suites per chip family, captures of the real MPM protocols, and
   frequency scans and raw captures for reverse engineering.
 - 12 host unit tests (`tests/frame`) check `frame.c` against the MPM encoders
@@ -61,6 +76,13 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
   own register tables, mostly 97 to 100% each way.
 - E01X, E129, C186, E010R5 and FrSky L run with the real MPM protocol code.
 - Not possible: 2 Mbps RX (CFlie).
+- The MPM v2 board gives the same results as the LaunchPad: 96 to 100% from
+  the MPM chips, 94 to 100% to them (CC2500 at full power: 80 to 100%). The
+  losses below 100% that were tracked down are on the bench side: too much
+  signal at +20 dBm and 1 m (CC2500), read stalls and a race in the MPM bench
+  firmware (fixed), and Wi-Fi beacons and traffic against the CYRF6936 bind
+  power (PA 0, about -50 dBm).
+  Still unexplained: [below](#losses-still-to-explain).
 
 What it means for the chip choice, and the requirements any other candidate
 must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
@@ -72,6 +94,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 | E010R5 changes the channel while the last packet is still on air (1 in 6 corrupted) | Fixed: [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197) |
 | XN297 emulation: no CRC xorout on TX in the unscrambled enhanced mode (RX applies it in debug builds) | Fixed, branch `xn297-enhanced-xorout` of the fork. No protocol uses the mode, no PR |
 | E01X: `HS6200_calc_crc()` reads `msg[pos+1]`, a stale stack byte: the CRC is right for 3% of E012 packets | Documented, with a fix (`msg[pos]`) checked against the CC2652. Needs an E01X model to test before a PR |
+| Bench firmware only: CC2500 RX read `RXBYTES` before `MARCSTATE`, a packet ending in between came out short | Fixed in `mpm-bench` |
 
 ## Where things are
 
@@ -82,10 +105,39 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix |
 | same, `e010r5-hop-fix` | The E010R5 fix, PR #1197 |
 
+To build the bench firmware with both fixes, merge the two branches into a
+local branch off `mpm-bench` ([bench.md](bench.md)).
+
+## Losses still to explain
+
+Results below 100% with no cause found yet, most useful first. The others
+(NRF address `5555555555`, 2 Mbps RX, the CC2500 and CYRF6936 losses on the
+MPM v2 board, FlySky in Wi-Fi channel 1, E01X and E010R5) are explained in
+[interop-results.md](interop-results.md).
+
+1. **A7105 at 500 kbps, CC2652 -> A7105:** WFLY2 96.5 to 97.8%, Joysway
+   94.4 to 98.6%, FlySky 99 to 99.8%, all CRC errors, whatever the CC2652
+   power. FlySky and AFHDS2A are among the most used protocols.
+2. **CYRF6936, CC2652 -> CYRF6936, at full power:** Kyosho3 95 to 99%,
+   Scorpio 97 to 100%, MLINK 97 to 100%. MLINK is only received with the
+   chips inverted (not understood).
+3. **NRF24L01 2 Mbps, CC2652 -> NRF:** 92 to 97% (LaunchPad), 94.8 to 100%
+   (MPM v2). The CFlie direction.
+4. **Smaller ones:** Height 5 ch 88 to 100% (the A7105 RX restart between
+   short packets?), Bugs 97.6 to 99%, NRF address `0f0f0f0f0f` 97.6 to 99.6%
+   at 1 Mbps (a weak sync word), and the LaunchPad CC2500 runs that dropped to
+   91 to 100% on some re-runs (Skyartec, SFHSS, Corona: the MPM read stalls?).
+
+The loss timing tells Wi-Fi from a format problem: Wi-Fi beacons take out
+packets 102.4 ms apart.
+
 ## Not covered yet
 
 - **Sensitivity, range, blocking.** Nothing was measured: there is no
-  attenuator on the bench, and the signal is around -20 to -30 dBm. These are
+  attenuator on the bench. The signal is around -20 to -30 dBm from the
+  LaunchPad, stronger from the MPM v2 (+20 dBm). At about -50 dBm (the
+  CYRF6936 bind power) Wi-Fi already costs 1 to 17% depending on the channel;
+  the CYRF6936 loses as much from the MPM v2 at its lowest power. These are
   the most likely losses:
   - the stricter sync threshold used for weak sync words;
   - the CYRF6936 DSSS processing gain, only partly kept: the chips are
@@ -107,8 +159,9 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
   CC2652).
 - **2 Mbps RX.** The only route on the CC2652 is the BLE 2M PHY, untried (see
   the assessment).
-- **TX power.** The CC2652R tops out at +5 dBm. 4-in-1 modules have a PA and
-  an LNA: either a CC2652P (+20 dBm PA) or an external front end.
+- **TX power and the front end.** The MPM v2 board has an external PA/LNA
+  (SKY66112, about +20 dBm). Output power, harmonics and the LNA's effect on
+  sensitivity and blocking are not measured (no RF equipment yet).
 
 ## Next steps toward MPM v2
 
@@ -149,9 +202,11 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
    need fast RX/TX turnaround.
 5. **Test with real hardware.** Test each protocol with real receivers and
    models: bind, control, telemetry, failsafe. The E01X fix too.
-6. **Hardware.** A PA/LNA or a CC2652P, the antenna, and a per-module
-   frequency trim stored in flash. The MPM `option` does that job today: the
-   bench boards are 35 kHz (CC2500) and 90 kHz (A7105) off.
+6. **Hardware.** The MPM v2 prototype has the PA/LNA; the changes for the
+   next revision are listed in [hardware.md](hardware.md). Its own frequency
+   needs no per-board calibration (HPOSC correction). The receivers' crystals
+   still vary: the 4-in-1 chips of the bench are 35 kHz (CC2500) and 90 kHz
+   (A7105) off, which the MPM `option` corrects per model today.
 
 ## Questions for review
 
