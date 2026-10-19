@@ -116,8 +116,10 @@ MPM v2 board, FlySky in Wi-Fi channel 1, E01X and E010R5) are explained in
 [interop-results.md](interop-results.md).
 
 1. **A7105 at 500 kbps, CC2652 -> A7105:** WFLY2 96.5 to 97.8%, Joysway
-   94.4 to 98.6%, FlySky 99 to 99.8%, all CRC errors, whatever the CC2652
-   power. FlySky and AFHDS2A are among the most used protocols.
+   94.4 to 98.6%, FlySky 99 to 99.8%, all CRC errors. Not Wi-Fi, power,
+   frequency offset or GFSK vs 2-FSK; Joysway's errors depend on the data
+   and on its RX table ([details](interop-results.md#a7105)). Next: a real
+   FlySky / AFHDS2A receiver (FS-iA6B), or a second A7105 as a reference.
 2. **CYRF6936, CC2652 -> CYRF6936, at full power:** Kyosho3 95 to 99%,
    Scorpio 97 to 100%, MLINK 97 to 100%. MLINK is only received with the
    chips inverted (not understood).

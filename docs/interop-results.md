@@ -217,6 +217,28 @@ CC2652 (`TX_II` 0x2B, FlySky without FEC: 186 kHz 2.4% CRC errors, 250 kHz
 0.6%, 140 and 300 kHz worse). The remaining CRC errors at 500 kbps do not
 depend on the CC2652 power: no second A7105 to compare with.
 
+The CRC errors at 500 kbps, looked at with the MPM v2 (500 packets per test,
+the MPM reports the bad packets with their data):
+
+- Random in time (no 102.4 ms Wi-Fi beacon pattern), mostly one wrong bit per
+  packet. The rate moves from run to run (WFLY2: 0.2 to 6%), more than with
+  any of the changes below.
+- Not changed by: the CC2652 power (about +20, +17 and +1 dBm out),
+  the frequency offset (trim 60 to 180 kHz; 0 and 30 kHz are worse), 2-FSK
+  instead of GFSK (the A7105 itself sends 2-FSK: `TX_I` FS = 0).
+- Joysway: most errors are bit 4 of payload byte 0 (0xA5 -> 0xB5), the first
+  0 after about 10 alternating bits (end of the ID 0x2A, then 1010 0100).
+  Other first bytes (0x00, 0x3C, 0xFF) don't do it. WFLY2 sends the same ID
+  and first byte without it: the Joysway table receives differently. It sets
+  `RX` (0x18) RXSM to 00 and `RX_GAIN_IV` (0x1C) LHC to 11, where the
+  datasheet says 11 and 01; 0x1C at 0x0A cut the errors in some runs, not in
+  others.
+
+Without a second A7105 sending, the CC2652 signal can't be told from the
+A7105 receiver at 500 kbps with these tables. A real receiver settles it for
+the protocols that matter (FlySky / AFHDS2A, an FS-iA6B is at hand), AFHDS2A
+with its FEC.
+
 ## CYRF6936
 
 `suite_cyrf.py` (100 packets each way, all bytes compared, 10 to 20 ms
