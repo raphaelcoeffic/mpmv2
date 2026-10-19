@@ -219,7 +219,9 @@ packets 102.4 ms apart.
 7. **Update from the radio.** Boot loader in flash sector 0
    (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
    MULTI-Module, works over USB; EdgeTX branch `mpm-v2-flash` for the MPM v2
-   files. Next: try it from a radio. See [update.md](update.md).
+   files. Next: the module bay path, with a radio simulator on an
+   RP2040-zero (radio lines, switched module power) on the bench first. See
+   [update.md](update.md).
 
 ## Questions for review
 

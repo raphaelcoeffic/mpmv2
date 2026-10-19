@@ -7,7 +7,8 @@ and EdgeTX writes it through the module bay, no USB and no tools.
 Status: the boot loader (`src/bootloader/`, `-DBOOTLOADER=ON`) works over
 USB with a host tool that does what EdgeTX does; the EdgeTX side is on
 branch `mpm-v2-flash` (not pushed). Not yet tried from a radio: the module
-bay lines (inverted, S.Port polarity through U9) are untested.
+bay lines (inverted, S.Port polarity through U9) are untested, see
+[To test with a radio](#to-test-with-a-radio).
 
 ## What EdgeTX does today
 
@@ -216,12 +217,79 @@ USB serial adapter (TX to the PPM pin, RX from S.Port).
   ELRS-like one): the ROM boot loader isn't on the module bay pins, and
   STK500 does the job.
 
+## To test with a radio
+
+Everything above was tested over USB only. The module bay path needs a
+radio, or the radio simulator planned for the bench (below). What to test,
+and what may go wrong:
+
+1. **Sync over the module bay** (EdgeTX `mpm-v2-flash`, "Flash External
+   Multi" with `mpm-v2.bin`).
+   - *RX polarity:* DIO22 is inverted in the I/O controller on the
+     assumption that the radio's soft serial idles low on the PPM pin. If
+     the bytes arrive wrong, no sync, and the window ends on "noise".
+   - *S.Port polarity through U9:* the reasoning is that TX1_INV = 1 makes
+     U9 pull S.Port low at idle (D4) and R22 pull it up for the high bits.
+     If D4 / R22 work the other way, EdgeTX reads nothing ("no response")
+     or garbage. Check the S.Port level on a scope before and after the
+     sync.
+   - *S.Port drive strength:* R22 against the radio's S.Port input
+     (pull-down?) decides the high level and the edge times at 57600.
+2. **Window timing with a real power up.** EdgeTX powers the module up
+   with its TX line already idle, waits 10 ms, then syncs every 100 ms: the
+   power rail rise, the ROM boot and `board_init()` (HPOSC) must leave the
+   first or second sync inside the 300 ms window.
+   - *A glitch at power up* (the line or the module rail rising) reads as
+     one or two bytes: below `BL_NOISE_BYTES`, but to be checked.
+3. **No radio and radio not sending.** `BL_RADIO_ABSENT_LEVEL` assumes DIO22
+   reads high (R14) with nothing on the PPM pin, and low (radio soft serial
+   idle) with a radio. Check both levels, and the time to the application:
+   - module on USB alone (bench): 20 ms window;
+   - radio powering the module before it sends (EdgeTX boot): the window
+     runs until the first frames, at most 300 ms;
+   - radios whose PPM pin idles high or floats while the radio boots: the
+     module starts after 20 ms, so a flash right after that has to power
+     cycle again (EdgeTX does).
+4. **Radio reboot with frames running** (watchdog, model in the air): does
+   the radio cut the module power? If so, time from the first frame to the
+   module sending RF again. Expected: the window ends on the first frame
+   (8 bytes of noise), plus the application's start.
+5. **PPM input** instead of serial: PPM edges must count as noise (framing
+   errors). A PPM train with long gaps could end the window late only if
+   it looks idle for 300 ms, which it can't.
+6. **The whole update from the radio:** 56 KB and a large image (200 KB,
+   past the 16 bit address), EdgeTX's progress and messages, then the new
+   application running. Also: a wrong file (STM32 `.bin` on the MPM v2,
+   MPM v2 `.bin` on an STM32 MULTI-Module, refused by EdgeTX before
+   writing), and pulling the module out mid-update (boot loader in charge
+   at the next power up, flash again).
+7. **Internal module** (a later board): the same over the duplex UART at
+   normal polarity, and the recovery through `serialpassthrough` and
+   `bootpin` (see Internal modules).
+
+## Radio simulator (planned)
+
+Until then the bench rig is the test bed. A radio simulator on an
+RP2040-zero will stand in for the radio:
+
+- the module bay lines: inverted serial out on the PPM pin, inverted serial
+  in from S.Port, normal polarity for an internal module's UART;
+- a high-side switch on the module power, as the radios have
+  (`modulePortSetPower()`), to time power ups;
+- EdgeTX's flashing sequence (power off 3 s, on, sync, pages, as
+  `stk500_flash.py`), and normal traffic: MULTI serial frames (100k 8E2)
+  and PPM, to check the window ends on them;
+- a radio reboot: frames, power off for a radio's boot time, power on,
+  frames again, with the time until the module answers.
+
+Points 1 to 6 above can then be run on the bench; a real radio is still
+needed for the EdgeTX side (`mpm-v2-flash`) and the radios' own line
+levels.
+
 ## Next
 
-1. Try from a radio: external bay (`mpm-v2-flash` EdgeTX), the S.Port
-   polarity and the window timing with a real power up; then a radio reboot
-   with frames running (module back with the first frames).
-2. Check `BL_RADIO_ABSENT_LEVEL` and the radio line idle level on the
-   module bay with a radio connected but not sending.
-3. Make `-DBOOTLOADER=ON` the default for the MPM v2 once tried from a
-   radio.
+1. Radio simulator, then the tests above.
+2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
+   path works.
+3. Generalise the radio port (UART0 or UART1, polarity) for internal
+   module boards.
