@@ -269,9 +269,41 @@ the MPM reports the bad packets with their data):
   in the morning, 67 to 87% in the afternoon, while Hubsan at 100 kbps stayed
   at 100%), more than with any of the changes below (`losses.py a7105 <name>
   --dir rev`).
-- Not changed by: the CC2652 power (about +20, +17 and +1 dBm out),
-  the frequency offset (trim 60 to 180 kHz; 0 and 30 kHz are worse), 2-FSK
+- Not changed by: the CC2652 power (about +20, +17 and +1 dBm out), 2-FSK
   instead of GFSK (the A7105 itself sends 2-FSK: `TX_I` FS = 0).
+- The frequency offset matters more than first measured (WFLY2, 250 packets
+  per point, two interleaved rounds, a later day): trim 0 / 30 / 50 / 70 /
+  90 / 110 / 135 / 180 kHz gave 60-64 / 82-84 / 84-86 / 92 / 94-98 / 93 /
+  76-78 / 58-60%. About 20 kHz off the best point doubles the losses, and
+  the best point moves from day to day (earlier: flat from 60 to 180 kHz).
+  The A7105 crystal drifting with temperature would explain this and the
+  morning / afternoon difference above; not measured yet. The SDR puts the
+  CC2652 at trim 95 about 23 kHz above the A7105's own TX carrier, so the
+  A7105 receives best a little above where it sends. MULTI has the same
+  problem with real receivers: `FORCE_<PROTO>_TUNING` in `_Config.h` for
+  each A7105 protocol (`A7105_AdjustLOBaseFreq`).
+- The bench A7105 RX settings are the protocols' own tables, checked
+  against the datasheet (WFLY2, trim 95 unless noted):
+  - RF switch: `A7105_SetTxRxMode` drives GIO1 / GIO2 as constant outputs
+    (function 11xx, level set by the invert bit), RX = GIO1 0, GIO2 1, as the
+    real protocols. The re-arm (STANDBY, `PLL_I`, RX strobe) is theirs too.
+  - Calibration read back after the runs: IF filter `0x22` 0x05 (FBCF 0,
+    FB 5), VCO band `0x25` 0x34 (VBCF 0, band 4).
+  - `CODE_II` (0x20) ETH, the ID error tolerance: WFLY2 writes 0x12 (0 bits),
+    the datasheet recommends 1. ETH 1 to 3 (0x16 / 0x1A / 0x1E) about halves
+    the missing packets; the single bit CRC errors stay.
+  - `RX` (0x18) FC on (0x72): flat from trim 0 to 180 kHz but 82 to 94%. FC
+    only works with the MCU reading `AC` (0x12, 0x13) and writing the PLL
+    back (AMICCOM reference code), which no MULTI protocol does.
+  - CC2652 deviation: 186 kHz 81-86%, 220 kHz 93-94%, 250 to 280 kHz 94-99%,
+    320 kHz 87-88%, 360 kHz 71-73%, 400 kHz 48-50%. The 250 kHz preset is
+    right.
+  - CC2652 preamble: 8 and 16 bytes no better than 4.
+  - Gain (`RX_GAIN_I`) and VCO band, earlier: lower gain is worse (not
+    overload), forced bands no different.
+  - Carrier spread from packet to packet on the MPM v2 (SDR, 14 and 22
+    packets): A7105 9.1 kHz sd, CC2652 10.8 kHz, not the 16 to
+    23 kHz of the earlier table below.
 - Joysway: most errors are bit 4 of payload byte 0 (0xA5 -> 0xB5), the first
   0 after about 10 alternating bits (end of the ID 0x2A, then 1010 0100).
   Other first bytes (0x00, 0x3C, 0xFF) don't do it. WFLY2 sends the same ID
