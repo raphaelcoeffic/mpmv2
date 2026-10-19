@@ -1,0 +1,99 @@
+#pragma once
+
+// MULTI-Module core: takes the frames of the radio, runs the selected protocol
+// and sends the module status back, after Multiprotocol.ino of the MPM
+// (loop(), Update_All(), protocol_init(), update_serial_data())
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "mpm_frame.h"
+
+// Version in the status telemetry: the MPM release whose serial link and
+// telemetry this follows. EdgeTX warns below 1.3.3.0
+#define MPM_VERSION_MAJOR 1
+#define MPM_VERSION_MINOR 3
+#define MPM_VERSION_REVISION 4
+#define MPM_VERSION_PATCH 74
+
+// No frame from the radio for this long: input signal lost, the protocol
+// callbacks stop
+#define MPM_INPUT_TIMEOUT_MS 70
+// Status telemetry period
+#define MPM_STATUS_PERIOD_MS 500
+// The first callback of a protocol, after its init
+#define MPM_FIRST_CALLBACK_US 5000
+// Input frames are processed between callbacks if this much time is left
+#define MPM_UPDATE_MIN_US 900
+// Or after this many callbacks without time for it
+#define MPM_UPDATE_FORCE 10
+
+// Channels 5 to 12 above this: Channel_AUX bits
+#define MPM_CHANNEL_SWITCH 1106
+
+#define MPM_PROTO_LIST 0
+
+typedef struct {
+  uint8_t id;             // protocol number of the serial link
+  const char* name;       // up to 7 characters
+  uint8_t n_sub;          // sub protocols, 0 = none
+  uint8_t sub_len;        // length of a sub protocol name
+  const char* sub_names;  // n_sub names of sub_len characters each
+  uint8_t option_type;    // mpm_option_type_t
+  bool failsafe;          // supports failsafe
+  bool ch_map;            // supports disabling the channel mapping
+  // Starts the protocol (mpm state set: sub protocol, option, id, bind...).
+  // May reject the sub protocol: mpm_sub_invalid()
+  void (*init)();
+  // Called again after the returned number of microseconds
+  uint32_t (*callback)();
+  // The radio clears the bind flag, NULL = mpm_bind_done()
+  void (*end_bind)();
+} mpm_protocol_t;
+
+// The protocol table, in the order the radio lists them
+extern const mpm_protocol_t mpm_protocols[];
+extern const uint8_t mpm_protocol_count;
+
+typedef struct {
+  // From the radio
+  uint8_t protocol;
+  uint8_t sub_protocol;
+  uint8_t rx_num;
+  int8_t option;
+  bool autobind;
+  bool range_check;
+  bool low_power;
+  bool disable_telem;
+  bool disable_ch_map;  // only if the protocol supports it
+  bool telem_invert;
+  uint16_t channels[MPM_CHANNELS];  // 0..2047, MPM_CHANNEL_MIN..MAX = -+100%
+  uint16_t failsafe[MPM_CHANNELS];  // MPM_FAILSAFE_NO_PULSE, _HOLD or a value
+  bool failsafe_valid;              // failsafe values received since init
+  uint8_t channel_aux;              // bit i: channel 5 + i above MPM_CHANNEL_SWITCH
+  uint8_t data[MPM_FRAME_DATA_MAX]; // protocol data of the last frame
+  uint8_t data_len;
+  // Module
+  uint32_t id;               // module id + rx_num
+  uint8_t rx_tx_addr[5];     // from id, as set_rx_tx_addr()
+  bool bind_in_progress;
+  bool input;                // frames from the radio
+  bool proto_valid;          // protocol and sub protocol found and started
+} mpm_state_t;
+
+extern mpm_state_t mpm;
+
+void mpm_init();
+
+// One step of the main loop: call it continuously. Runs the protocol
+// callback when due, processes the radio frames in between
+void mpm_poll();
+
+// Main loop, never returns
+void mpm_run();
+
+// For protocols
+void mpm_bind_done();
+void mpm_sub_invalid();
+// Telemetry frame of the given type: header + data
+void mpm_telem_send(uint8_t type, const uint8_t* data, uint8_t len);

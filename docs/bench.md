@@ -150,6 +150,7 @@ setup, setups as `;`-separated commands or example files
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
 | `timing.py` | Bench `timing` per PHY (NRF, FrSky D and X, AFHDS2A, DSM): TX start, hop, turnarounds, RSSI, as a table ([radio-interface.md](radio-interface.md)) |
 | `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
+| `radio_sim.py` | The radio side of the MPM serial link for the firmware without `BENCH` (MPM core): frames every 7 ms at 100000 8E2, status, protocol list scan, bind, test protocol to the 4-in-1 ([mpm-core.md](mpm-core.md)) |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
 
 ### ESP32-S3 as a third receiver

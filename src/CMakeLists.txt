@@ -7,6 +7,11 @@ set(firmware_sources
     lfs_driver.c
     led_rgb.c
     main.c
+    mpm/mpm.c
+    mpm/mpm_frame.c
+    mpm/mpm_port.c
+    mpm/protocols.c
+    mpm/proto_test.c
     nor_flash.c
     ppm.c
     frame.c
@@ -22,6 +27,7 @@ set(firmware_sources
 add_executable(firmware
     ${firmware_sources}
 )
+target_include_directories(firmware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(board_definitions "")
 if (USE_XOSC)

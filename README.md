@@ -12,6 +12,7 @@ Radio work so far, see `docs/`:
 - [docs/bench.md](docs/bench.md): the test rig (bench firmwares, host tools in `tools/bench`, unit tests in `tests/frame`)
 - [docs/rf-core-notes.md](docs/rf-core-notes.md): what was found inside the CC2652 RF core (modem registers, CPE parameters)
 - [docs/radio-interface.md](docs/radio-interface.md): the radio driver interface, what the MPM protocols need from it, the CC2652's measured latencies
+- [docs/mpm-core.md](docs/mpm-core.md): the MULTI-Module core (`src/mpm`): serial link with the radio, scheduler, telemetry, test protocol
 
 Credits: the RF core work builds on the 38C3 talk "Beyond BLE: Cracking open
 the black-box of RF microcontrollers" by Adam Batori and Robert Pafford
@@ -27,6 +28,7 @@ cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON -DCMA
 ninja -C build-bench
 openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
 make -C tests/frame    # host unit tests of the framings
+make -C tests/mpm      # host unit tests of the MPM core
 ```
 
 On the MPM v2 board (console on the USB-C port, J-Link on J10):

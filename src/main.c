@@ -8,6 +8,7 @@
 #include "bench.h"
 #include "board.h"
 #include "file_system.h"
+#include "mpm/mpm.h"
 #include "ppm.h"
 #include "serial.h"
 #include "shell.h"
@@ -196,7 +197,9 @@ static void stop_signal_receiver(signal_type_t t)
   }
 }
 
-static void main_loop()
+// Input signal detection (PPM / serial), not used yet: the MULTI-Module core
+// takes the serial input
+__attribute__((unused)) static void main_loop()
 {
   signal_type_t signal = SIGNAL_TYPE_NONE;
   uint32_t timeout = 0;
@@ -275,5 +278,6 @@ int main(void)
   //   // test_print_file();
   // }
 
-  main_loop();
+  mpm_init();
+  mpm_run();
 }

@@ -78,6 +78,13 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
 - 12 host unit tests (`tests/frame`) check `frame.c` against the MPM encoders
   and against raw captures.
 
+**MPM core** (`src/mpm/`, [mpm-core.md](mpm-core.md)): the MPM main loop
+in plain C: the radio's serial frames, the µs callback scheduler, protocol
+start and bind, status telemetry and the protocol list EdgeTX reads. A test
+protocol (NRF24L01 every 4 ms) runs on the LaunchPad against a simulated
+radio (`radio_sim.py`): the 4-in-1 receives it with all channels right,
+callback period within ±5 µs while frames and telemetry are processed.
+
 **Results** ([interop-results.md](interop-results.md)):
 
 - NRF24L01 and XN297 work at 250 kbps and 1 Mbps both ways, ESB acks and ack
@@ -116,7 +123,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 
 | Repository, branch | Content |
 |---|---|
-| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/` (unit tests), `docs/` |
+| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
 | [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`), plus the two fixes below |
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix alone |
 | same, `e010r5-hop-fix` | The E010R5 fix alone, PR #1197 |
@@ -222,10 +229,10 @@ packets 102.4 ms apart.
    API, is cleaner but diverges from upstream. Recommended: the virtual chips,
    starting with the NRF24L01 / XN297 and CC2500 families (the most
    protocols).
-3. **Port the MPM core.** Port the µs callback scheduler on a CC2652 timer,
-   the protocol table, and the serial protocol from the radio (mpm-v2 already
-   has the PPM input, input detection, the serial port and the flash). Then
-   bring protocols over one family at a time, each checked on the bench
+3. **Port the MPM core.** Done for the serial link ([mpm-core.md](mpm-core.md)):
+   scheduler, protocol table, frames, status and protocol list. Left: the
+   module bay (UART1, inverted), PPM input, channel order, wait-for-bind.
+   Then bring protocols over one family at a time, each checked on the bench
    (`proto_capture.py` and the suites work against the CC2652 too).
 4. **Measure and fix the timing.** Measure RF core command latencies, then
    check that hopping and TX fit in each protocol's period. Telemetry and ESB
