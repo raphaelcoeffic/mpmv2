@@ -27,7 +27,8 @@
 //                                chip stream, prefix 4e: its first payload byte)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
-//   pwr <word>                   RF core TX power word (applied by next preset/phy)
+//   pwr <word|default>           RF core TX power word (applied by next preset/phy),
+//                                default: RF_TX_POWER_DEFAULT (board.h)
 //   syncthr <n>                  sync correlation threshold, 0 = auto: default
 //                                (0x1F), strict (0x32) for weak RX sync words
 //   sync <hex>                   raw framing: sync word, 1 to 4 bytes
@@ -125,6 +126,7 @@ static uint8_t _tx_len;
 static uint32_t _tx_period;
 static uint32_t _tx_count;
 static uint32_t _tx_next;
+static uint32_t _tx_late_max;  // us, worst txp packet start after its slot
 static uint8_t _seq_idx = SEQ_OFF;
 static uint8_t _seq;
 static uint8_t _rx_len;
@@ -372,10 +374,11 @@ static bool _need_phy()
 static void _cmd_info()
 {
   _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
-          "chplan=%lu/%lu framing=%s esb=%d ack=%d\r\n",
+          "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld hposc=%d\r\n",
           _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
           _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
-          _frame.type == FRAME_NRF && _frame.esb, _ack_on);
+          _frame.type == FRAME_NRF && _frame.esb, _ack_on, _tx_power, _trim_khz,
+          radio_hposc_offset());
 }
 
 // PHY presets. nRF24L01: 160 kHz deviation at 250k/1M, 320 kHz at 2M. XN297 at
@@ -691,7 +694,9 @@ static void _cmd_syncthr(char* args)
 static void _cmd_pwr(char* args)
 {
   uint32_t pwr;
-  if (_number(&args, &pwr)) _tx_power = pwr;
+  while (*args == ' ' || *args == '\t') args++;
+  if (!strncmp(args, "default", 7)) _tx_power = RF_TX_POWER_DEFAULT;
+  else if (_number(&args, &pwr)) _tx_power = pwr;
   _printf("@ok pwr=0x%04x\r\n", _tx_power);
 }
 
@@ -1108,6 +1113,7 @@ static void _cmd_txp(char* args)
   _tx_period = period;
   _tx_count = count;
   _tx_next = micros();
+  _tx_late_max = 0;
   _seq = 0;
   _stat_tx = _stat_rx = _stat_err = _stat_acked = _stat_retries = 0;
   _job = JOB_TXP;
@@ -1157,6 +1163,7 @@ static void _cmd_stop()
   bool was_rx = _job == JOB_RX;
   _job_stop();
   _printf("@ok stop tx=%lu rx=%lu err=%lu", _stat_tx, _stat_rx, _stat_err);
+  if (_stat_tx) _printf(" late_max=%lu", _tx_late_max);
   if (_ack_on) _printf(" acked=%lu retries=%lu", _stat_acked, _stat_retries);
   if (was_rx) {
     radio_rx_stats_t st;
@@ -1225,6 +1232,8 @@ static void _poll_uart()
 static void _run_txp()
 {
   if (micros_before(_tx_next)) return;
+  uint32_t late = micros() - _tx_next;
+  if (late > _tx_late_max) _tx_late_max = late;
   _tx_next += _tx_period;
 
   if (_seq_idx < _tx_len) _tx_buf[_seq_idx] = _seq++;

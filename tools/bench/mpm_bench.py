@@ -159,7 +159,8 @@ def find_port(kind: str = "mpm") -> str:
         return kind
     env = os.environ.get(f"{kind.upper()}_PORT")
     if env:
-        return env
+        # CC_PORT=v2: the MPM v2 is the CC2652 of the rig
+        return find_port(env) if env != kind else env
     if kind == "mpm":
         ports = [p.device for p in list_ports.comports() if p.vid == MAPLE_VID]
     else:

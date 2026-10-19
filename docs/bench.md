@@ -86,10 +86,12 @@ ninja -C build-v2 flash                 # tools/flash_jlink.sh build-v2/firmware
 tools/bench/mpm_bench.py -p v2 shell
 ```
 
-`tools/flash_jlink.sh` takes `$JLINK_DEVICE` (default `CC2652RB`),
-`$JLINK_SPEED` and `$JLINK_SERIAL`. Without a J-Link, `tools/serial_bl.py`
-flashes over USB through the ROM boot loader (DTR/RTS drive RESET and BOOT).
-The board itself is described in [hardware.md](hardware.md).
+`tools/flash_jlink.sh` uses OpenOCD with the J-Link (`ti_cc26x2.cfg`): no
+SEGGER DLL, so no J-Link EDU terms of use pop-up. `JLINK_TOOL=segger` uses
+J-Link Commander instead (`$JLINK_DEVICE`, default `CC2652RB`). Both take
+`$JLINK_SPEED` and `$JLINK_SERIAL`. `tools/serial_bl.py` only checks that the
+ROM boot loader answers over USB (DTR/RTS drive RESET and BOOT); it doesn't
+flash. The board itself is described in [hardware.md](hardware.md).
 
 `src/bench.c` is the command interpreter, `src/radio.c` the RF core driver
 (bare-metal proprietary mode: `rfc.c`/`rfc.h` and the proprietary CPE patch
@@ -102,7 +104,9 @@ installed on the fly): run them as `uv run tools/bench/<script>` or directly.
 
 Ports: `$MPM_PORT`, `$CC_PORT` and `$V2_PORT`, otherwise the first STM32duino
 USB serial port (VID `1eaf`), the first XDS110 port and the first CH343 port
-(MPM v2, `1a86:55d3`).
+(MPM v2, `1a86:55d3`). `CC_PORT=v2` runs any script with the MPM v2 as the
+CC2652, `CC_INIT` adds commands on it first (e.g. `CC_INIT="pwr 0x12d6"`, -5 dBm
+into the PA: +20 dBm at 1 m overloads some 4-in-1 receivers).
 
 ```sh
 tools/bench/mpm_bench.py ports

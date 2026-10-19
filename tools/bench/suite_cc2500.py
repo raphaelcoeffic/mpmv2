@@ -38,7 +38,7 @@ P = {
     "ikea": ("ikea.txt", "preset ikea;ch 16", 0),
     "corona": ("corona.txt", "preset corona", 0),
     # V2 freezes the CC2500 AGC: lower the CC2652 power
-    "coronav2": ("corona.txt;w 0x0e 8000;w 0x15 0x50;w 0x1b 67fbdc;ch 0", "pwr 0x10c3;preset coronav2;pwr 0x7217", 0),
+    "coronav2": ("corona.txt;w 0x0e 8000;w 0x15 0x50;w 0x1b 67fbdc;ch 0", "pwr 0x10c3;preset coronav2;pwr default", 0),
     "fdv3": ("corona.txt;w 0x15 0x50;ch 0", "preset fdv3", 0),
     "ares": ("ares.txt", "preset ares", 0),
     "radiolink": ("radiolink.txt", "preset radiolink", 0),

@@ -14,6 +14,9 @@ from run to run: re-runs gave 92 to 100% on some CC2652 -> MPM
 directions (FrSky X, V8, Corona V2, Skyartec, SFHSS, Kyosho3) that had been
 100%.
 
+The sections below are the LaunchPad (CC2652R1, +5 dBm, no front end). The
+same suites on the MPM v2 board are in [MPM v2](#mpm-v2).
+
 ## NRF24L01
 
 `suite_nrf.py nrf1m nrf250k nrf2m` (250 packets, 16 byte payload):
@@ -335,3 +338,51 @@ All the MPM protocols of the four chips have been run: the CC2500, A7105 and
 CYRF6936 DSSS ones with their own register setups, the GFSK mode ones and
 FrSky L with the real protocol code. CFlie at 2 Mbps is the only one left
 (no 2 Mbps receiver on the CC2652).
+
+## MPM v2
+
+The same suites with the MPM v2 board (CC2652RB, SKY66112 PA/LNA, see
+[hardware.md](hardware.md)) in place of the LaunchPad: `CC_PORT=v2`, the two
+modules about 1 m apart on a desk, MPM v2 at its default power (`0x2853`,
+0 dBm into the PA, about +20 dBm out), October 2026.
+
+**Frequency.** The CC2652RB runs on its BAW oscillator (HPOSC), about 98 ppm
+fast on this chip (`info`: `hposc=-411`). With the HPOSC correction in
+`radio.c` it lands within about 10 kHz of the LaunchPad: the CC2500 receives
+the MPM v2 FrSky D packets from -80 to 0 kHz of `trim` (LaunchPad: -60 to 0),
+the A7105 Hubsan packets reach the MPM v2 from about -100 to +300 kHz of
+detuning (centre about +100, LaunchPad +90). The `trim` values of the setups
+carry over.
+
+| Family | MPM -> MPM v2 | MPM v2 -> MPM |
+|---|---|---|
+| NRF24L01 1 Mbps / 250 kbps, 6 addresses | 99.6 to 100% | 99.2 to 100% |
+| NRF24L01 2 Mbps | (no 2 Mbps RX) | 94.8 to 100% |
+| XN297, all modes of `suite_nrf.py` | 100% | 100% |
+| ESB 250 kbps (`esb.py`) | | 250/250 acked on the 1st try |
+| CC2500, the 18 setups of `suite_cc2500.py` | 100% | 80 to 100%, see below |
+| A7105, the 11 setups of `suite_a7105.py` | 100% | 94.4 to 100% (Joysway 94.4%, Bugs 97.6%, WFLY2 97.8%) |
+| CYRF6936, the 12 setups of `suite_cyrf.py` | 96 to 100% (LaunchPad: 99 to 100%) | 99 to 100% |
+
+CC2500, MPM v2 -> MPM below 100% at full power: Redpine 80%, Hitec 93%,
+Ares and FrSky X LBT 94%, Redpine slow 96.5%, FrSky X, IKEA and Corona V2 97%.
+Three causes, none on the MPM v2 side:
+
+- **Too much signal.** At -5 dBm (`CC_INIT="pwr 0x12d6"`) Hitec and Ares get
+  100%; at -21 dBm (`0x04c6`) they drop again (90 to 96.5%). +20 dBm at 1 m
+  overloads the 4-in-1 receiver (it has an LNA too).
+- **MPM read stalls.** Redpine (3 ms period) loses runs of exactly 10 packets
+  in some runs: the packet before the gap is read 33 ms late by the MPM, while
+  the MPM v2 sends on time (`stop` reports `late_max`, under 10 us). With the
+  CC2500 going idle after each packet ("rx 0"), everything sent during the
+  stall is lost. Most runs get 100%.
+- **MPM bench race (FrSky X LBT).** The "other" packets are the first 10 of a
+  run, each 3 bytes short (last payload byte and status missing).
+  `bench_receive()` reads `RXBYTES` before checking `MARCSTATE`: when the
+  packet ends between the two reads, the MPM takes the radio as idle with the
+  old byte count and flushes the rest. Fix in `mpm-bench`: read `MARCSTATE`
+  first.
+
+Open: CYRF6936 -> MPM v2 loses 1 to 4% (DSM bind, Devo, WK2x01) where the
+LaunchPad got 99 to 100%. Not checked yet whether
+the MPM v2 receiver (11 dB LNA in front) is overloaded by the 4-in-1 PA at 1 m.

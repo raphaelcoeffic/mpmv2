@@ -10,6 +10,7 @@ command file, looked up in examples/ when it isn't a path:
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -41,8 +42,12 @@ def run(dev: Bench, spec, verbose: bool = False):
 
 
 def open_devices() -> tuple[Bench, Bench]:
-    """(MPM, CC2652); the CC2652 bench runs on a 921600 baud UART."""
-    return Bench(find_port("mpm")), Bench(find_port("cc"), 921600)
+    """(MPM, CC2652); the CC2652 bench runs on a 921600 baud UART.
+    CC_PORT=v2 uses the MPM v2 instead of the LaunchPad. $CC_INIT: commands
+    run on the CC2652 first, e.g. CC_INIT="pwr 0x04c6" (applies at the next preset)."""
+    mpm, cc = Bench(find_port("mpm")), Bench(find_port("cc"), 921600)
+    run(cc, os.environ.get("CC_INIT"))
+    return mpm, cc
 
 
 def drain(dev: Bench):

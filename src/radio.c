@@ -1,3 +1,5 @@
+#include <driverlib/aon_batmon.h>
+#include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include <driverlib/rfc.h>
 #include <driverlib/rf_data_entry.h>
@@ -36,8 +38,16 @@ static const uint32_t _base_overrides[] = {
 };
 #define BASE_OVERRIDES (sizeof(_base_overrides) / sizeof(_base_overrides[0]))
 
-// Base + anti-aliasing filter + sync threshold + end marker
-static uint32_t _overrides[BASE_OVERRIDES + 3];
+// Base + anti-aliasing filter + sync threshold + HPOSC + end marker
+static uint32_t _overrides[BASE_OVERRIDES + 4];
+
+// HPOSC (BAW oscillator of the CC2652RB): the RF core is told the HF clock
+// offset, from the factory calibration and the chip temperature, as the TI
+// RF driver does (HPOSC_OVERRIDE at setup, CMD_UPDATE_HPOSC_FREQ afterwards)
+#define HPOSC_CHECK_MS 1000
+static bool _hposc;
+static int16_t _hposc_offset;  // 2^-22 relative
+static uint32_t _hposc_check;
 
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_FS_t _fs;
@@ -159,6 +169,38 @@ static radio_status_t _power_up()
   return RADIO_OK;
 }
 
+static void _hposc_init()
+{
+  static bool done;
+  if (done) return;
+  done = true;
+
+  _hposc = OSC_IsHPOSCEnabled();
+  if (_hposc) {
+    AONBatMonEnable();
+    OSC_HPOSCInitializeFrequencyOffsetParameters();
+  }
+}
+
+static int16_t _hposc_get_offset()
+{
+  int32_t offset = OSC_HPOSCRelativeFrequencyOffsetGet(AONBatMonTemperatureGetDegC());
+  _hposc_check = millis();
+  return OSC_HPOSCRelativeFrequencyOffsetToRFCoreFormatConvert(offset);
+}
+
+// Follow the temperature, the RF core must be idle
+static void _hposc_update()
+{
+  if (!_hposc || millis() - _hposc_check < HPOSC_CHECK_MS) return;
+
+  int16_t offset = _hposc_get_offset();
+  if (offset == _hposc_offset) return;
+
+  _hposc_offset = offset;
+  RFCDoorbellSendTo(CMDR_DIR_CMD_2BYTE(CMD_UPDATE_HPOSC_FREQ, (uint16_t)offset));
+}
+
 static void _init_setup(const radio_phy_t* phy)
 {
   memset(&_setup, 0, sizeof(_setup));
@@ -196,6 +238,10 @@ static void _init_setup(const radio_phy_t* phy)
   // Rx: sync word correlation threshold (MDM register 0x5114, default 0x1F)
   if (phy->sync_threshold)
     _overrides[n++] = HW_REG_OVERRIDE(0x5114, phy->sync_threshold << 8 | phy->sync_threshold);
+  if (_hposc) {
+    _hposc_offset = _hposc_get_offset();
+    _overrides[n++] = HPOSC_OVERRIDE((uint32_t)(uint16_t)_hposc_offset);
+  }
   _overrides[n] = 0xFFFFFFFF;
   _setup.pRegOverride = _overrides;
 }
@@ -219,6 +265,7 @@ radio_status_t radio_init(const radio_phy_t* phy)
     return RADIO_ERR_PARAM;
 
   if (_powered) radio_off();
+  _hposc_init();
 
   radio_status_t st = _power_up();
   if (st != RADIO_OK) return st;
@@ -242,6 +289,7 @@ radio_status_t radio_set_frequency(uint32_t freq_khz)
   _freq_khz = freq_khz;
   if (!_powered) return RADIO_OK;  // tuned by radio_init()
   radio_rx_stop();
+  _hposc_update();
   return _run_fs();
 }
 
@@ -447,3 +495,5 @@ void radio_rx_stats(radio_rx_stats_t* stats)
 }
 
 uint16_t radio_last_status() { return _last_status; }
+
+int16_t radio_hposc_offset() { return _hposc ? _hposc_offset : 0; }

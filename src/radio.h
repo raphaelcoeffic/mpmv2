@@ -86,3 +86,7 @@ bool radio_receive(radio_packet_t* pkt);
 
 // Last RF core command status, for diagnostics
 uint16_t radio_last_status();
+
+// HF clock correction given to the RF core (CC2652RB HPOSC), 0 otherwise:
+// F_nominal = F_hposc * (1 + offset / 2^22), -411 = HPOSC 98 ppm fast
+int16_t radio_hposc_offset();
