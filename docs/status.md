@@ -63,6 +63,8 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
 - The CC2652 side runs on the LaunchPad or the MPM v2 board (`-p v2`,
   `CC_PORT=v2`): USB-C console, flashing with a J-Link on J10 through OpenOCD
   (`ninja flash`).
+- An ESP32-S3 with esp-sdr is a third receiver: it shows what each chip
+  really sends (`sdr_compare.py`).
 - The rig has suites per chip family, captures of the real MPM protocols, and
   frequency scans and raw captures for reverse engineering.
 - 12 host unit tests (`tests/frame`) check `frame.c` against the MPM encoders
@@ -118,8 +120,10 @@ MPM v2 board, FlySky in Wi-Fi channel 1, E01X and E010R5) are explained in
 1. **A7105 at 500 kbps, CC2652 -> A7105:** WFLY2 96.5 to 97.8%, Joysway
    94.4 to 98.6%, FlySky 99 to 99.8%, all CRC errors. Not Wi-Fi, power,
    frequency offset or GFSK vs 2-FSK; Joysway's errors depend on the data
-   and on its RX table ([details](interop-results.md#a7105)). Next: a real
-   FlySky / AFHDS2A receiver (FS-iA6B), or a second A7105 as a reference.
+   and on its RX table ([details](interop-results.md#a7105)). An SDR view of
+   both chips shows the CC2652 signal clean, with a wider eye than the
+   A7105's own: the errors are on the A7105 receiver side. Next: a real
+   FlySky / AFHDS2A receiver (FS-iA6B).
 2. **CYRF6936, CC2652 -> CYRF6936, at full power:** Kyosho3 95 to 99%,
    Scorpio 97 to 100%, MLINK 97 to 100%. MLINK is only received with the
    chips inverted (not understood).

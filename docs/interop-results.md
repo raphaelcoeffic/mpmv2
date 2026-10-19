@@ -237,10 +237,28 @@ the MPM reports the bad packets with their data):
   datasheet says 11 and 01; 0x1C at 0x0A cut the errors in some runs, not in
   others.
 
-Without a second A7105 sending, the CC2652 signal can't be told from the
-A7105 receiver at 500 kbps with these tables. A real receiver settles it for
-the protocols that matter (FlySky / AFHDS2A, an FS-iA6B is at hand), AFHDS2A
-with its FEC.
+The signals themselves, seen by an ESP32-S3 SDR (`sdr_compare.py`, the same
+packet from both chips, all payloads decoded right from the SDR bits):
+
+| Sender (500 kbps) | Bit rate | Deviation, runs | Isolated bits | Worst bit | Carrier sd |
+|---|---|---|---|---|---|
+| A7105, FlySky / WFLY2 / Joysway tables | 499.97 to 500.10 kbps | 188 to 208 kHz | 108 to 129% of it | 141 to 156 kHz | 4 to 10 kHz |
+| CC2652 (250 kHz preset) | 500.01 to 500.02 kbps | 239 to 250 kHz | 93 to 100% | 168 to 206 kHz | 16 to 23 kHz |
+
+- The A7105 overshoots on isolated bits (no Gaussian filter, `TX_I` FS = 0);
+  the CC2652 is flat and has the wider eye.
+- At the Joysway byte 0 bit 4 the CC2652 sends -249 kHz (worst packet -221),
+  nothing special at the end of its sync word. The flip happens in the A7105
+  receiver with the Joysway table.
+- Deviation from the CC2652 (Joysway, 250 packets): 186 to 250 kHz all about
+  97 to 99%, byte 0 errors included; 300 kHz worse (92%).
+- The CC2652 carrier moves 16 to 23 kHz (sd) from packet to packet, the
+  A7105 4 to 10 kHz. Not looked into yet.
+
+So the CC2652 signal is not the problem; the remaining errors are the A7105
+receiver with these tables, which a real receiver may or may not share. A real
+receiver settles it for the protocols that matter (FlySky / AFHDS2A, an
+FS-iA6B is at hand), AFHDS2A with its FEC.
 
 ## CYRF6936
 

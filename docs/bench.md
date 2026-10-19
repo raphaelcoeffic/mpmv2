@@ -138,10 +138,34 @@ setup, setups as `;`-separated commands or example files
 | `suite_a7105.py` | The A7105 protocols (11 setups), with their `A7105_Init()` tables |
 | `suite_cyrf.py` | The CYRF6936 DSSS protocols (12 setups), with their own register setups |
 | `losses.py` | Where the losses of a CYRF6936 or A7105 suite setup go: missing or bad, wrong bytes and bits, RSSI, receiver counters, and whether they lock to the 102.4 ms Wi-Fi beacon cycle (`--timing`). `--mpm-extra` / `--cc-extra` change one register or setting at a time |
+| `sdr.py` | Client for an ESP32-S3 running [esp-sdr](https://github.com/ESPARGOS/esp-sdr): I/Q bursts, FM demodulation, bit clock and slicing. `sdr.py info`, `sdr.py cap <MHz>` |
+| `sdr_compare.py` | The same A7105 packet from the MPM A7105 and from the CC2652, seen by the SDR: bit rate, carrier, deviation in runs and on isolated bits, worst bit, payload; `--bits` per-bit table |
 | `proto_capture.py` | The MPM runs one of its protocols (`proto`), the CC2652 receives on one channel: E01X, E129, C186, E010R5, FrSky L |
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
+
+### ESP32-S3 as a third receiver
+
+An ESP32-S3 flashed with esp-sdr (the browser installer of the project) is an
+8-bit receive-only SDR on USB: bursts of 16380 samples, about 1 ms at
+16 MS/s. It shows what a chip really sends, independently of the two chips
+under test. Found out while setting it up:
+
+- After flashing, unplug and replug: it then enumerates as "USB JTAG/serial
+  debug unit" (303a:1001). `$SDR_PORT` overrides the port.
+- The spectrum is inverted (`sdr.demod()` conjugates). `FREQ` takes whole
+  MHz: tune 1 MHz off the signal, away from the DC spike.
+- The hardware AGC only catches the start of a packet: manual gain about 40
+  at 1 m (`Sdr.autogain()` picks the highest gain without clipping).
+- The ESP32 crystal is good to 10 to 20 ppm: compare two senders, don't take
+  absolute frequencies.
+
+```sh
+tools/bench/sdr.py info
+CC_PORT=v2 tools/bench/sdr_compare.py flysky
+CC_PORT=v2 tools/bench/sdr_compare.py joysway --bits 48 64
+```
 
 Each suite takes protocol names (default: all), `--count`, `--period`, `--dir
 fwd|rev` (fwd: MPM -> CC2652) and `-v` (print the setup commands), and exits
