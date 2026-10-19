@@ -966,17 +966,28 @@ static uint32_t _sync_word(const uint8_t* b, uint8_t len)
 // Smallest distance between the window at byte 'pos' and the earlier bits, in
 // half bits (bits before the stream are noise: 1/2 error). All the earlier
 // bits: the CYRF6936 SOP code repeats 36 chips later
+// Bits pos to pos + n - 1 of a stream (MSB first), n <= 32: reads 5 bytes
+static uint32_t _window(const uint8_t* s, uint16_t pos, uint8_t n)
+{
+  const uint8_t* b = s + (pos >> 3);
+  uint64_t v = (uint64_t)b[0] << 32 | (uint32_t)b[1] << 24 | (uint32_t)b[2] << 16 | b[3] << 8 | b[4];
+  return (uint32_t)(v >> (40 - (pos & 7) - n)) & (n == 32 ? 0xFFFFFFFF : (1u << n) - 1);
+}
+
 static uint8_t _sync_score(const uint8_t* stream, uint8_t pos, uint8_t len)
 {
-  uint8_t best = 0xFF;
+  uint8_t best = 0xFF, n = 8 * len;
   int16_t first = 8 * pos;
-  int16_t from = first < 8 * len ? first - 8 * len + 1 : 0;
+  uint32_t sync = _window(stream, first, n);
+  int16_t from = first < n ? first - n + 1 : 0;
   for (int16_t at = from; at < first; at++) {
-    uint8_t errors = 0;
-    for (int16_t i = 0; i < 8 * len && errors < best; i++) {
-      int16_t j = at + i;
-      if (j < 0) errors += 1;
-      else if (_get_bits(stream, first + i, 1) != _get_bits(stream, j, 1)) errors += 2;
+    uint8_t errors;
+    if (at < 0) {
+      // Bits before the stream: 1 each, the rest against the last n + at sync bits
+      uint8_t k = n + at;
+      errors = -at + 2 * __builtin_popcount((_window(stream, 0, k) ^ sync) & ((1u << k) - 1));
+    } else {
+      errors = 2 * __builtin_popcount(_window(stream, at, n) ^ sync);
     }
     if (errors < best) best = errors;
   }
@@ -986,11 +997,12 @@ static uint8_t _sync_score(const uint8_t* stream, uint8_t pos, uint8_t len)
 static void _choose_rx_sync(frame_t* f)
 {
   // NRF: the 1 byte preamble before the address is known too
-  uint8_t stream[1 + sizeof(f->known)];
+  uint8_t stream[1 + sizeof(f->known) + 1];  // _window() reads 1 byte further
   uint8_t lead = 0;
   if (f->type == FRAME_NRF) stream[lead++] = f->known[0] & 0x80 ? 0xAA : 0x55;
   memcpy(stream + lead, f->known, f->known_len);
   uint8_t stream_len = lead + f->known_len;
+  stream[stream_len] = 0;
 
   uint8_t best_pos = stream_len - f->sync_len;
   uint8_t best_score = 0;
@@ -1247,6 +1259,43 @@ uint16_t frame_rx_var_len(const frame_t* f, uint8_t len, const uint8_t* data, ui
     if (need > rx_len) rx_len = need;
   }
   return rx_len;
+}
+
+// CYRF6936 EOP without a length field: the bytes before eop successive
+// symbols that correlate with no data code (more than threshold chip errors).
+// The first symbol is part of the RX sync word
+uint8_t frame_cyrf_rx_count(const frame_t* f, const uint8_t* data, uint16_t rx_len,
+                            uint8_t threshold, uint8_t eop)
+{
+  if (f->type != FRAME_CYRF) return 0;
+  uint8_t buf[FRAME_AIR_MAX];
+  uint16_t avail = f->rx_start + rx_len;
+  if (avail > sizeof(buf)) avail = sizeof(buf);
+  memcpy(buf, f->known, f->rx_start);
+  memcpy(buf + f->rx_start, data, avail - f->rx_start);
+
+  uint8_t n = f->sdr ? CYRF_SDR_CHIPS : _cyrf_n(f);
+  uint16_t pos = 8 * f->hdr_len + CYRF_GAP_CHIPS;
+  uint16_t symbols = 0, misses = 0;
+  for (; pos + n <= 8 * avail && misses < (eop ? eop : 1); pos += n) {
+    uint64_t chips = _get_chips(f, buf, pos, n);
+    uint8_t d = n;
+    if (f->sdr) {
+      d = __builtin_popcountll(chips ^ _cyrf_code(f->data_code, n));
+    } else {
+      uint8_t v = _cyrf_decode_symbol(f, chips);
+      d = __builtin_popcountll(chips ^ _cyrf_symbol(f, v));
+    }
+    if (d > n / 2) d = n - d;
+    if (symbols + misses == 0 || d <= threshold) {
+      symbols += misses + 1;
+      misses = 0;
+    } else {
+      misses++;
+    }
+  }
+  if (f->sdr) symbols /= 8;
+  return symbols > 255 ? 255 : symbols;
 }
 
 static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t* data,

@@ -29,3 +29,12 @@
 
 #define AFHDS2A_A7105_INO
 #define AFHDS2A_FW_TELEMETRY
+
+// CYRF6936 family: CYRF6936 emulation on the CC2652 (cyrf6936.c)
+#define CYRF6936_INSTALLED
+#define CYRF6936_ENABLE_LOW_POWER
+
+#define DSM_CYRF6936_INO
+#define DSM_TELEMETRY
+#define DSM_X_PLUS               // _Config.h defaults
+#define DSM_THROTTLE_KILL_CH 14

@@ -19,6 +19,8 @@ set(firmware_sources
     mpm/upstream/frsky.c
     mpm/upstream/a7105.c
     mpm/upstream/AFHDS2A_a7105.c
+    mpm/upstream/cyrf6936.c
+    mpm/upstream/dsm_all.c
     mpm/upstream/telemetry.c
     nor_flash.c
     ppm.c

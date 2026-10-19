@@ -46,12 +46,15 @@ As the MPM:
 Not there yet: PPM input, the module bay (UART1, inverted, `telem_invert`),
 channel order remapping (`disable_ch_map` is decoded only), the telemetry
 buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
-frames), protocol telemetry to the radio (`Telemetry.ino`).
+frames), the telemetry formats other than `MULTI_TELEMETRY` (`Telemetry.ino`:
+FrSky hub, S.Port, AFHDS2A and DSM frames only).
 
 ## MPM protocol files
 
 `src/mpm/upstream/`: protocol files of the MPM (v1.3.4.74) compiled as C,
-with one line added (`#include "mpm_compat.h"`).
+with one line added (`#include "mpm_compat.h"`) and the few C++isms fixed
+(default arguments: macros, marked `mpm-v2`). The protocols sharing static
+functions are built as one file, as the MPM builds its `.ino` files.
 
 | File | Content |
 |---|---|
@@ -60,6 +63,13 @@ with one line added (`#include "mpm_compat.h"`).
 | `mpm_compat.h/c` | The globals and helpers of `Multiprotocol.ino`, `Multiprotocol.h`, `TX_Def.h` and `Convert.ino`; the MPM names of the core's state (`Channel_data`, `rx_tx_addr`, `option`, the `IS_*` flags) are macros on `mpm` |
 | `iface_xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames |
 | `Bayang_nrf24l01.c` | Bayang |
+| `iface_cc2500.h`, `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
+| `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`) |
+| `iface_a7105.h`, `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
+| `AFHDS2A_a7105.c` | AFHDS2A |
+| `iface_cyrf6936.h`, `cyrf6936.c` | CYRF6936 emulation (`CYRF6936_SPI.ino`), see below |
+| `dsm_all.c` | DSM (`DSM.c`, `DSM_cyrf6936.c`; macOS file names are case insensitive: not `dsm.c`) |
+| `telemetry.c` | `Telemetry.ino`, `MULTI_TELEMETRY` part: the core calls `TelemetryUpdate()` when no status frame is due, frames written only with 48 bytes free in the UART buffer |
 
 The protocol table entries follow the MPM's: sub protocol names with their
 length byte first (`STR_SUBTYPE_*`), the callback returns `uint16_t`, an
@@ -83,6 +93,39 @@ The XN297 emulation, as the NRF24L01 in the MPM:
   25 dB lower) for bind and range check. `XN297_HoppingCalib()` does nothing.
 - Weak RX addresses get the stricter sync threshold, as on the bench.
 
+### Chip emulations
+
+The CC2500, A7105 and CYRF6936 protocols drive the chip's registers as on
+the MPM; the emulation keeps a copy of the registers and FIFOs and, at TX
+or RX, turns them into the RF core setup (`radio_init()` only when the PHY
+changes, and again after each chip reset: another protocol may have set the
+radio up), the frequency and a `frame.c` framing. Status registers read as
+the protocols read them.
+
+- **CC2500**: rate, deviation (MSK as 2-FSK, bits inverted), RX bandwidth,
+  preamble, sync word (2 or 4 bytes), CRC, CC2400 CRC, variable length,
+  whitening, FEC; FREQ / CHANNR / CHANSPC / FSCTRL0 to the frequency; RX FIFO
+  with address check, CRC autoflush, appended RSSI and LQI; MARCSTATE,
+  RXBYTES, TXBYTES. Not done: SYNC_MODE 0 (`CC2500_250K_Init()`), infinite
+  length. PATABLE -10 dBm and up is the board default power, below
+  `RF_TX_POWER_LOW`.
+- **A7105**: data rate, ID (2 or 4 bytes), CRC, FEC, preamble length, FIFO
+  length; PLL registers to the frequency; MODE (TRER, CRCF), RSSI ADC. Not
+  done: whitening. TX_TEST -11 dBm and up: default power.
+- **CYRF6936**: 8DR and SDR, 32 / 64 chip codes, SOP, length field, CRC seed,
+  TX_INV; channel n at 2400 + n MHz plus TX_OFFSET (DSM: 2401 + n);
+  TX_CTRL / RX_CTRL GO, TX_IRQ_STATUS (TXC cleared on read), RX_IRQ_STATUS,
+  RX_COUNT, RX_BUFFER, RSSI (count 21 at -60 dBm, 1.9 dB a count). Without a
+  length field the packet ends after EOP_CTRL symbols over the DATA64_THOLD
+  chip errors (`frame_cyrf_rx_count()`). The MFG ID is the module id and 2
+  zero bytes (a DSM receiver bound to an MPM v1 must be bound again). Not
+  done: GFSK and DDR modes. PA_SETTING -5 dBm and up: default power.
+
+The EEPROM (`eeprom_read_byte()`: AFHDS2A RX ids, clone ids, the CYRF ID) is
+in RAM for now: lost at power off.
+
+### Checks against the MPM
+
 `tools/bench/proto_compare.py` checks a port against the MPM: the LaunchPad
 (MPM core, driven by `radio_sim.py`'s frames) and the 4-in-1 (MPM bench
 firmware, `id` command for the same module id) run the protocol with the
@@ -91,6 +134,20 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | Protocol | Bind | Data |
 |---|---|---|
 | Bayang (sub 0) | same payload, 2000 µs | same payload, 8001 µs |
+| FrSky D (3) | same payloads, 9005 µs | same (frame and telemetry counters masked) |
+| FrSky X (15, D16 v1) | same payloads, 9001 µs | same (random and counter bytes masked, CRC checked) |
+| FrSky V (25) | same payloads; timing differs, see below | same (seed and CRC masked) |
+| AFHDS2A (28) | same payloads, 7701 µs | same, 61.6 ms between visits of the channel |
+| DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
+
+DSM: the bench `cyrfid` command gives the MPM the port's CYRF ID (RAM
+only), the codes of the capture channel come from `DSM.c`. The SDR bind
+packets have no CRC and last 8 ms: Wi-Fi beacons (every 102.4 ms) corrupt
+some (2% at -50 dBm from the MPM, about 10% at -66 dBm from the port at bind
+power); their checksums filter them. FrSky V bind: its 53460 µs callback
+wraps the MPM's 16 bit timer (about 20.7 ms between packets on a real MPM,
+8.6 ms on the bench firmware's scheduler), the port waits the full time.
+
 
 At bind power (about -59 dBm at the receiver) one or the other loses 0 to
 16% of the bind packets from run to run, in bursts; at full power the port

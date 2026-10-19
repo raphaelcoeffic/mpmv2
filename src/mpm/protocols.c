@@ -12,6 +12,10 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_FRSKYD, "FrSky D", "\x06" "D8\0   " "Cloned", 2, MPM_OPTION_RFTUNE, false, false, FRSKYD_init,
    FRSKYD_callback, 0},
 #endif
+#ifdef DSM_CYRF6936_INO
+  {PROTO_DSM, "DSM", "\x04" "2 1F" "2 2F" "X 1F" "X 2F" "Auto" "R 1F" "2SFC", 7, MPM_OPTION_MAXTHR,
+   false, true, DSM_init, DSM_callback, 0},
+#endif
 #ifdef BAYANG_NRF24L01_INO
   {PROTO_BAYANG, "Bayang", "\x07" "Std\0   " "H8S3D\0 " "X16 AH\0" "IRDrone" "DHD D4\0" "QX100\0 ", 6,
    MPM_OPTION_TELEM, false, false, BAYANG_init, BAYANG_callback, end_bind_counter},

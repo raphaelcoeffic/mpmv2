@@ -24,6 +24,10 @@
 #define pgm_read_dword(p) (*(const uint32_t*)(p))
 #define _BV(n) (1 << (n))
 #define delayMicroseconds(us) delay_us(us)
+#define delayMilliseconds(ms) delay_us((ms) * 1000UL)
+#ifndef min
+#define min(a, b) ((a) < (b) ? (a) : (b))  // Arduino
+#endif
 #define NOP() __asm__ __volatile__("nop")
 #define debug(...) do {} while (0)
 #define debugln(...) do {} while (0)
@@ -181,6 +185,22 @@ enum A7105_POWER {
 #define A7105_RANGE_POWER A7105_POWER_0
 #define A7105_BIND_POWER A7105_POWER_0
 
+// CYRF6936 TX_CFG.PA_SETTING values (cyrf6936.c maps them to RF core power words)
+enum CYRF_POWER {
+  CYRF_POWER_0 = 0x00,  // -35dbm
+  CYRF_POWER_1 = 0x01,  // -30dbm
+  CYRF_POWER_2 = 0x02,  // -24dbm
+  CYRF_POWER_3 = 0x03,  // -18dbm
+  CYRF_POWER_4 = 0x04,  // -13dbm
+  CYRF_POWER_5 = 0x05,  //  -5dbm
+  CYRF_POWER_6 = 0x06,  //   0dbm
+  CYRF_POWER_7 = 0x07   //  +4dbm
+};
+#define CYRF_HIGH_POWER CYRF_POWER_7
+#define CYRF_LOW_POWER CYRF_POWER_3
+#define CYRF_RANGE_POWER CYRF_POWER_1  // 1/30 of the full power distance
+#define CYRF_BIND_POWER CYRF_POWER_0
+
 //
 // Globals of Multiprotocol.ino
 //
@@ -301,6 +321,8 @@ void eeprom_write_byte(EE_ADDR address, uint8_t value);
 #define FRSKYX_CLONE_EEPROM_OFFSET 822
 #define FRSKYX2_CLONE_EEPROM_OFFSET 873
 #define DSM_CLONE_EEPROM_OFFSET 1074
+#define EEPROM_CID_INIT_OFFSET 0  // 1 byte flag that Cyrf ID is initialized
+#define EEPROM_CID_OFFSET 1       // 6 bytes Cyrf ID
 
 // Arduino random(max)
 long mpm_random(long max);

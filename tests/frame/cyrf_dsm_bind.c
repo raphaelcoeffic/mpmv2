@@ -42,6 +42,18 @@ int main()
   CHECK(frame_init(&g));
   memcpy(stream + 8, cap, clen);
   bool pre = g.known_len > 8 && frame_decode(&g, stream + g.rx_start, 8 + clen - g.rx_start, 3, out, &out_len) == FRAME_OK;
+  // EOP (no length field): a 10 byte bind response then noise, 2 symbols
+  static uint8_t air[8 + 16 * 64 + 8];
+  uint32_t x = 12345;
+  for (unsigned i = 0; i < sizeof(air); i++) {
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    air[i] = x;
+  }
+  memcpy(air, f.known, 4);
+  memcpy(air + 4, tx, frame_tx_data(&f, full, 10, tx));
+  uint8_t count = frame_cyrf_rx_count(&f, air + f.rx_start, sizeof(air) - f.rx_start, 10, 2);
+  printf("eop: count=%u\n", count);
+  CHECK(count == 10);
   printf("sdr n=%u rx_start=%u encode %s decode %s 20-errors %s; prefix: known=%u rx_start=%u %s\n", n,
          f.rx_start, enc ? "ok" : "FAIL", dec ? "ok" : "FAIL", robust ? "ok" : "FAIL", g.known_len,
          g.rx_start, pre ? "ok" : "FAIL");

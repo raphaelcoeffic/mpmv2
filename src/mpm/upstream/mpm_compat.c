@@ -7,6 +7,9 @@
 #ifdef A7105_INSTALLED
 #include "iface_a7105.h"
 #endif
+#ifdef CYRF6936_INSTALLED
+#include "iface_cyrf6936.h"
+#endif
 
 uint16_t counter;
 uint8_t channel;
@@ -91,6 +94,9 @@ void mpm_protocol_prepare()
 #endif
 #ifdef A7105_INSTALLED
   A7105_Reset();
+#endif
+#ifdef CYRF6936_INSTALLED
+  CYRF_Reset();
 #endif
   init_frskyd_link_telemetry();
   pps_timer = millis();

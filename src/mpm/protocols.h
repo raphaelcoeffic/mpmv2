@@ -14,6 +14,10 @@ void end_bind_counter();
 void BAYANG_init();
 uint16_t BAYANG_callback();
 #endif
+#ifdef DSM_CYRF6936_INO
+void DSM_init();
+uint16_t DSM_callback();
+#endif
 #ifdef FRSKYD_CC2500_INO
 void FRSKYD_init();
 uint16_t FRSKYD_callback();

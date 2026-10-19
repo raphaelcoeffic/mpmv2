@@ -10,6 +10,7 @@ and after; the payloads and packet intervals are compared.
 
   proto_compare.py bayang
   proto_compare.py bayang --secs 6 --sub 1
+  proto_compare.py dsm --sub 3
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
@@ -110,10 +111,77 @@ def afhds2a_capture(addr: bytes, sub: int, module_id: int = 0) -> list[Capture]:
             Capture("data", f"preset afhds2a;ch {afhds2a_hop0(module_id, addr)}", 38, mask=rx_id)]
 
 
+def dsm_pncodes() -> list[bytes]:
+    """DSM_pncodes of DSM.ino (Row 1 to 4 then Row 0, 8 or 9 columns)"""
+    import re
+    from pathlib import Path
+    src = (Path(__file__).parents[2] / "src/mpm/upstream/DSM.c").read_text()
+    table = src[src.index("DSM_pncodes"):]
+    table = re.sub(r"//[^\n]*|/\*.*?\*/", "", table[:table.index("};")], flags=re.S)
+    return [bytes(int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{2})", row))
+            for row in re.findall(r"\{([^{}]*)\}", table)]
+
+
+def dsm_read_code(codes: list[bytes], row: int, col: int) -> bytes:
+    """DSM_read_code()"""
+    row = (row - 1) & 0xFF
+    return codes[min(row, 4) * 8 + col]
+
+
+def dsm_cyrf_id(module_id: int) -> bytes:
+    """The port's CYRF6936 MFG ID (cyrf6936.c): the module id, 2 zero bytes"""
+    return module_id.to_bytes(4, "big") + bytes(2)
+
+
+def dsmx_channels(mfg: list[int]) -> list[int]:
+    """DSM_calc_dsmx_channel()"""
+    chans = []
+    id_tmp = ~((mfg[0] << 24) | (mfg[1] << 16) | (mfg[2] << 8) | mfg[3]) & 0xFFFFFFFF
+    while len(chans) < 23:
+        id_tmp = (id_tmp * 0x0019660D + 0x3C6EF35F) & 0xFFFFFFFF
+        ch = ((id_tmp >> 8) % 0x49) + 3
+        if (ch ^ mfg[3]) & 1 or ch in chans:
+            continue
+        counts = [sum(1 for c in chans if lo <= c <= hi) for lo, hi in ((0, 27), (28, 51), (52, 255))]
+        if (ch < 28 and counts[0] < 8) or (28 <= ch < 52 and counts[1] < 7) or (ch >= 52 and counts[2] < 8):
+            chans.append(ch)
+    return chans
+
+
+def dsm_bind_ok(p: bytes) -> bool:
+    """DSM_build_bind_packet() sums (SDR bind packets have no CRC: corrupted
+    ones are received, e.g. by WiFi beacons over their 8 ms)"""
+    s1 = 384 - 0x10 + sum(p[:8])
+    s2 = s1 + sum(p[8:14])
+    return len(p) == 16 and p[8:10] == (s1 & 0xFFFF).to_bytes(2, "big") and p[14:16] == (s2 & 0xFFFF).to_bytes(2, "big")
+
+
+def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> list[Capture]:
+    """DSMX: bind on channel 13 (SDR), data on hopping_frequency[0] with its
+    SOP / data codes and the CH2 CRC seed (the first packet there; it
+    alternates with the CH1 seed, those fail the CRC)"""
+    if sub not in (2, 3):
+        sys.exit("dsm: DSMX only, --sub 2 (X 1F) or 3 (X 2F)")
+    mfg = list(dsm_cyrf_id(module_id)[:4])
+    mfg[3] ^= rx_num
+    sop_col = (mfg[0] + mfg[1] + mfg[2] + 2) & 7
+    if sop_col == 0:
+        mfg[addr[0] % 3] ^= 1
+        sop_col = (mfg[0] + mfg[1] + mfg[2] + 2) & 7
+    seed = (mfg[0] << 8) + mfg[1]
+    ch = dsmx_channels(mfg)[0]
+    codes = dsm_pncodes()
+    row = (ch - 2) % 5
+    sop = dsm_read_code(codes, row, sop_col)
+    data = dsm_read_code(codes, row, 7 - sop_col) + dsm_read_code(codes, row, 8 - sop_col)
+    return [Capture("bind", "preset dsmbind;ch 13", 16, bind=True, valid=dsm_bind_ok),
+            Capture("data", f"preset dsm;cyrf {sop.hex()} {data.hex()} {seed};ch {ch}", 16)]
+
+
 # name: (protocol number, captures(addr, sub))
 CASES = {"bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
-         "afhds2a": (28, afhds2a_capture)}
+         "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture)}
 
 
 def masked(p: str, mask: tuple) -> str:
@@ -172,6 +240,10 @@ def main():
         radio.set(protocol=0, channels=CHANNELS)  # protocol list: no RF until started
 
         kw = {"module_id": (a.id + a.rx_num) & 0xFFFFFFFF} if a.case == "afhds2a" else {}
+        if a.case == "dsm":
+            # The MPM's DSM ID: the port's CYRF6936 MFG ID instead of its chip's
+            mpm.cmd(f"cyrfid {dsm_cyrf_id(a.id).hex()}")
+            kw = {"module_id": a.id, "rx_num": a.rx_num}
         for c in captures(addr, a.sub, **kw):
             def mpm_start():
                 mpm.cmd(f"proto {proto} {a.sub} {a.rx_num} {a.option} {int(c.bind)}")

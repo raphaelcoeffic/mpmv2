@@ -138,6 +138,12 @@ uint16_t frame_rx_var_len(const frame_t* f, uint8_t len, const uint8_t* data, ui
 frame_result_t frame_decode(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                             uint8_t len, uint8_t* payload, uint8_t* payload_len);
 
+// CYRF6936 without a length field (FRAMING_CFG.LEN_EN 0, SDR): the number
+// of bytes received (RX_COUNT) before the EOP condition, eop successive
+// symbols with more than threshold chip errors (EOP_CTRL, DATA64_THOLD)
+uint8_t frame_cyrf_rx_count(const frame_t* f, const uint8_t* data, uint16_t rx_len,
+                            uint8_t threshold, uint8_t eop);
+
 // Same, also returns the NRF packet control field (0 for other framings)
 frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                                 uint8_t len, uint8_t* payload, uint8_t* payload_len,

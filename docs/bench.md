@@ -233,6 +233,7 @@ Received packets: `@rx <time_us> <channel> <hex> [crc=ok|bad] [...]`.
 | `stop` | Stop the current job: `@ok stop tx=<n> rx=<n> err=<n>` |
 | `chan <i> <value>` | Channel value 0..2047 (1024 = center) used by `proto` (CH5 to CH12 switches updated too) |
 | `id [value]` | Module id used by `proto` (`MProtocol_id_master`), as the CC2652's to compare a port: `@ok id=<hex>` |
+| `cyrfid [hex]` | CYRF6936 MFG ID used by DSM (6 bytes, RAM only: the EEPROM copy and its binds stay), none: the chip's again. `@ok cyrfid=<hex>` |
 | `proto <num> [sub] [rxnum] [option] [bind]` | Run a built-in protocol with the normal scheduler, `num` as in `Multiprotocol.h` |
 | `user [hex]` | Run `Bench_user_init()` / `Bench_user_callback()` from `_Bench_User.ino` |
 
