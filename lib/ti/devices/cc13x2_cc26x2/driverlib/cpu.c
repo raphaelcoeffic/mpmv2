@@ -127,20 +127,16 @@ CPUcpsid(void)
 uint32_t __attribute__((naked))
 CPUcpsid(void)
 {
-    uint32_t ui32Ret;
+    // Naked function: GCC only supports basic asm here, an output operand
+    // gets any register (r3 at -O0, not the r0 of the return value). The
+    // return value goes to R0 by hand, as the clang version.
 
     // Read PRIMASK and disable interrupts
-    __asm volatile ("    mrs     %0, PRIMASK\n"
+    __asm volatile (
+                    "    mrs     r0, PRIMASK\n"
                     "    cpsid   i\n"
                     "    bx      lr\n"
-                    : "=r"(ui32Ret)
                    );
-
-    // The return is handled in the inline assembly, but the compiler will
-    // still complain if there is not an explicit return here (despite the fact
-    // that this does not result in any code being produced because of the
-    // naked attribute).
-    return(ui32Ret);
 }
 #endif
 
@@ -211,19 +207,15 @@ CPUprimask(void)
 uint32_t __attribute__((naked))
 CPUprimask(void)
 {
-    uint32_t ui32Ret;
+    // Naked function: GCC only supports basic asm here, an output operand
+    // gets any register (r3 at -O0, not the r0 of the return value). The
+    // return value goes to R0 by hand, as the clang version.
 
     // Read PRIMASK
-    __asm volatile ("    mrs     %0, PRIMASK\n"
+    __asm volatile (
+                    "    mrs     r0, PRIMASK\n"
                     "    bx      lr\n"
-                    : "=r"(ui32Ret)
                    );
-
-    // The return is handled in the inline assembly, but the compiler will
-    // still complain if there is not an explicit return here (despite the fact
-    // that this does not result in any code being produced because of the
-    // naked attribute).
-    return(ui32Ret);
 }
 #endif
 
@@ -298,20 +290,16 @@ CPUcpsie(void)
 uint32_t __attribute__((naked))
 CPUcpsie(void)
 {
-    uint32_t ui32Ret;
+    // Naked function: GCC only supports basic asm here, an output operand
+    // gets any register (r3 at -O0, not the r0 of the return value). The
+    // return value goes to R0 by hand, as the clang version.
 
     // Read PRIMASK and enable interrupts.
-    __asm volatile ("    mrs     %0, PRIMASK\n"
+    __asm volatile (
+                    "    mrs     r0, PRIMASK\n"
                     "    cpsie   i\n"
                     "    bx      lr\n"
-                    : "=r"(ui32Ret)
                    );
-
-    // The return is handled in the inline assembly, but the compiler will
-    // still complain if there is not an explicit return here (despite the fact
-    // that this does not result in any code being produced because of the
-    // naked attribute).
-    return(ui32Ret);
 }
 #endif
 
@@ -382,19 +370,15 @@ CPUbasepriGet(void)
 uint32_t __attribute__((naked))
 CPUbasepriGet(void)
 {
-    uint32_t ui32Ret;
+    // Naked function: GCC only supports basic asm here, an output operand
+    // gets any register (r3 at -O0, not the r0 of the return value). The
+    // return value goes to R0 by hand, as the clang version.
 
     // Read BASEPRI.
-    __asm volatile ("    mrs     %0, BASEPRI\n"
+    __asm volatile (
+                    "    mrs     r0, BASEPRI\n"
                     "    bx      lr\n"
-                    : "=r"(ui32Ret)
                    );
-
-    // The return is handled in the inline assembly, but the compiler will
-    // still complain if there is not an explicit return here (despite the fact
-    // that this does not result in any code being produced because of the
-    // naked attribute).
-    return(ui32Ret);
 }
 #endif
 
@@ -468,16 +452,12 @@ CPUdelay(uint32_t ui32Count)
 void __attribute__((naked))
 CPUdelay(uint32_t ui32Count)
 {
-    // Loop the specified number of times.
-    // GCC supports input parameters in naked functions, so we use the parameter
-    // in the inline assembly and let the compiler decide on which register to
-    // use for it.
-    __asm volatile ("CPUdel%=:\n"
-                    "    subs  %0, #1\n"
-                    "    bne   CPUdel%=\n"
+    // Loop the specified number of times. Naked function: basic asm only
+    // (an operand may get another register), ui32Count is in R0.
+    __asm volatile ("1:\n"
+                    "    subs  r0, #1\n"
+                    "    bne   1b\n"
                     "    bx    lr\n"
-                    : /* No output */
-                    : "r" (ui32Count)
                    );
 }
 #endif

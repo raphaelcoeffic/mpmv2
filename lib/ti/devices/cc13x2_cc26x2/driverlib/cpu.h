@@ -358,19 +358,17 @@ CPUbasepriSet(uint32_t ui32NewBasepri)
     __asm("    msr     BASEPRI, r0\n");
 }
 #else
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wattributes"
-__STATIC_INLINE void __attribute__ ((naked))
+__STATIC_INLINE void
 CPUbasepriSet(uint32_t ui32NewBasepri)
 {
-    // Set the BASEPRI register.
+    // Set the BASEPRI register. Not naked: GCC only supports basic asm in a
+    // naked function, the operand may be in any register
     __asm volatile ("    msr     BASEPRI, %0\n"
-                    "    bx      lr\n"
                     : /* No output */
                     : "r" (ui32NewBasepri)
+                    : "memory"
                    );
 }
-#pragma GCC diagnostic pop
 #endif
 
 //*****************************************************************************

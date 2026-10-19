@@ -85,6 +85,10 @@ protocol, bind sets and clears the flag. `link` at 1 Mbps and 250 kbps: 500
 packets, 0 or 1 lost, all channels right, callback period 3996 to 4005 µs
 while the frames from the radio and the telemetry are processed.
 
-The build type defaults to Release: at -O0 the driverlib's GCC
-`CPUcpsid()` returns PRIMASK in r3 instead of r0, `IntMasterDisable()`
-returns garbage and the interrupts stay off after the first masked section.
+The driverlib's GCC versions of `CPUcpsid()`, `CPUcpsie()`,
+`CPUprimask()` and `CPUbasepriGet()` returned their value through an asm
+output operand in a naked function, which GCC doesn't support: at -O0 it
+went to r3 instead of r0, `IntMasterDisable()` returned garbage and the
+interrupts stayed off after the first masked section. Fixed in
+`lib/ti/.../driverlib/cpu.c` (basic asm writing r0, as TI's clang version),
+`CPUdelay()` and `CPUbasepriSet()` too.
