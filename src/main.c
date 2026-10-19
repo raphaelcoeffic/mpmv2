@@ -255,11 +255,6 @@ int main(void)
   timer_init();
   leds_init();
 
-// #if defined(TEST_PIN)
-  // GPIO_setDio(TEST_PIN);
-  // IOCPinTypeGpioOutput(TEST_PIN);
-// #endif
-
   debugln("## Boot completed ##");
 
 #if defined(BENCH)

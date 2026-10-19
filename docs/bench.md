@@ -206,7 +206,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `preset gfsk1m` | CYRF6936 GFSK mode PHY (E01X, E129, E010R5): 1 Mbps GFSK, 250 kHz deviation, 2400 MHz + `ch` x 1 MHz. Then `hs6200` or `rf2500` |
 | `preset frskyl` | FrSky L: 125 kbaud 2-FSK, 47.5 kHz deviation, FrSky channel plan, `frskyl` framing (the 256 byte chip stream, 11 chips per bit), `prefix 4e` for the RX sync word. `rx 17`; the packet CRC is not checked |
 | `phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]` | Custom PHY. `rx_bw` is the RF core code (85 = 175 kHz, 87 = 265 kHz, 89 = 350 kHz, 94 = 882 kHz, 97 = 1399 kHz, 100 = 2458 kHz). `fsk=1`: 2-FSK instead of 2-GFSK |
-| `pwr <word>` | RF core TX power word, used by the next `preset`/`phy` (default `0x7217` = +5 dBm) |
+| `pwr <word>` | RF core TX power word, used by the next `preset`/`phy` (default `RF_TX_POWER_DEFAULT` in `board.h`: `0x7217` = +5 dBm on the LaunchPad, `0x2853` = 0 dBm on MPM v2, in front of a 22 dB PA whose input is +5 dBm max) |
 | `syncthr <n>` | Sync word correlation threshold (RF core register 0x5114), `0` = auto: TI default 0x1F, 0x32 when the RX sync word is weak. Applies at once |
 | `sync <hex>` | Raw framing, 1 to 4 byte sync word |
 | `nrf <addr> [crc_bytes] [sync_bytes]` | NRF24L01 framing (EN_AA=0, static payload): address in `TX_ADDR` order, CRC computed in software |

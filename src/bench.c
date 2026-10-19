@@ -101,7 +101,7 @@ static uint32_t _line_len;
 static radio_phy_t _phy;
 static char _phy_name[16] = "none";
 static bool _phy_ok;
-static uint16_t _tx_power = 0x7217;  // TI default for 2.4 GHz prop (+5 dBm)
+static uint16_t _tx_power = RF_TX_POWER_DEFAULT;
 static uint8_t _sync_threshold;
 #define SYNC_THRESHOLD_STRICT 0x32
 
