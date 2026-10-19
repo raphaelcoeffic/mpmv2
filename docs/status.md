@@ -79,11 +79,11 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
 - E01X, E129, C186, E010R5 and FrSky L run with the real MPM protocol code.
 - Not possible: 2 Mbps RX (CFlie).
 - The MPM v2 board gives the same results as the LaunchPad: 96 to 100% from
-  the MPM chips, 94 to 100% to them (CC2500 at full power: 80 to 100%). The
-  losses below 100% that were tracked down are on the bench side: too much
-  signal at +20 dBm and 1 m (CC2500), read stalls and a race in the MPM bench
-  firmware (fixed), and Wi-Fi beacons and traffic against the CYRF6936 bind
-  power (PA 0, about -50 dBm).
+  the MPM chips, 95 to 100% to them. The losses below 100% that were tracked
+  down are on the bench side: output stalls and a race in the MPM bench
+  firmware (fixed: CC2500 and CYRF6936 now 100% to the MPM but Corona V2 and
+  Kyosho3), the Corona V2 frozen AGC, and Wi-Fi beacons and traffic against
+  the CYRF6936 bind power (PA 0, about -50 dBm).
   Still unexplained: [below](#losses-still-to-explain).
 
 What it means for the chip choice, and the requirements any other candidate
@@ -94,27 +94,26 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 | Issue | State |
 |---|---|
 | E010R5 changes the channel while the last packet is still on air (1 in 6 corrupted) | Fixed: [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197) |
-| XN297 emulation: no CRC xorout on TX in the unscrambled enhanced mode (RX applies it in debug builds) | Fixed, branch `xn297-enhanced-xorout` of the fork. No protocol uses the mode, no PR |
+| XN297 emulation: no CRC xorout on TX in the unscrambled enhanced mode (RX applies it in debug builds) | Fixed, branch `xn297-enhanced-xorout` of the fork (also in `mpm-bench`). No protocol uses the mode, no PR |
 | E01X: `HS6200_calc_crc()` reads `msg[pos+1]`, a stale stack byte: the CRC is right for 3% of E012 packets | Documented, with a fix (`msg[pos]`) checked against the CC2652. Needs an E01X model to test before a PR |
 | Bench firmware only: CC2500 RX read `RXBYTES` before `MARCSTATE`, a packet ending in between came out short | Fixed in `mpm-bench` |
+| Bench firmware only: `Serial.write()` blocked up to 23 ms on a slow host, the chips missed packets meanwhile | Fixed in `mpm-bench`: output through a RAM ring |
 
 ## Where things are
 
 | Repository, branch | Content |
 |---|---|
 | [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/` (unit tests), `docs/` |
-| [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware only (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`) |
-| same, `xn297-enhanced-xorout` | The XN297 emulation fix |
-| same, `e010r5-hop-fix` | The E010R5 fix, PR #1197 |
-
-To build the bench firmware with both fixes, merge the two branches into a
-local branch off `mpm-bench` ([bench.md](bench.md)).
+| [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`), plus the two fixes below |
+| same, `xn297-enhanced-xorout` | The XN297 emulation fix alone |
+| same, `e010r5-hop-fix` | The E010R5 fix alone, PR #1197 |
 
 ## Losses still to explain
 
 Results below 100% with no cause found yet, most useful first. The others
 (NRF address `5555555555`, 2 Mbps RX, the CC2500 and CYRF6936 losses on the
-MPM v2 board, FlySky in Wi-Fi channel 1, E01X and E010R5) are explained in
+MPM v2 board, the MPM bench output stalls, FlySky in Wi-Fi channel 1, E01X
+and E010R5) are explained in
 [interop-results.md](interop-results.md).
 
 1. **A7105 at 500 kbps, CC2652 -> A7105:** WFLY2 96.5 to 97.8%, Joysway
@@ -124,15 +123,16 @@ MPM v2 board, FlySky in Wi-Fi channel 1, E01X and E010R5) are explained in
    both chips shows the CC2652 signal clean, with a wider eye than the
    A7105's own: the errors are on the A7105 receiver side. Next: a real
    FlySky / AFHDS2A receiver (FS-iA6B).
-2. **CYRF6936, CC2652 -> CYRF6936, at full power:** Kyosho3 95 to 99%,
-   Scorpio 97 to 100%, MLINK 97 to 100%. MLINK is only received with the
-   chips inverted (not understood).
+2. **CYRF6936, CC2652 -> CYRF6936:** with the bench output fix all 100%
+   but Kyosho3 (99%, single misses at a 10 ms period). MLINK is only received
+   with the chips inverted (not understood).
 3. **NRF24L01 2 Mbps, CC2652 -> NRF:** 92 to 97% (LaunchPad), 94.8 to 100%
    (MPM v2). The CFlie direction.
 4. **Smaller ones:** Height 5 ch 88 to 100% (the A7105 RX restart between
    short packets?), Bugs 97.6 to 99%, NRF address `0f0f0f0f0f` 97.6 to 99.6%
-   at 1 Mbps (a weak sync word), and the LaunchPad CC2500 runs that dropped to
-   91 to 100% on some re-runs (Skyartec, SFHSS, Corona: the MPM read stalls?).
+   at 1 Mbps (a weak sync word). The LaunchPad CC2500 runs that dropped to
+   91 to 100% on some re-runs (Skyartec, SFHSS, Corona) were most likely the
+   bench output stalls (fixed); not re-run on the LaunchPad.
 
 The loss timing tells Wi-Fi from a format problem: Wi-Fi beacons take out
 packets 102.4 ms apart.

@@ -3,12 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <driverlib/gpio.h>
+
 #include "bench.h"
 #include "board.h"
 #include "frame.h"
 #include "radio.h"
 #include "timer.h"
 #include "uart.h"
+
+#if defined(LED_SPI) && defined(LED_DIN)
+  #include "led_rgb.h"
+#endif
 
 // Commands (one per line, numbers in decimal or 0x hex):
 //
@@ -134,6 +140,50 @@ static uint8_t _rx_len;
 static uint32_t _stat_tx;
 static uint32_t _stat_rx;
 static uint32_t _stat_err;
+
+// RF activity LED: each packet sent or received lights it for LED_HOLD_US,
+// so that a packet stream looks steady and a single packet still shows.
+// MPM v2 RGB LED: TX orange, RX green, RX with a bad CRC red, idle dim blue
+// (as at boot). LaunchPad: TX red, RX green, bad CRC both.
+#define LED_HOLD_US 20000
+
+typedef enum { LED_IDLE, LED_TX, LED_RX, LED_RX_BAD } led_state_t;
+
+static led_state_t _led_state;
+static uint32_t _led_until;
+
+static void _led_show(led_state_t state)
+{
+#if defined(LED_SPI) && defined(LED_DIN)
+  static const uint32_t colors[] = {
+      [LED_IDLE] = LED_COLOR(0x00, 0x00, 0x60),
+      [LED_TX] = LED_COLOR(0x60, 0x20, 0x00),
+      [LED_RX] = LED_COLOR(0x00, 0x60, 0x00),
+      [LED_RX_BAD] = LED_COLOR(0x60, 0x00, 0x00),
+  };
+  led_rgb_set_color(colors[state]);
+#elif defined(LED_GREEN) && defined(LED_RED)
+  GPIO_writeDio(LED_RED, state == LED_TX || state == LED_RX_BAD);
+  GPIO_writeDio(LED_GREEN, state == LED_RX || state == LED_RX_BAD);
+#else
+  (void)state;
+#endif
+}
+
+static void _led_event(led_state_t state)
+{
+  _led_until = micros() + LED_HOLD_US;
+  if (state == _led_state) return;
+  _led_state = state;
+  _led_show(state);
+}
+
+static void _led_poll()
+{
+  if (_led_state == LED_IDLE || micros_before(_led_until)) return;
+  _led_state = LED_IDLE;
+  _led_show(LED_IDLE);
+}
 
 // Acknowledgments (ESB): same framing as the data, empty or with a payload
 // (dynamic payload length only). As the nRF24L01+, any valid ack is accepted:
@@ -324,6 +374,7 @@ static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
     return false;
   }
   _stat_tx++;
+  _led_event(LED_TX);
   if (_ack_on) {
     _stat_retries += ack->tries - 1;
     if (ack->acked) _stat_acked++;
@@ -339,6 +390,7 @@ static void _report_packet(const radio_packet_t* pkt)
   frame_result_t res =
       frame_decode_pcf(&_frame, pkt->data, pkt->len, _rx_len, payload, &len, &pcf);
 
+  _led_event(_frame.crc_len && res != FRAME_OK ? LED_RX_BAD : LED_RX);
   _printf("@rx %lu %d ", pkt->timestamp_us, _channel);
   _print_hex(payload, len);
   if (_frame.crc_len) _printf(" crc=%s", res == FRAME_OK ? "ok" : "bad");
@@ -1280,6 +1332,7 @@ void bench_loop()
 
   while (true) {
     _poll_uart();
+    _led_poll();
 
     switch (_job) {
       case JOB_TXP:

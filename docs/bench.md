@@ -42,21 +42,22 @@ The bench firmware is in the branch `mpm-bench` of
 over the debug serial port. `_Bench_Config.h` keeps only the protocols the
 bench uses so that a debug build fits in flash (88%).
 
-Two MPM fixes change some results. They aren't in `mpm-bench`; merge them
-into a local build branch when you need them:
+`mpm-bench` also carries the two MPM fixes that change some results (each
+also has its own branch on the fork, for upstream):
 
-- `xn297-enhanced-xorout` (same fork): the XN297 emulation sends the
-  unscrambled enhanced mode CRC without the xorout its RX side applies. Needed
-  for `suite_nrf.py xn297enh_unscr*`, MPM -> CC2652. No MPM protocol uses this
+- `xn297-enhanced-xorout`: the XN297 emulation sends the unscrambled
+  enhanced mode CRC without the xorout its RX side applies. Needed for
+  `suite_nrf.py xn297enh_unscr*`, MPM -> CC2652. No MPM protocol uses this
   mode.
-- [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197):
+- `e010r5-hop-fix`, [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197):
   E010R5 changes the channel before the last packet is sent; without it 1 in 6
   E010R5 packets is corrupted (`proto_capture.py e010r5`).
 
-```sh
-git checkout -b bench-build mpm-bench
-git merge origin/xn297-enhanced-xorout origin/e010r5-hop-fix   # in the clone below
-```
+The bench output never blocks: it goes through a 2 KB ring, drained when USB
+has room (`stop` reports `out_drop=<n>` if lines had to be dropped). Before,
+`Serial.write()` waited on a slow host for up to 23 ms and the chips, armed
+for one packet, missed the next ones. LED blinks on each packet sent, LED2
+on each packet received.
 
 ```sh
 git clone -b mpm-bench https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module.git
@@ -82,6 +83,8 @@ openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf ve
 ### MPM v2
 
 The same bench firmware runs on the MPM v2 board (no `BOARD_CC2652R1_LAUNCHXL`).
+Its RGB LED shows the RF activity: orange on TX, green on RX, red on a bad CRC,
+dim blue when idle (LaunchPad: red on TX, green on RX, both on a bad CRC).
 The console is the USB-C port (CH343, UART0 at 921600 baud), flashing goes
 through the J-Link on J10:
 

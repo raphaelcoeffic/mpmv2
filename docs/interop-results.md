@@ -400,25 +400,30 @@ carry over.
 | Family | MPM -> MPM v2 | MPM v2 -> MPM |
 |---|---|---|
 | NRF24L01 1 Mbps / 250 kbps, 6 addresses | 99.6 to 100% | 99.2 to 100% |
-| NRF24L01 2 Mbps | (no 2 Mbps RX) | 94.8 to 100% |
+| NRF24L01 2 Mbps | (no 2 Mbps RX) | 94.8 to 100% (96 to 98.4% after the bench output fix) |
 | XN297, all modes of `suite_nrf.py` | 100% | 100% |
 | ESB 250 kbps (`esb.py`) | | 250/250 acked on the 1st try |
-| CC2500, the 18 setups of `suite_cc2500.py` | 100% | 80 to 100%, see below |
-| A7105, the 11 setups of `suite_a7105.py` | 100% | 94.4 to 100% (Joysway 94.4%, Bugs 97.6%, WFLY2 97.8%) |
-| CYRF6936, the 12 setups of `suite_cyrf.py` | 96 to 100% (LaunchPad: 99 to 100%), Wi-Fi, see below | 99 to 100% |
+| CC2500, the 18 setups of `suite_cc2500.py` | 100% | 100% at full power after the bench output fix, Corona V2 91 to 98.5% (before: 80 to 100%), see below |
+| A7105, the 11 setups of `suite_a7105.py` | 100% | 95 to 100% (Bugs 95.6%, WFLY2 95%, Joysway and Pelikan 98.2%) |
+| CYRF6936, the 12 setups of `suite_cyrf.py` | 96 to 100% (LaunchPad: 99 to 100%), Wi-Fi, see below | 100%, Kyosho3 99% |
 
-CC2500, MPM v2 -> MPM below 100% at full power: Redpine 80%, Hitec 93%,
-Ares and FrSky X LBT 94%, Redpine slow 96.5%, FrSky X, IKEA and Corona V2 97%.
-Three causes, none on the MPM v2 side:
+CC2500, MPM v2 -> MPM below 100% at full power at first: Redpine 80%, Hitec
+93%, Ares and FrSky X LBT 94%, Redpine slow 96.5%, FrSky X, IKEA and Corona V2
+97%. Causes, none on the MPM v2 side:
 
-- **Too much signal.** At -5 dBm (`CC_INIT="pwr 0x12d6"`) Hitec and Ares get
-  100%; at -21 dBm (`0x04c6`) they drop again (90 to 96.5%). +20 dBm at 1 m
-  overloads the 4-in-1 receiver (it has an LNA too).
-- **MPM read stalls.** Redpine (3 ms period) loses runs of exactly 10 packets
-  in some runs: the packet before the gap is read 33 ms late by the MPM, while
-  the MPM v2 sends on time (`stop` reports `late_max`, under 10 us). With the
-  CC2500 going idle after each packet ("rx 0"), everything sent during the
-  stall is lost. Most runs get 100%.
+- **MPM bench output stalls.** Redpine (3 ms period) loses runs of exactly 10
+  packets: the packet before the gap is read 33 ms late by the MPM, while the
+  MPM v2 sends on time (`stop` reports `late_max`, under 10 us). The bench
+  firmware printed each packet with `Serial.write()`, which waits for room in
+  the 256 byte USB buffer when the host is slow to fetch it; the chips, armed
+  for one packet ("rx 0" on the CC2500), miss everything sent meanwhile. The
+  same 23 ms stalls took CYRF6936 packets in pairs (Kyosho3 at a 10 ms
+  period). Fixed in `mpm-bench` (7be801b, output through a RAM ring): the
+  worst read is then 400 us late, and all 18 CC2500 setups get 100% at full
+  power but Corona V2. Hitec and Ares, which had looked like overload (100% at
+  -5 dBm, worse at +20 and -21 dBm), were these stalls too.
+- **Corona V2** freezes the CC2500 AGC (see above): 91 to 98.5% depending on
+  the MPM v2 power, best at `pwr 0x10c3`.
 - **MPM bench race (FrSky X LBT).** The "other" packets are the first 10 of a
   run, each 3 bytes short (last payload byte and status missing).
   `bench_receive()` reads `RXBYTES` before checking `MARCSTATE`: when the
