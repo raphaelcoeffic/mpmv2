@@ -10,8 +10,10 @@ bits are wrong, the RSSI, the receiver counters and the timing of the losses.
   losses.py cyrf devo --mpm-extra "w 0x03 0x0f" --ch 8 --runs 3
   losses.py a7105 joysway --dir rev --payload 3ce0d55691cc07427db8f32e69a4df1a
   losses.py a7105 wfly2 --dir rev --cc-extra "pwr 0x04c6" -q
+  losses.py nrf nrf2m --dir rev --addr 6565656565
 
-Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups). The
+Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups), nrf
+(the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m). The
 packet counter is at byte 2, so --count is at most 256.
 
 Losses locked to the 102.4 ms cycle (--timing: most of them in one phase
@@ -28,6 +30,7 @@ import time
 import rig
 import suite_a7105
 import suite_cyrf
+import suite_nrf
 
 BEACON_US = 102400
 
@@ -40,6 +43,9 @@ def family_setups(a) -> tuple[list[str], list[str], int]:
         mpm = rig.commands(mpm_setup) + (rig.commands(mpm_rx) if a.dir == "rev" else [])
         cc = rig.commands(cc_setup) + (rig.commands(cc_tx) if a.dir == "rev" else [])
         return mpm, cc, n
+    if a.family == "nrf":
+        mpm_setup, cc_setup = suite_nrf.nrf_setups(a.name, a.addr)
+        return rig.commands(mpm_setup), rig.commands(cc_setup), 16
     mpm_tx, mpm_rx, cc_setup, n = suite_a7105.setups(a.name, a.trim)
     return rig.commands(mpm_rx if a.dir == "rev" else mpm_tx), rig.commands(cc_setup), n
 
@@ -113,14 +119,15 @@ def report(i: int, r: dict, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("family", choices=("cyrf", "a7105"))
+    ap.add_argument("family", choices=("cyrf", "a7105", "nrf"))
     ap.add_argument("name", help="setup name of the family's suite")
     ap.add_argument("--dir", default="fwd", choices=("fwd", "rev"), help="fwd: MPM -> CC2652")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--count", type=int, default=250, help="packets per run, at most 256")
-    ap.add_argument("--period", type=int, help="TX period in us (default: cyrf 10000, a7105 5000)")
-    ap.add_argument("--ch", type=int, help="channel (default: cyrf 30, a7105 170)")
+    ap.add_argument("--period", type=int, help="TX period in us (default: cyrf 10000, a7105 and nrf 5000)")
+    ap.add_argument("--ch", type=int, help="channel (default: cyrf 30, a7105 170, nrf 40)")
     ap.add_argument("--trim", type=int, default=90, help="a7105: CC2652 trim in kHz (default 90)")
+    ap.add_argument("--addr", default="e7e7e7e7e7", help="nrf: address (default e7e7e7e7e7)")
     ap.add_argument("--payload", help="payload in hex (default: the suites' pattern)")
     ap.add_argument("--mpm-extra", default="", help="commands after the MPM setup")
     ap.add_argument("--cc-extra", default="", help="commands after the CC2652 setup")
@@ -131,9 +138,12 @@ def main():
     if a.count > 256:
         ap.error("--count: at most 256 (8 bit counter)")
     a.period = a.period or (10000 if a.family == "cyrf" else 5000)
-    ch = a.ch if a.ch is not None else (30 if a.family == "cyrf" else 170)
-    if a.family == "cyrf" and a.name not in suite_cyrf.P or a.family == "a7105" and a.name not in suite_a7105.P:
-        ap.error(f"unknown {a.family} setup {a.name}")
+    ch = a.ch if a.ch is not None else {"cyrf": 30, "a7105": 170, "nrf": 40}[a.family]
+    names = {"cyrf": suite_cyrf.P, "a7105": suite_a7105.P, "nrf": suite_nrf.NRF}[a.family]
+    if a.name not in names:
+        ap.error(f"unknown {a.family} setup {a.name}: {' '.join(names)}")
+    if a.family == "nrf" and a.name == "nrf2m" and a.dir == "fwd":
+        ap.error("nrf2m: --dir rev only, the CC2652 has no 2 Mbps receiver")
 
     mpm_setup, cc_setup, n = family_setups(a)
     payload = bytes.fromhex(a.payload) if a.payload else rig.pattern(n)

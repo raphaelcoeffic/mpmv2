@@ -140,9 +140,9 @@ setup, setups as `;`-separated commands or example files
 | `suite_cc2500.py` | The CC2500 protocols (18 setups), MPM CC2500 registers against the CC2652 presets. `--phy` derives a CC2652 PHY from any CC2500 register table |
 | `suite_a7105.py` | The A7105 protocols (11 setups), with their `A7105_Init()` tables |
 | `suite_cyrf.py` | The CYRF6936 DSSS protocols (12 setups), with their own register setups |
-| `losses.py` | Where the losses of a CYRF6936 or A7105 suite setup go: missing or bad, wrong bytes and bits, RSSI, receiver counters, and whether they lock to the 102.4 ms Wi-Fi beacon cycle (`--timing`). `--mpm-extra` / `--cc-extra` change one register or setting at a time |
+| `losses.py` | Where the losses of a CYRF6936, A7105 or plain NRF24L01 suite setup go: missing or bad, wrong bytes and bits, RSSI, receiver counters, and whether they lock to the 102.4 ms Wi-Fi beacon cycle (`--timing`). `--mpm-extra` / `--cc-extra` change one register or setting at a time |
 | `sdr.py` | Client for an ESP32-S3 running [esp-sdr](https://github.com/ESPARGOS/esp-sdr): I/Q bursts, FM demodulation, bit clock and slicing. `sdr.py info`, `sdr.py cap <MHz>` |
-| `sdr_compare.py` | The same A7105 packet from the MPM A7105 and from the CC2652, seen by the SDR: bit rate, carrier, deviation in runs and on isolated bits, worst bit, payload; `--bits` per-bit table |
+| `sdr_compare.py` | The same A7105 or NRF24L01 packet from the MPM and from the CC2652, seen by the SDR: bit rate, carrier, deviation in runs and on isolated bits, worst bit, payload; `--bits` per-bit table |
 | `proto_capture.py` | The MPM runs one of its protocols (`proto`), the CC2652 receives on one channel: E01X, E129, C186, E010R5, FrSky L |
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
@@ -168,6 +168,7 @@ under test. Found out while setting it up:
 tools/bench/sdr.py info
 CC_PORT=v2 tools/bench/sdr_compare.py flysky
 CC_PORT=v2 tools/bench/sdr_compare.py joysway --bits 48 64
+CC_PORT=v2 tools/bench/sdr_compare.py nrf2m --ch 40
 ```
 
 Each suite takes protocol names (default: all), `--count`, `--period`, `--dir

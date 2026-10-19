@@ -38,6 +38,12 @@ P = {
 }
 
 
+def nrf_setups(name: str, addr: str) -> tuple[str, str]:
+    """(MPM setup, CC2652 setup) of a plain NRF24L01 test, without the channel."""
+    rf, preset = NRF[name]
+    return f"nrf_1m.txt;{rf};w 0x0a {addr};w 0x10 {addr}", f"preset {preset};nrf {addr} 2"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"tests (default: all): {' '.join(list(NRF) + list(P))}")
@@ -50,10 +56,9 @@ def main():
     with mpm, cc:
         for name in a.names or list(NRF) + list(P):
             if name in NRF:
-                rf, preset = NRF[name]
                 for addr in a.addr or ADDRS:
-                    r = rig.link_test(mpm, cc, payload, mpm_setup=f"nrf_1m.txt;{rf};w 0x0a {addr};w 0x10 {addr}",
-                                      cc_setup=f"preset {preset};nrf {addr} 2", ch=40, period=a.period,
+                    mpm_setup, cc_setup = nrf_setups(name, addr)
+                    r = rig.link_test(mpm, cc, payload, mpm_setup=mpm_setup, cc_setup=cc_setup, ch=40, period=a.period,
                                       count=a.count, direction="rev" if name == "nrf2m" else a.dir,
                                       verbose=a.verbose)
                     rig.print_results(f"{name} {addr}", r)

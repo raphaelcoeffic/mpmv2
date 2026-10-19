@@ -42,6 +42,49 @@ instead of 0x1F gets it from 50% to 100%. Its sensitivity cost is not
 measured. Detuning the CC2652 gives the same limit for both thresholds (100%
 at 250 kHz, 0% at 350 kHz).
 
+### 2 Mbps, CC2652 -> NRF
+
+On the MPM v2 (`losses.py nrf nrf2m`, address `e7e7e7e7e7`, 5 ms period),
+2 Mbps loses packets in the middle of the band and 1 Mbps doesn't, in
+interleaved runs:
+
+| Channel | 2 Mbps | 1 Mbps |
+|---|---|---|
+| 2 | 99.3% | 98.9% |
+| 40 | 97.1 to 98.2% | 99.9 to 100% |
+| 80 | 99.2 to 99.8% | 99.4 to 100% |
+
+A ch 30 to 50 sweep (missing per 500) puts the losses over ch 30 to 41
+(3 to 18), ch 42 to 50 1 to 6. Every loss is a missing packet: the NRF drops
+CRC failures without a word. What it is not:
+
+- **Wi-Fi beacons:** 100 pairs of lost packets, 8% within one packet of a
+  multiple of 102.4 ms (random: 10%).
+- **Wi-Fi or other traffic in general**, as far as the ESP32-S3 SDR sees it:
+  2440 MHz is busy 1.4% of the time, 2480 MHz 1.8 to 3%. And 2 Mbps packets
+  are half as long as 1 Mbps ones, which get through.
+- **The ESP32's LO:** the same losses with the SDR tuned to 2440 or 2470 MHz,
+  idle or capturing.
+- **Frequency offset:** the CC2652 is about 135 kHz above this NRF at
+  `trim -35` (SDR, both senders); `trim` 0, -35, -170 and -300 give the same
+  losses.
+- **Payload:** fixed payloads (no counter) with byte 2 at 0x00, 0x32, 0x51,
+  0x64, 0x9b, 0xc0 all lose 1 to 4%.
+- **Address:** `c3c3c3c3c3`, `6565656565`, `a1b2c3d4e5`, `0102030405`,
+  `0f0f0f0f0f` alike.
+- **Deviation:** `phy 2000000 <dev> 100` with 320, 400 and 480 kHz alike.
+- **Power:** at ch 40, 10 dB less (`pwr 0x04c6`) only goes from 2% to 3%; at
+  ch 80, from 0.5% to 3.7%. So at full power ch 40 has a floor that ch 80
+  doesn't.
+
+`sdr_compare.py nrf2m` (ch 40 and 80 alike): the CC2652 deviates 245 to
+260 kHz on runs and 290 to 300 kHz on isolated bits (117%), the NRF 310 kHz
+and 250 kHz (80%). The CC2652's worst bit is at 71 kHz from the carrier, the
+NRF's at 175 kHz: a narrower eye, but the same on both channels and not
+changed by a larger deviation. Open: a source in ch 30 to 41 that this NRF
+sees at 2 Mbps only, or an NRF receiver weakness there. An NRF -> NRF
+reference would tell, the bench has a single NRF24L01.
+
 ### Enhanced ShockBurst
 
 Measured on air from the nRF24L01+:
@@ -400,7 +443,7 @@ carry over.
 | Family | MPM -> MPM v2 | MPM v2 -> MPM |
 |---|---|---|
 | NRF24L01 1 Mbps / 250 kbps, 6 addresses | 99.6 to 100% | 99.2 to 100% |
-| NRF24L01 2 Mbps | (no 2 Mbps RX) | 94.8 to 100% (96 to 98.4% after the bench output fix) |
+| NRF24L01 2 Mbps | (no 2 Mbps RX) | ch 40: 97 to 98.2%, ch 2 and 80: 99.2 to 99.8%, see [2 Mbps](#2-mbps-cc2652---nrf) |
 | XN297, all modes of `suite_nrf.py` | 100% | 100% |
 | ESB 250 kbps (`esb.py`) | | 250/250 acked on the 1st try |
 | CC2500, the 18 setups of `suite_cc2500.py` | 100% | 100% at full power after the bench output fix, Corona V2 91 to 98.5% (before: 80 to 100%), see below |

@@ -82,13 +82,13 @@ class Sdr:
         iq = np.frombuffer(data, np.int8).astype(np.float32)
         return iq[0::2] + 1j * iq[1::2]
 
-    def autogain(self, start: int = 70, tries: int = 8) -> int | None:
+    def autogain(self, start: int = 70, tries: int = 8, min_len: int = 2000) -> int | None:
         """Highest manual gain without clipping on the packets being sent."""
         for g in range(start, 0, -5):
             self.cmd(f"GAIN MANUAL {g}")
             lv = []
             for _ in range(tries):
-                b = burst(iq := self.cap(), thr=10)
+                b = burst(iq := self.cap(), thr=10, min_len=min_len)
                 if b:
                     lv.append(clipping(iq[b[0]:b[1]]))
             if lv and max(lv) < 0.002:

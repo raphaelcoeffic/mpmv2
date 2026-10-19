@@ -126,8 +126,11 @@ and E010R5) are explained in
 2. **CYRF6936, CC2652 -> CYRF6936:** with the bench output fix all 100%
    but Kyosho3 (99%, single misses at a 10 ms period). MLINK is only received
    with the chips inverted (not understood).
-3. **NRF24L01 2 Mbps, CC2652 -> NRF:** 92 to 97% (LaunchPad), 94.8 to 100%
-   (MPM v2). The CFlie direction.
+3. **NRF24L01 2 Mbps, CC2652 -> NRF:** 92 to 97% (LaunchPad); MPM v2 97
+   to 98.2% at ch 30 to 41, 99.2 to 99.8% at ch 2 and 80, while 1 Mbps gets
+   100% at ch 40. Random losses: not Wi-Fi beacons, frequency offset, payload,
+   address or deviation ([details](interop-results.md#2-mbps-cc2652---nrf)).
+   The CFlie direction.
 4. **Smaller ones:** Height 5 ch 88 to 100% (the A7105 RX restart between
    short packets?), Bugs 97.6 to 99%, NRF address `0f0f0f0f0f` 97.6 to 99.6%
    at 1 Mbps (a weak sync word). The LaunchPad CC2500 runs that dropped to
