@@ -77,6 +77,7 @@ typedef struct {
   uint8_t data_len;
   // Module
   uint32_t id;               // module id + rx_num
+  uint32_t id_master;        // module id (MProtocol_id_master)
   uint8_t rx_tx_addr[5];     // from id, as set_rx_tx_addr()
   bool bind_in_progress;
   bool input;                // frames from the radio

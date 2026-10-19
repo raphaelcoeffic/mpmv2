@@ -1,6 +1,12 @@
 // Globals and helpers of Multiprotocol.ino and Convert.ino
 // (DIY-Multiprotocol-TX-Module v1.3.4.74, GPL v3)
 #include "mpm_compat.h"
+#ifdef CC2500_INSTALLED
+#include "iface_cc2500.h"
+#endif
+#ifdef A7105_INSTALLED
+#include "iface_a7105.h"
+#endif
 
 uint16_t counter;
 uint8_t channel;
@@ -41,13 +47,34 @@ uint8_t CH_TAER[16] = {THROTTLE, AILERON, ELEVATOR, RUDDER, CH5,  CH6,  CH7,  CH
 uint8_t CH_EATR[16] = {ELEVATOR, AILERON, THROTTLE, RUDDER, CH5,  CH6,  CH7,  CH8,
                        CH9,      CH10,    CH11,     CH12,   CH13, CH14, CH15, CH16};
 uint8_t prev_power = 0xFD;
+uint8_t prev_option;
+bool lbt_power;
 
 uint8_t packet_in[TELEMETRY_BUFFER_SIZE];
+uint8_t telemetry_in_buffer[TELEMETRY_BUFFER_SIZE];
 uint8_t v_lipo1, v_lipo2;
 uint8_t RX_RSSI, TX_RSSI, RX_LQI, TX_LQI;
 uint8_t telemetry_link;
 uint8_t telemetry_counter;
 uint8_t telemetry_lost;
+
+static uint8_t _eeprom[EEPROM_SIZE];
+static bool _eeprom_init;
+
+uint8_t eeprom_read_byte(EE_ADDR address)
+{
+  if (!_eeprom_init || address >= EEPROM_SIZE) return 0xFF;
+  return _eeprom[address];
+}
+
+void eeprom_write_byte(EE_ADDR address, uint8_t value)
+{
+  if (!_eeprom_init) {
+    memset(_eeprom, 0xFF, sizeof(_eeprom));
+    _eeprom_init = true;
+  }
+  if (address < EEPROM_SIZE) _eeprom[address] = value;
+}
 
 // Called by the core before each protocol start: what protocol_init() resets
 void mpm_protocol_prepare()
@@ -56,15 +83,22 @@ void mpm_protocol_prepare()
   crc8_polynomial = 0x31;
   binding_idx = 0;
   prev_power = 0xFD;
-  // init_frskyd_link_telemetry()
-  telemetry_link = 0;
-  telemetry_lost = 1;
-  telemetry_counter = 0;
-  v_lipo1 = v_lipo2 = 0;
-  RX_RSSI = TX_RSSI = RX_LQI = TX_LQI = 0;
+  prev_option = option;
+  lbt_power = false;
+  // modules_reset()
+#ifdef CC2500_INSTALLED
+  CC2500_Reset();
+#endif
+#ifdef A7105_INSTALLED
+  A7105_Reset();
+#endif
+  init_frskyd_link_telemetry();
   pps_timer = millis();
   pps_counter = 0;
 }
+
+// The core's telemetry hook: Telemetry.ino's TelemetryUpdate() (Update_Telem())
+void mpm_protocol_telemetry() { TelemetryUpdate(); }
 
 // End_Bind() of the MPM for the protocols that count their bind packets
 void end_bind_counter()
@@ -184,9 +218,43 @@ uint16_t convert_channel_frsky(uint8_t num)
   return ((val * 15) >> 4) + 1290;
 }
 
+// 0-2047, 0 = 817, 1024 = 1500, 2047 = 2182
+//64=860,1024=1500,1984=2140//Taranis 125%
+uint16_t FrSkyX_scaleForPXX_n(uint8_t i, uint8_t num_chan)
+{  // mapped 860,2140(125%) range to 64,1984(PXX values);
+  uint16_t chan_val = convert_channel_frsky(i) - 1226;
+  if (i >= num_chan) chan_val |= 2048;  // upper channels offset
+  return chan_val;
+}
+
+uint16_t FrSkyX_scaleForPXX_FS_n(uint8_t i, uint8_t num_chan)
+{  // mapped 1,2046(125%) range to 64,1984(PXX values);
+  uint16_t chan_val = ((Failsafe_data[i] * 15) >> 4) + 64;
+  if (Failsafe_data[i] == FAILSAFE_CHANNEL_NOPULSES)
+    chan_val = FAILSAFE_CHANNEL_NOPULSES;
+  else if (Failsafe_data[i] == FAILSAFE_CHANNEL_HOLD)
+    chan_val = FAILSAFE_CHANNEL_HOLD;
+  if (i >= num_chan) chan_val |= 2048;  // upper channels offset
+  return chan_val;
+}
+
 //
 // Multiprotocol.ino
 //
+
+// random(max): xorshift32, seeded from the module id and the time of the
+// first call
+long mpm_random(long max)
+{
+  static uint32_t x;
+  if (!x) x = (MProtocol_id ^ micros()) | 1;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  // As Arduino's: a positive value modulo max, max may be negative
+  // (FrSky X: random(0xfefefefe))
+  return max ? (long)(x >> 1) % max : 0;
+}
 
 void set_rx_tx_addr(uint32_t id)
 {

@@ -14,3 +14,19 @@ void end_bind_counter();
 void BAYANG_init();
 uint16_t BAYANG_callback();
 #endif
+#ifdef FRSKYD_CC2500_INO
+void FRSKYD_init();
+uint16_t FRSKYD_callback();
+#endif
+#ifdef FRSKYV_CC2500_INO
+void FRSKYV_init();
+uint16_t FRSKYV_callback();
+#endif
+#ifdef FRSKYX_CC2500_INO
+void FRSKYX_init();
+uint16_t FRSKYX_callback();
+#endif
+#ifdef AFHDS2A_A7105_INO
+void AFHDS2A_init();
+uint16_t AFHDS2A_callback();
+#endif

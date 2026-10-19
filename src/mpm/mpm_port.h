@@ -15,6 +15,8 @@ void mpm_port_init();
 bool mpm_port_read_frame(uint8_t* buf, uint8_t* len);
 // Telemetry to the radio
 void mpm_port_write(const uint8_t* data, uint8_t len);
+// Room left for telemetry (bytes)
+uint16_t mpm_port_write_free();
 
 void mpm_port_led(bool on);
 

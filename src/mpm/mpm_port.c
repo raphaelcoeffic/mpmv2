@@ -90,6 +90,8 @@ bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
 
 void mpm_port_write(const uint8_t* data, uint8_t len) { uart_tx_irq(MPM_UART, data, len); }
 
+uint16_t mpm_port_write_free() { return uart_tx_free(MPM_UART); }
+
 void mpm_port_led(bool on)
 {
 #if defined(LED_GREEN)

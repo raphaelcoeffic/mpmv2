@@ -135,6 +135,10 @@ static uint16_t _proto_list_callback()
   return 1000;
 }
 
+// Protocol layer hook (upstream/telemetry.c): the protocol's telemetry
+__attribute__((weak)) void mpm_protocol_telemetry() {}
+
+// As TelemetryUpdate(): the status first, else the protocol's telemetry
 static void _update_telem(uint32_t ms)
 {
   if (mpm.disable_telem) return;
@@ -142,7 +146,9 @@ static void _update_telem(uint32_t ms)
     if (mpm.protocol != MPM_PROTO_LIST) _send_status_frame();
     _send_status = false;
     _status_ms = ms;
+    return;
   }
+  if (_callback && mpm.protocol != MPM_PROTO_LIST) mpm_protocol_telemetry();
 }
 
 // Protocol layer hook (upstream/mpm_compat.c): what the MPM's protocol_init()
@@ -159,6 +165,7 @@ static void _protocol_init()
   mpm.option_override = 0xFF;
   mpm_port_reset_rf();
 
+  mpm.id_master = _module_id;
   mpm.id = _module_id + mpm.rx_num;
   mpm.rx_tx_addr[0] = mpm.id >> 24;
   mpm.rx_tx_addr[1] = mpm.id >> 16;

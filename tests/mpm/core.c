@@ -39,6 +39,8 @@ bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
   *len = _frame_len;
   return true;
 }
+uint16_t mpm_port_write_free() { return 256; }
+
 void mpm_port_write(const uint8_t* data, uint8_t len)
 {
   if (_telem_len + len <= sizeof(_telem)) memcpy(_telem + _telem_len, data, len);

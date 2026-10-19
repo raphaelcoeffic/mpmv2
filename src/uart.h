@@ -76,6 +76,8 @@ void uart_disable_tx_irq(uart_t uart);
 bool uart_tx_irq_enabled(uart_t uart);
 
 bool uart_tx_irq(uart_t uart, const void* data, uint32_t len);
+// Free bytes in the TX ring of uart_enable_tx_irq()
+uint32_t uart_tx_free(uart_t uart);
 bool uart_print_irq(uart_t uart, const char* str);
 
 // TX DMA methods

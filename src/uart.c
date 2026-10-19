@@ -354,6 +354,13 @@ static inline bool _tx_buffered(uint32_t uart, uint8_t data)
   return true;
 }
 
+uint32_t uart_tx_free(uart_t uart)
+{
+  ASSERT(uart < MAX_UART);
+  uart_tx_buffer_t* buf = &_uart_state[uart].tx_buf;
+  return (buf->tail - buf->head - 1) & (buf->size - 1);
+}
+
 bool uart_tx_irq(uart_t uart, const void* data, uint32_t len)
 {
   ASSERT(uart < MAX_UART);

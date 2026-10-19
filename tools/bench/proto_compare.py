@@ -23,6 +23,7 @@ import statistics
 import sys
 import time
 from collections import Counter
+from typing import NamedTuple
 
 import rig
 from mpm_bench import Bench, find_port
@@ -38,17 +39,89 @@ def rx_tx_addr(module_id: int, rx_num: int) -> bytes:
     return a + bytes([(a[2] & 0xF0) | (a[3] & 0x0F)])
 
 
-def bayang_capture(addr: bytes, sub: int) -> list[tuple[str, str, int]]:
-    """(name, receiver setup, rx length): bind channel/address, then a data channel."""
+class Capture(NamedTuple):
+    name: str
+    setup: str           # receiver (MPM v2 bench) setup
+    rx_len: int
+    bind: bool = False   # started with the bind flag
+    mask: tuple = ()     # payload bytes left out of the comparison (counters, CRCs)
+    valid: object = None  # payload check (protocol CRC without the chip's)
+
+
+def bayang_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind channel/address, then a data channel."""
     bind_ch = 10 if sub in (2, 3) else 0  # X16_AH, IRDRONE
     data_ch = (addr[3] & 0x1F) + 0x10  # hopping_frequency[1]
     xn = "preset nrf1m;xn 1 1 0"
-    return [("bind", f"{xn};xaddr 0000000000;ch {bind_ch}", 15),
-            ("data", f"{xn};xaddr {addr.hex()};ch {data_ch}", 15)]
+    return [Capture("bind", f"{xn};xaddr 0000000000;ch {bind_ch}", 15),
+            Capture("data", f"{xn};xaddr {addr.hex()};ch {data_ch}", 15)]
+
+
+def frskyd_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind and data on CHANNR 0 (hopping_frequency[0] = 0 for every ID).
+    Data: frame and telemetry counters left out."""
+    return [Capture("bind", "preset frskyd;ch 0", 20, bind=True),
+            Capture("data", "preset frskyd;ch 0", 20, mask=(3, 4))]
+
+
+def frskyv_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind on CHANNR 0, data on CHANNR 6 (channel 0 of the seed sequence):
+    seed and CRC left out."""
+    return [Capture("bind", "preset frskyv;ch 0", 16, bind=True),
+            Capture("data", "preset frskyv;ch 6", 16, mask=(3, 4, 14))]
+
+
+def frskyx_crc_ok(p: bytes) -> bool:
+    """FrSkyX_crc() over packet[3..len-2], in the last 2 bytes"""
+    crc = 0
+    for b in p[3:-2]:
+        v = (crc >> 8) ^ b
+        crc = ((crc << 8) ^ FRSKYX_CRC_SHORT[v & 15] ^ (0x1081 * (v >> 4))) & 0xFFFF
+    return len(p) > 5 and p[-2:] == crc.to_bytes(2, "big")
+
+
+FRSKYX_CRC_SHORT = [0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF,
+                    0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7]
+
+
+def frskyx_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind on CHANNR 0, data on hopping_frequency[0] (rx_tx_addr[0] & 7):
+    channel skip (random), hop index, failsafe flag, sequence and CRC left
+    out. FCC D16 v1 only"""
+    n = 0x1D
+    return [Capture("bind", "preset frskyx;ch 0", n + 1, bind=True, valid=frskyx_crc_ok),
+            Capture("data", f"preset frskyx;ch {addr[0] & 7}", n + 1,
+                    mask=(4, 5, 7, 21, 22, n - 1, n), valid=frskyx_crc_ok)]
+
+
+def afhds2a_hop0(module_id: int, addr: bytes) -> int:
+    """hopping_frequency[0] of AFHDS2A_calc_channels()"""
+    rnd = module_id
+    band_no = addr[3] & 3  # idx 0
+    rnd = (rnd * 0x0019660D + 0x3C6EF35F) & 0xFFFFFFFF
+    return band_no * 41 + 1 + (rnd % 41)
+
+
+def afhds2a_capture(addr: bytes, sub: int, module_id: int = 0) -> list[Capture]:
+    """Bind on A7105 channel 0x0D, data on hopping_frequency[0]: the RX ID
+    (EEPROM: from earlier binds on the MPM) left out"""
+    rx_id = (5, 6, 7, 8)
+    return [Capture("bind", "preset afhds2a;ch 13", 38, bind=True, mask=rx_id),
+            Capture("data", f"preset afhds2a;ch {afhds2a_hop0(module_id, addr)}", 38, mask=rx_id)]
 
 
 # name: (protocol number, captures(addr, sub))
-CASES = {"bayang": (14, bayang_capture)}
+CASES = {"bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
+         "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
+         "afhds2a": (28, afhds2a_capture)}
+
+
+def masked(p: str, mask: tuple) -> str:
+    b = bytearray.fromhex(p)
+    for i in mask:
+        if i < len(b):
+            b[i] = 0
+    return b.hex()
 
 
 def capture(rx: Bench, setup: str, rx_len: int, start, stop, secs: float) -> list[tuple[int, str]]:
@@ -98,21 +171,24 @@ def main():
             mpm.cmd(f"chan {i} {v}")
         radio.set(protocol=0, channels=CHANNELS)  # protocol list: no RF until started
 
-        def mpm_start():
-            mpm.cmd(f"proto {proto} {a.sub} {a.rx_num} {a.option}")
+        kw = {"module_id": (a.id + a.rx_num) & 0xFFFFFFFF} if a.case == "afhds2a" else {}
+        for c in captures(addr, a.sub, **kw):
+            def mpm_start():
+                mpm.cmd(f"proto {proto} {a.sub} {a.rx_num} {a.option} {int(c.bind)}")
 
-        def port_start():
-            radio.set(protocol=proto, sub=a.sub, rx_num=a.rx_num, option=a.option)
+            def port_start():
+                radio.set(protocol=proto, sub=a.sub, rx_num=a.rx_num, option=a.option, bind=c.bind)
 
-        for name, setup, rx_len in captures(addr, a.sub):
             got = {}
             for src, start, stop in (("MPM", mpm_start, lambda: mpm.cmd("stop")),
-                                     ("port", port_start, lambda: radio.set(protocol=0))):
+                                     ("port", port_start, lambda: radio.set(protocol=0, bind=False))):
                 time.sleep(0.2)
-                got[src] = capture(rx, setup, rx_len, start, stop, a.secs)
-                print(f"{name:5s} {src:4s}: {summary(got[src])}")
-            ref = Counter(p for _, p in got["MPM"])
-            port = Counter(p for _, p in got["port"])
+                got[src] = capture(rx, c.setup, c.rx_len, start, stop, a.secs)
+                if c.valid:
+                    got[src] = [(t, p) for t, p in got[src] if c.valid(bytes.fromhex(p))]
+                print(f"{c.name:5s} {src:4s}: {summary(got[src])}")
+            ref = Counter(masked(p, c.mask) for _, p in got["MPM"])
+            port = Counter(masked(p, c.mask) for _, p in got["port"])
             for p, n in ref.most_common(3):
                 print(f"      {p}  MPM {n}, port {port.get(p, 0)}")
             only = [p for p in port if p not in ref]

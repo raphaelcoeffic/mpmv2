@@ -15,6 +15,11 @@ set(firmware_sources
     mpm/upstream/mpm_compat.c
     mpm/upstream/xn297.c
     mpm/upstream/Bayang_nrf24l01.c
+    mpm/upstream/cc2500.c
+    mpm/upstream/frsky.c
+    mpm/upstream/a7105.c
+    mpm/upstream/AFHDS2A_a7105.c
+    mpm/upstream/telemetry.c
     nor_flash.c
     ppm.c
     frame.c
