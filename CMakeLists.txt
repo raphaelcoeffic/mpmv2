@@ -8,6 +8,12 @@ include(${CMAKE_SOURCE_DIR}/cmake/toolchain/arm-none-eabi.cmake)
 
 project(MPMv2 VERSION 0.1.0.0)
 
+# Without optimization, the driverlib's GCC CPUcpsid() returns PRIMASK in r3
+# instead of r0: IntMasterDisable() returns garbage and interrupts stay off
+if (NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()
+
 option(BOARD_CC2652R1_LAUNCHXL
   "Target board is CC2652R1-LAUNCHXL (otherwise MPM w/ CC2652RB is assumed)"
   OFF

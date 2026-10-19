@@ -182,7 +182,7 @@ static inline void _rx_irq(uint32_t base, uart_rx_buffer_t* rx, uint32_t len)
 
 static inline void _rx_flush_fifo(uint32_t base, uart_rx_buffer_t* rx)
 {
-  while(!(HWREG(UART0_BASE + UART_O_FR) & UART_FR_RXFE)) {
+  while(!(HWREG(base + UART_O_FR) & UART_FR_RXFE)) {
     uint8_t data = HWREG(base + UART_O_DR);
     if (rx->rcvd < rx->size) rx->buffer[rx->rcvd++] = data;
     // TODO: else set overflow flag?
