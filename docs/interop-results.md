@@ -362,7 +362,7 @@ carry over.
 | ESB 250 kbps (`esb.py`) | | 250/250 acked on the 1st try |
 | CC2500, the 18 setups of `suite_cc2500.py` | 100% | 80 to 100%, see below |
 | A7105, the 11 setups of `suite_a7105.py` | 100% | 94.4 to 100% (Joysway 94.4%, Bugs 97.6%, WFLY2 97.8%) |
-| CYRF6936, the 12 setups of `suite_cyrf.py` | 96 to 100% (LaunchPad: 99 to 100%) | 99 to 100% |
+| CYRF6936, the 12 setups of `suite_cyrf.py` | 96 to 100% (LaunchPad: 99 to 100%), Wi-Fi, see below | 99 to 100% |
 
 CC2500, MPM v2 -> MPM below 100% at full power: Redpine 80%, Hitec 93%,
 Ares and FrSky X LBT 94%, Redpine slow 96.5%, FrSky X, IKEA and Corona V2 97%.
@@ -384,6 +384,25 @@ Three causes, none on the MPM v2 side:
   `MARCSTATE` first): `frskyxeu` rev 200/200, other=0, in 3 runs out of 3
   (`CC_INIT="pwr 0x12d6"`).
 
-Open: CYRF6936 -> MPM v2 loses 1 to 4% (DSM bind, Devo, WK2x01) where the
-LaunchPad got 99 to 100%. Not checked yet whether
-the MPM v2 receiver (11 dB LNA in front) is overloaded by the 4-in-1 PA at 1 m.
+CYRF6936 -> MPM v2 losses (1 to 4% on DSM bind, Devo, WK2x01; LaunchPad: 99 to
+100%): Wi-Fi, not overload. These setups are bind configurations: `TX_CFG`
+PA 0 (`CYRF_BIND_POWER`), so about -50 dBm at the MPM v2. DSM data sends at
+PA 7 (-18 dBm) and gets 100%.
+
+- Power: Devo with PA 7 (`w 0x03 0x0f`) 200/200 twice; DSM data with PA 0
+  (`w 0x03 0x28`) 97 to 98%. No RF core errors (`rf_nok=0`, `rf_buf_full=0`):
+  the packets are missing (SOP not found) or have bytes wrong. The decoder
+  takes the nearest code, so each wrong byte is a whole 32/64 chip symbol
+  trashed: a burst, not a weak signal (-50 dBm is 40 dB above sensitivity).
+- Channel (Devo PA 0, 250 packets): 83 to 93% at 2400 to 2418 MHz (7 Wi-Fi
+  networks on channel 1 here), 96 to 100% elsewhere. No clean channel: the
+  suite at ch 49 still gets 95 to 100%.
+- Timing (Devo, ch 8, 10 ms period): 60 to 75% of the lost packets are 10 or
+  11 packets apart (or multiples): 102.4 ms, the Wi-Fi beacon interval. The
+  rest come in bursts (traffic).
+- The CYRF6936 does the same: MPM v2 -> MPM at the lowest power
+  (`CC_INIT="pwr 0x04c6"`, ch 8) Devo 90 to 92%, DSM 82 to 84%; at the default
+  power 250/250.
+
+The LaunchPad numbers were taken another day (other Wi-Fi traffic, 100
+packets per setup). In real use only binding runs at PA 0, at short range.
