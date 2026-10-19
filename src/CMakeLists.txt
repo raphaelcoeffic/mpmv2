@@ -64,7 +64,7 @@ endif()
 
 if (BENCH)
     message("## Radio bench mode")
-    target_sources(firmware PRIVATE bench.c)
+    target_sources(firmware PRIVATE bench.c sx1281.c)
     target_compile_definitions(firmware PRIVATE BENCH)
 endif()
 

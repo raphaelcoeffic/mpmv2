@@ -43,9 +43,12 @@ def run(dev: Bench, spec, verbose: bool = False):
 
 def open_devices() -> tuple[Bench, Bench]:
     """(MPM, CC2652); the CC2652 bench runs on a 921600 baud UART.
-    CC_PORT=v2 uses the MPM v2 instead of the LaunchPad. $CC_INIT: commands
-    run on the CC2652 first, e.g. CC_INIT="pwr 0x04c6" (applies at the next preset)."""
+    CC_PORT=v2 uses the MPM v2 instead of the LaunchPad. The CC2652 bench is
+    set back to its own radio ("chip cc2652"), then $CC_INIT runs on it, e.g.
+    CC_INIT="pwr 0x04c6" (applies at the next preset), CC_INIT="chip sx1281"
+    (MPM v2: the SX1281 sends and receives, GFSK 125 kbps to 2 Mbps)."""
     mpm, cc = Bench(find_port("mpm")), Bench(find_port("cc"), 921600)
+    run(cc, "chip cc2652")
     run(cc, os.environ.get("CC_INIT"))
     return mpm, cc
 

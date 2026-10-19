@@ -85,6 +85,40 @@ changed by a larger deviation. Open: a source in ch 30 to 41 that this NRF
 sees at 2 Mbps only, or an NRF receiver weakness there. An NRF -> NRF
 reference would tell, the bench has a single NRF24L01.
 
+**The SX1281 as the sender** (`--cc-extra "chip sx1281"`, 2 Mbps, modulation
+index 0.35: 350 kHz, BT 0.5, 0 dBm into the PA), 750 packets per point,
+interleaved with the CC2652:
+
+| Channel | CC2652 | SX1281 |
+|---|---|---|
+| 32 | 742 | 739 |
+| 36 | 740 | 750 |
+| 40 | 730 | 730 |
+
+The SX1281 loses the same packets the CC2652 does, all missing. So it is not
+the CC2652's waveform: the channel or this NRF's receiver.
+
+### SX1281 (MPM v2)
+
+The MPM v2's second radio, behind U3 (`chip sx1281`, `src/sx1281.c`): GFSK
+packet mode, 125 kbps to 2 Mbps, used as a raw radio under `frame.c` like the
+RF core (sync word up to 4 bytes, fixed length, CRC and whitening off).
+October 2026, the NRF setups (`losses.py nrf`):
+
+- **2 Mbps RX, which the CC2652 can't do:** NRF -> SX1281 at ch 2 / 40 / 80:
+  96.8 / 98 / 96% on the first try.
+- **1 Mbps and 250 kbps RX**, interleaved with the CC2652 at ch 80 (a lossy
+  channel that day: the CC2652 had 100% there before): 1 Mbps 92 to 94.8%
+  (CC2652 93.2 to 94.8%), 250 kbps 88 to 92% (CC2652 88.4 to 90%).
+- **RX single mode, re-armed after each packet** (continuous mode can lock up,
+  datasheet errata 16.1). The chip still drops out of RX now and then: once
+  it stalled for good after 50 packets (it then stays in STDBY_RC, BUSY
+  time-outs). The driver checks the chip mode every millisecond and arms RX
+  again (`stop` prints `sx_rearm` and `sx_busy`): 2 re-arms in 4 runs of 250.
+- **The SX1281 crystal:** its offset is not measured yet (a `trim` sweep
+  taken before the re-arm check went in mixed in the stalls).
+- No ESB acks from the SX1281 yet (`ack` is CC2652 only).
+
 ### Enhanced ShockBurst
 
 Measured on air from the nRF24L01+:

@@ -113,8 +113,10 @@ installed on the fly): run them as `uv run tools/bench/<script>` or directly.
 Ports: `$MPM_PORT`, `$CC_PORT` and `$V2_PORT`, otherwise the first STM32duino
 USB serial port (VID `1eaf`), the first XDS110 port and the first CH343 port
 (MPM v2, `1a86:55d3`). `CC_PORT=v2` runs any script with the MPM v2 as the
-CC2652, `CC_INIT` adds commands on it first (e.g. `CC_INIT="pwr 0x12d6"`, -5 dBm
-into the PA: +20 dBm at 1 m overloads some 4-in-1 receivers).
+CC2652. Each script sets the CC2652 bench back to its own radio (`chip
+cc2652`), then `CC_INIT` adds commands on it (e.g. `CC_INIT="pwr 0x12d6"`, -5
+dBm into the PA: +20 dBm at 1 m overloads some 4-in-1 receivers;
+`CC_INIT="chip sx1281"`: the MPM v2's SX1281 sends and receives instead).
 
 ```sh
 tools/bench/mpm_bench.py ports
@@ -255,6 +257,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 
 | Command | Description |
 |---|---|
+| `chip <cc2652\|sx1281> [dbm]` | Radio for the PHY (applied at once and kept): the RF core, or the MPM v2's SX1281 (GFSK 125 kbps to 2 Mbps, rates within 1%, nearest modulation index, TX power in dBm into the PA: default 0, max 2). `info` shows what the SX1281 got. No `ack` with the SX1281 |
 | `preset <nrf1m\|nrf2m\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation) |
 | `preset <name>` | CC2500 PHYs of the MPM protocols, with their channel plan and `cc2500` framing: same `ch` numbers as `CHANNR`. `frskyd`, `frskyv`, `frskyx`, `frskyx2`, `frskyxeu`, `frskyx2eu`, `hott`, `hitec`, `redpine`, `redpineslow`, `skyartec`, `corona`, `coronav2`, `fdv3`, `ares`, `radiolink`, `ikea`, `sfhss`. Sync words from the ID (Hitec, Skyartec data packets, RadioLink variants): `cc2500` after the preset |
 | `preset <flysky\|afhds2a\|hubsan\|bugs\|height\|pelikan\|kyosho\|kyoshohype\|wfly2\|joysway>` | A7105 PHYs with their `a7105` framing and channel plan (2400 MHz + `ch` x 500 kHz, `ch` = `PLL_I`) |

@@ -9,6 +9,7 @@
 #include "board.h"
 #include "frame.h"
 #include "radio.h"
+#include "sx1281.h"
 #include "timer.h"
 #include "uart.h"
 
@@ -19,6 +20,10 @@
 // Commands (one per line, numbers in decimal or 0x hex):
 //
 //   info                         @ok bench=1 dev=cc2652 ...
+//   chip <cc2652|sx1281> [dbm]   radio for the PHY (applied at once and kept): the
+//                                CC2652 RF core (default) or the SX1281 (MPM v2: GFSK
+//                                125 kbps to 2 Mbps, TX power in dBm into the
+//                                PA, default 0, max 2; no ack)
 //   preset <name>                load a PHY preset (and its channel plan):
 //                                nrf1m nrf2m nrf250k xn250k, CC2500 ones with
 //                                their framing: frskyd frskyx frskyx2 frskyxeu
@@ -110,6 +115,8 @@ static char _phy_name[16] = "none";
 static bool _phy_ok;
 static uint16_t _tx_power = RF_TX_POWER_DEFAULT;
 static uint8_t _sync_threshold;
+static bool _sx;  // chip sx1281
+static int8_t _sx_dbm = SX1281_TX_DBM_DEFAULT;
 #define SYNC_THRESHOLD_STRICT 0x32
 
 static uint32_t _freq_khz = 2440000;
@@ -290,8 +297,48 @@ static int _hex(char* args, uint8_t* buf, uint32_t size)
 
 static void _set_sync_word()
 {
+  if (_sx) {
+    sx1281_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
+    return;
+  }
   radio_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
   radio_set_rx_sync_alt(frame_rx_sync_alt(&_frame));
+}
+
+static radio_status_t _radio_init()
+{
+  if (_sx) {
+    radio_off();
+    return sx1281_init(&_phy, _sx_dbm);
+  }
+  sx1281_off();
+  return radio_init(&_phy);
+}
+
+static radio_status_t _radio_set_frequency(uint32_t khz)
+{
+  return _sx ? sx1281_set_frequency(khz) : radio_set_frequency(khz);
+}
+
+static radio_status_t _radio_send(const uint8_t* data, uint16_t len)
+{
+  return _sx ? sx1281_send(data, len) : radio_send(data, len);
+}
+
+static radio_status_t _radio_rx_start(uint16_t len)
+{
+  return _sx ? sx1281_rx_start(len) : radio_rx_start(len);
+}
+
+static void _radio_rx_stop()
+{
+  if (_sx) sx1281_rx_stop();
+  else radio_rx_stop();
+}
+
+static bool _radio_receive(radio_packet_t* pkt)
+{
+  return _sx ? sx1281_receive(pkt) : radio_receive(pkt);
 }
 
 static bool _apply_phy()
@@ -302,20 +349,20 @@ static bool _apply_phy()
   // to 100%. Its sensitivity cost is not measured: only used when needed.
   _phy.sync_threshold = _sync_threshold ? _sync_threshold
                         : frame_rx_sync_weak(&_frame) ? SYNC_THRESHOLD_STRICT : 0;
-  _phy_ok = radio_init(&_phy) == RADIO_OK &&
-            radio_set_frequency(_freq_khz + _trim_khz) == RADIO_OK;
+  _phy_ok = _radio_init() == RADIO_OK &&
+            _radio_set_frequency(_freq_khz + _trim_khz) == RADIO_OK;
   _set_sync_word();
   return _phy_ok;
 }
 
 static void _report_radio_error(const char* what)
 {
-  _printf("@err %s status=0x%04x\r\n", what, radio_last_status());
+  _printf("@err %s status=0x%04x\r\n", what, _sx ? sx1281_last_status() : radio_last_status());
 }
 
 static void _job_stop()
 {
-  if (_job == JOB_RX) radio_rx_stop();
+  if (_job == JOB_RX) _radio_rx_stop();
   _job = JOB_IDLE;
 }
 
@@ -368,7 +415,7 @@ static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
   uint8_t air[RADIO_MAX_PKT_LEN];
   uint16_t n = frame_tx_data(&_frame, payload, len, air);
   radio_status_t st = RADIO_ERR_PARAM;
-  if (n) st = _ack_on ? _send_acked(air, n, ack) : radio_send(air, n);
+  if (n) st = _ack_on ? _send_acked(air, n, ack) : _radio_send(air, n);
   if (st != RADIO_OK) {
     _stat_err++;
     return false;
@@ -409,7 +456,7 @@ static void _report_ack(const ack_t* ack)
 
 static bool _rx_start()
 {
-  return radio_rx_start(frame_rx_len(&_frame, _rx_len)) == RADIO_OK;
+  return _radio_rx_start(frame_rx_len(&_frame, _rx_len)) == RADIO_OK;
 }
 
 //
@@ -423,14 +470,50 @@ static bool _need_phy()
   return _phy_ok && _frame_ok;
 }
 
+static void _print_chip()
+{
+  _printf("chip=%s", _sx ? "sx1281" : "cc2652");
+  if (_sx && _phy_ok) {
+    const sx1281_mod_t* m = sx1281_mod();
+    _printf(" dbm=%d sx_rate=%lu sx_bw=%lu sx_dev=%lu sx_bt=%s", _sx_dbm, m->rate, m->bw, m->dev,
+            m->bt ? "0.5" : "off");
+  }
+}
+
 static void _cmd_info()
 {
   _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
-          "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld hposc=%d\r\n",
+          "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld hposc=%d ",
           _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
           _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
           _frame.type == FRAME_NRF && _frame.esb, _ack_on, _tx_power, _trim_khz,
           radio_hposc_offset());
+  _print_chip();
+  _print("\r\n");
+}
+
+// Switches the radio, applied at once if a PHY is set up
+static void _cmd_chip(char* args)
+{
+  char* name = _next_arg(&args);
+  bool sx = name && !strcmp(name, "sx1281");
+  uint32_t dbm = _number_or(&args, SX1281_TX_DBM_DEFAULT);
+  if (!name || (!sx && strcmp(name, "cc2652")) || (int32_t)dbm < -18 ||
+      (int32_t)dbm > SX1281_TX_DBM_MAX) {
+    _printf("@err usage: chip <cc2652|sx1281> [dbm -18..%d]\r\n", SX1281_TX_DBM_MAX);
+    return;
+  }
+  _job_stop();
+  _sx = sx;
+  _sx_dbm = (int32_t)dbm;
+  if (_sx) _ack_on = false;
+  if (_phy_ok && !_apply_phy()) {
+    _report_radio_error("radio init");
+    return;
+  }
+  _print("@ok ");
+  _print_chip();
+  _print("\r\n");
 }
 
 // PHY presets. nRF24L01: 160 kHz deviation at 250k/1M, 320 kHz at 2M. XN297 at
@@ -1038,6 +1121,10 @@ static void _cmd_ack(char* args)
   uint32_t retries = _number_or(&args, _ack_retries);
   uint32_t window = _number_or(&args, _ack_window);
   uint32_t max_len = _number_or(&args, _ack_max_len);
+  if (on && _sx) {
+    _print("@err ack: cc2652 only\r\n");
+    return;
+  }
   if (on && (_frame.type != FRAME_NRF || !_frame.esb)) {
     _print("@err ack needs esb framing\r\n");
     return;
@@ -1058,10 +1145,10 @@ static void _cmd_ack(char* args)
 static bool _set_frequency(uint32_t khz)
 {
   job_t job = _job;
-  if (job == JOB_RX) radio_rx_stop();
+  if (job == JOB_RX) _radio_rx_stop();
 
   _freq_khz = khz;
-  bool ok = !_phy_ok || radio_set_frequency(khz + _trim_khz) == RADIO_OK;
+  bool ok = !_phy_ok || _radio_set_frequency(khz + _trim_khz) == RADIO_OK;
   if (ok && job == JOB_RX) ok = _rx_start();
   if (!ok) {
     _job = JOB_IDLE;
@@ -1217,7 +1304,13 @@ static void _cmd_stop()
   _printf("@ok stop tx=%lu rx=%lu err=%lu", _stat_tx, _stat_rx, _stat_err);
   if (_stat_tx) _printf(" late_max=%lu", _tx_late_max);
   if (_ack_on) _printf(" acked=%lu retries=%lu", _stat_acked, _stat_retries);
-  if (was_rx) {
+  if (was_rx && _sx) {
+    sx1281_stats_t st;
+    sx1281_rx_stats(&st);
+    _printf(" sx_ok=%lu sx_rearm=%lu sx_busy=%lu sx_last=0x%02x/0x%04x", st.ok, st.rearm, st.busy,
+            st.last_status, st.last_irq);
+  }
+  if (was_rx && !_sx) {
     radio_rx_stats_t st;
     radio_rx_stats(&st);
     _printf(" rf_ok=%u rf_nok=%u rf_buf_full=%u", st.ok, st.nok, st.buf_full);
@@ -1232,6 +1325,7 @@ static void _process_line(char* line)
   if (!cmd) return;
 
   if (!strcmp(cmd, "info")) _cmd_info();
+  else if (!strcmp(cmd, "chip")) _cmd_chip(args);
   else if (!strcmp(cmd, "preset")) _cmd_preset(args);
   else if (!strcmp(cmd, "phy")) _cmd_phy(args);
   else if (!strcmp(cmd, "pwr")) _cmd_pwr(args);
@@ -1301,13 +1395,13 @@ static void _run_txp()
 static void _run_rx()
 {
   radio_packet_t pkt;
-  while (radio_receive(&pkt)) {
+  while (_radio_receive(&pkt)) {
     _stat_rx++;
     _report_packet(&pkt);
   }
 
   // RX ends on errors (e.g. queue overflow): restart it
-  if (!radio_rx_active()) {
+  if (!_sx && !radio_rx_active()) {
     _stat_err++;
     if (!_rx_start()) {
       _job = JOB_IDLE;

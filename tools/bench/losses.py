@@ -11,6 +11,7 @@ bits are wrong, the RSSI, the receiver counters and the timing of the losses.
   losses.py a7105 joysway --dir rev --payload 3ce0d55691cc07427db8f32e69a4df1a
   losses.py a7105 wfly2 --dir rev --cc-extra "pwr 0x04c6" -q
   losses.py nrf nrf2m --dir rev --addr 6565656565
+  losses.py nrf nrf2m --cc-extra "chip sx1281"   NRF -> MPM v2 SX1281, 2 Mbps
 
 Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups), nrf
 (the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m). The
@@ -24,6 +25,7 @@ lose packets that way; the A7105 500 kbps CRC errors are random in time.
 
 import argparse
 import collections
+import os
 import sys
 import time
 
@@ -142,8 +144,10 @@ def main():
     names = {"cyrf": suite_cyrf.P, "a7105": suite_a7105.P, "nrf": suite_nrf.NRF}[a.family]
     if a.name not in names:
         ap.error(f"unknown {a.family} setup {a.name}: {' '.join(names)}")
-    if a.family == "nrf" and a.name == "nrf2m" and a.dir == "fwd":
-        ap.error("nrf2m: --dir rev only, the CC2652 has no 2 Mbps receiver")
+    sx1281 = "sx1281" in a.cc_extra + os.environ.get("CC_INIT", "")
+    if a.family == "nrf" and a.name == "nrf2m" and a.dir == "fwd" and not sx1281:
+        ap.error('nrf2m: the CC2652 has no 2 Mbps receiver: --dir rev, or the SX1281 '
+                 '(--cc-extra or CC_INIT "chip sx1281")')
 
     mpm_setup, cc_setup, n = family_setups(a)
     payload = bytes.fromhex(a.payload) if a.payload else rig.pattern(n)
