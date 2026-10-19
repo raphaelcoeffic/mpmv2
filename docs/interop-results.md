@@ -380,8 +380,9 @@ Three causes, none on the MPM v2 side:
   run, each 3 bytes short (last payload byte and status missing).
   `bench_receive()` reads `RXBYTES` before checking `MARCSTATE`: when the
   packet ends between the two reads, the MPM takes the radio as idle with the
-  old byte count and flushes the rest. Fix in `mpm-bench`: read `MARCSTATE`
-  first.
+  old byte count and flushes the rest. Fixed in `mpm-bench` (941479a, reads
+  `MARCSTATE` first): `frskyxeu` rev 200/200, other=0, in 3 runs out of 3
+  (`CC_INIT="pwr 0x12d6"`).
 
 Open: CYRF6936 -> MPM v2 loses 1 to 4% (DSM bind, Devo, WK2x01) where the
 LaunchPad got 99 to 100%. Not checked yet whether

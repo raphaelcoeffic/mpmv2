@@ -43,7 +43,7 @@ over the debug serial port. `_Bench_Config.h` keeps only the protocols the
 bench uses so that a debug build fits in flash (88%).
 
 Two MPM fixes change some results. They aren't in `mpm-bench`; merge them
-into your build branch when you need them:
+into a local build branch when you need them:
 
 - `xn297-enhanced-xorout` (same fork): the XN297 emulation sends the
   unscrambled enhanced mode CRC without the xorout its RX side applies. Needed
@@ -52,6 +52,11 @@ into your build branch when you need them:
 - [PR #1197](https://github.com/pascallanger/DIY-Multiprotocol-TX-Module/pull/1197):
   E010R5 changes the channel before the last packet is sent; without it 1 in 6
   E010R5 packets is corrupted (`proto_capture.py e010r5`).
+
+```sh
+git checkout -b bench-build mpm-bench
+git merge origin/xn297-enhanced-xorout origin/e010r5-hop-fix   # in the clone below
+```
 
 ```sh
 git clone -b mpm-bench https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module.git
