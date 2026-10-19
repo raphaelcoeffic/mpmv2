@@ -23,18 +23,41 @@ add_executable(firmware
     ${firmware_sources}
 )
 
+set(board_definitions "")
 if (USE_XOSC)
     if (BOARD_CC2652R1_LAUNCHXL)
         message("## Target is CC2652R1-LAUNCHXL: use external oscillator")
-        target_compile_definitions(firmware PRIVATE BOARD_CC2652R1_LAUNCHXL)
+        list(APPEND board_definitions BOARD_CC2652R1_LAUNCHXL)
     else()
         message("## Target is CC2652RB: use HPOSC (BAW)")
-        target_compile_definitions(firmware PRIVATE MCU_CC2652RB)
+        list(APPEND board_definitions MCU_CC2652RB)
     endif()
-    target_compile_definitions(firmware PRIVATE USE_XOSC)
+    list(APPEND board_definitions USE_XOSC)
 endif()
+target_compile_definitions(firmware PRIVATE ${board_definitions})
 
-if (USE_CCFG)
+if (BOOTLOADER)
+    # Boot loader in sector 0 with CCFG, application at 0x2000 (docs/update.md)
+    message("## Boot loader: application at 0x2000")
+    add_executable(bootloader bootloader/main.c board.c)
+    target_compile_definitions(bootloader PRIVATE ${board_definitions})
+    target_compile_options(bootloader PRIVATE -Os)
+    target_include_directories(bootloader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(bootloader driverlib_cc13x2_cc26x2)
+    target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
+    set_target_properties(bootloader PROPERTIES
+        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/bootloader.ld
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    if (USE_CCFG)
+        target_sources(bootloader PRIVATE ccfg.c)
+    endif()
+    add_custom_command(
+        TARGET bootloader POST_BUILD
+        COMMAND ${CMAKE_OBJCOPY} -O binary bootloader.elf bootloader.bin
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+elseif (USE_CCFG)
     message("## Include CCFG")
     target_sources(firmware PRIVATE ccfg.c)
 endif()
@@ -66,10 +89,18 @@ target_link_libraries(firmware
     ihex
 )
 
-set_target_properties(firmware
-    PROPERTIES
-    LINKER_FILE ${TI_DEVICE_DIR}/cc13x2_cc26x2/linker_files/cc26x2r1f.lds
-)
+if (BOOTLOADER)
+    target_link_options(firmware PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
+    set_target_properties(firmware
+        PROPERTIES
+        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/app.ld
+    )
+else()
+    set_target_properties(firmware
+        PROPERTIES
+        LINKER_FILE ${TI_DEVICE_DIR}/cc13x2_cc26x2/linker_files/cc26x2r1f.lds
+    )
+endif()
 
 # firmware.bin and firmware.elf directly in build directory
 set_property(
@@ -83,9 +114,27 @@ add_custom_command(
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-# J-Link: ninja -C <build dir> flash
-add_custom_target(flash
-  COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh ${CMAKE_BINARY_DIR}/firmware.elf
-  DEPENDS firmware
-  USES_TERMINAL
-)
+if (BOOTLOADER)
+  # firmware.bin gets the image header (length, CRC) the boot loader checks,
+  # mpm-v2.bin is the file for the radio (MULTI signature appended)
+  add_custom_command(
+    TARGET firmware POST_BUILD
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fw_image.py firmware.bin
+            --version ${PROJECT_VERSION} --out mpm-v2.bin
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+  # J-Link: ninja -C <build dir> flash (boot loader and application)
+  add_custom_target(flash
+    COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh
+            ${CMAKE_BINARY_DIR}/bootloader.elf ${CMAKE_BINARY_DIR}/firmware.bin@0x2000
+    DEPENDS firmware bootloader
+    USES_TERMINAL
+  )
+else()
+  # J-Link: ninja -C <build dir> flash
+  add_custom_target(flash
+    COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh ${CMAKE_BINARY_DIR}/firmware.elf
+    DEPENDS firmware
+    USES_TERMINAL
+  )
+endif()

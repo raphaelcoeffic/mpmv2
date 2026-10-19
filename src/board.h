@@ -88,6 +88,15 @@
   //
   #define BUTTON        IOID_0
   //
+  // Boot loader link to the radio (EdgeTX "Flash External Multi", STK500
+  // at 57600 8N1, see docs/update.md): in on the PPM pin, out on S.Port
+  // through U9 (TX1_INV), both inverted
+  #define BL_RADIO_RX       MODULE_RX
+  #define BL_RADIO_TX       MODULE_TX
+  #define BL_RADIO_INVERTED 1
+  // DIO22 level with nothing on the PPM pin (R14 pull-up)
+  #define BL_RADIO_ABSENT_LEVEL 1
+  //
 #endif
 
 void board_init();
