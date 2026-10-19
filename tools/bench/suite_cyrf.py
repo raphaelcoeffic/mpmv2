@@ -81,6 +81,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"protocols (default: all): {' '.join(P)}")
     ap.add_argument("--ch", type=int, default=30, help="channel (default 30)")
+    ap.add_argument("--trim", type=int, default=0, help="CC2652 trim in kHz (default 0)")
     rig.common_args(ap, period=20000, count=100)
     a = ap.parse_args()
     fails = 0
@@ -88,7 +89,7 @@ def main():
     with mpm, cc:
         for name in a.names or list(P):
             mpm_setup, cc_setup, n, mpm_rx, cc_tx = (P[name] + ("", ""))[:5]
-            r = rig.link_test(mpm, cc, rig.pattern(n), mpm_setup=mpm_setup, cc_setup=f"trim 0;{cc_setup}",
+            r = rig.link_test(mpm, cc, rig.pattern(n), mpm_setup=mpm_setup, cc_setup=f"trim {a.trim};{cc_setup}",
                               mpm_rx_setup=mpm_rx, cc_rx_setup=cc_tx, ch=a.ch, period=a.period,
                               count=a.count, direction=a.dir, seq=5 if name == "dsmbindresp" else rig.SEQ,
                               verbose=a.verbose)

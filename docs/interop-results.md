@@ -539,3 +539,25 @@ PA 7 (-18 dBm) and gets 100%.
 
 The LaunchPad numbers were taken another day (other Wi-Fi traffic, 100
 packets per setup). In real use only binding runs at PA 0, at short range.
+
+### Frequency margin
+
+Every suite setup at trim offsets of -100 to +100 kHz around the nominal
+value (CC2500 -35, A7105 90, CYRF6936 0), both ways (CC2500 and CYRF6936 100
+packets, A7105 200; `suite_<family>.py --trim`). Offsets where at least 95%
+arrive:
+
+| Family | MPM -> MPM v2 (MPM v2 receiving) | MPM v2 -> MPM (MPM v2 sending) |
+|---|---|---|
+| CC2500 | -60..+30 to -60..+60 for most; FrSky V, FrSky X LBT, Ares -30..+30; Redpine slow -30..0; HoTT -100..+100 | -60..+30 to -100..+60; Corona V2 none (85 to 88% at every offset) |
+| A7105 | -100..+100 (+60 for Pelikan) | Hubsan, Bugs, Height, Kyosho Hype -100..+100; Pelikan -100..+60; AFHDS2A, Kyosho -60..+60; FlySky 0..+30; Joysway 92 to 98% at every offset; WFLY2 none (59 to 90%) |
+| CYRF6936 | -100..+100, but DSM bind and bind response 87 to 95% at every offset (PA 0, Wi-Fi, above) | -100..+100 |
+
+- The CC2500 windows of about +-45 kHz are the protocols' own narrow filters,
+  the same both ways: the original MPM needs its frequency tune option with
+  real receivers for the same reason. Their centre sits about 15 to 20 kHz
+  below the nominal -35 that day.
+- The 500 kbps A7105 protocols without FEC are the narrow ones (FlySky here
+  received with the AFHDS2A table, ETH 3 bits; WFLY2 and Joysway with their
+  own). Joysway's losses don't depend on the offset (byte 0 bit 4, above).
+- CYRF6936 (DSSS) and the A7105 at 100 to 250 kbps don't care about 100 kHz.
