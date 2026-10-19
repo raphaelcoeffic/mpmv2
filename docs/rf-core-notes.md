@@ -64,9 +64,11 @@ other offsets). Checked: TI's Bluetooth values decode the same on both
 |---|---|---|
 | `0x50D4` | `DEMMISC2` | MAFCGAIN (13:12), STIMBYPASS (11), STIMESTONLY (10), STIMTEAPERIOD (9:7), STIMTEAGAIN (6:4), PDIF bits (3:0). TI's "symbol tracking" override writes 0x00F9 |
 | `0x5100..0x5108` | `DEMMAFI0..2` | Matched filter: C1C7 (15:8 of MAFI0), C3C5 / C2C6 (MAFI1), C4 (8:0 of MAFI2) |
-| `0x5110` | `DEMC1BE0` | Sync correlator: MASKB, MASKA, CASCCONF (5:4), COPYCONF (3:0) |
+| `0x5110` | `DEMC1BE0` | Sync correlator: MASKB, MASKA, CASCCONF (5:4: single, serial, parallel), COPYCONF (3:0) |
 | `0x5114` | `DEMC1BE1` | Sync thresholds B (15:8) and A (7:0): the bench `syncthr` |
-| `0x5118` | `DEMC1BE2` | PEAKCONF (9:8), THRESHOLDC (7:0) |
+| `0x5118` | `DEMC1BE2` | PEAKCONF (9:8: threshold, best, best of A and B), THRESHOLDC (7:0) |
+| `0x5164..0x5170` | `DEMC1BEREF0..3` | Correlator references A and B (the sync words) |
+| `0x50E0`, `0x50E4` | `DEMDSBU`, `DEMDSBU2` | DSBUDELAY, DSBUAVGLENGTH (0x83, 0x80) |
 | `0x50C0`, `0x50C4` | `MDMBAUD`, `MDMBAUDPRE` | Symbol rate (0x8000 / 12 on the Bluetooth 2M PHY) |
 | `0x51C0` | `DEMMAFC0` | COMPVAL (7:0): frequency offset of the last packet, signed ([below](#frequency-estimate)) |
 | `0x52C4` | `DEMDSBU1` | AVGVAL (15:0): follows the offset too, with an offset of its own per PHY |
@@ -104,6 +106,57 @@ could be off. `radio_packet_t`
 gives it in kHz (`freq_offset`, counts x deviation / 61), the bench prints it
 as `@rx ... foff=` and its `autotrim` follows it
 ([results](interop-results.md#automatic-frequency-trim)).
+
+## Sync correlator
+
+The proprietary RX runs correlator A alone (`DEMC1BE0` 0x000F, single), on
+its best peak (`DEMC1BE2` 0x017F), threshold `syncthr` (`0x5114`). TI's
+CC27xx generic GFSK and NESB PHYs run A and B in parallel (two sync words),
+best of the two, threshold 39 (0x27); 0x7F disables a correlator.
+
+Setting them:
+
+- The modem firmware writes `DEMC1BE0`, `DEMC1BE2`, `DEMMISC2` and
+  `DEMDSBU` at RX start: setup overrides of those don't stick (the
+  thresholds `0x5114` and `DEMDSBU2` do).
+- `poke` during RX does change `DEMC1BE2` (peak mode). Writing `DEMMISC2` or
+  `DEMDSBU` / `DEMDSBU2` that way stopped all reception, even of strong sync
+  words, until the next setup.
+- `DEMC1BE3` (CORRVALUEA in the CC27xx headers) reads 0.
+
+What it detects: 32 bit test words inside a 26 byte NRF payload behind
+address `e7e7e7e7e7`, raw framing with the word as sync word, guard bytes
+around it so that no shift of 1 to 16 bits comes close (LaunchPad, 1 Mbps,
+50 to 100 packets per point, packets found at any bit offset):
+
+| Word | Synced at threshold 0x20 / 0x28 / 0x32 / 0x3C / 0x46 |
+|---|---|
+| `a5c3e19b`, `ff00ff00`, `c3c3c3c3` | 88-100 / 94-100 / 100 / 22-94 / 0% |
+| `550f0f0f`, `55656565` | 100 / 100 / 94-96 / 2-56 / 0% |
+| `0f0f0f0f` | 16-25 / 100 / 94-100 / 100 / 0% |
+| `33333333` | 0 / 0 / 100 / 58 / 0% |
+| `55555555` (0101) | 22 / 24 / 56-64 / 0 / 0% |
+| `0000ffff` | 8-24 / 6 / 46-54 / 0 / 0% |
+| `55000000` | 4 / 80 / 0-13 / 0 / 0% |
+| `00000000`, `ffffffff` | 0 to 8% at any threshold, trim -200 to +200 |
+
+- The packets that sync, sync at the right bit (no early or late ones in
+  this layout): the losses are syncs not found.
+- Words with long runs or without transitions never reach the threshold,
+  even received without a bit error: the correlation seems to be taken
+  after the local average is removed, so a run of ones or zeros counts for
+  little, and so does 0101 (the Gaussian filter flattens it). Balanced
+  words with runs of 2 to 8 bits reach about 0x3C to 0x46.
+- Words far from balanced also depend on the frequency offset:
+  `55000000` 0 to 62% from trim +200 to -200.
+- Lower thresholds sync earlier on near matches (the periodic words at
+  0x20, the packet header), which loses the packet.
+
+So the weak NRF addresses are weak for the correlator itself, not only for
+the early syncs `frame.c` avoids: `5555555555` (the preamble run) and
+`0000000000`, `000000` have no strong 32 bit window at all. A 3 byte
+`000000` (ESky bind) is never received; `5555555555` about 25% synced. No
+correlator setting found brings them back.
 
 ## CPE parameter table
 

@@ -89,6 +89,7 @@
 //   chplan <base_hz> <spacing_hz>  channel plan (CC2500: FREQ and CHANSPC)
 //   trim <khz>                   frequency correction added to ch and freq, signed
 //                                (crystal offsets: the MULTI-Module CC2500 option)
+//   peek <addr> [n] / poke <addr> <val>  read / write 32 bit words
 //   autotrim [off | <offset_khz>]  trim follows the senders received: our
 //                                frequency at theirs + offset_khz (default 0),
 //                                from the modem's estimate (@rx foff=)
@@ -865,6 +866,19 @@ static void _cmd_peek(char* args)
   _print("\r\n");
 }
 
+// Write a 32 bit word. RF core: see _cmd_peek(); some modem registers written
+// during RX stop it until the next setup
+static void _cmd_poke(char* args)
+{
+  uint32_t addr, val;
+  if (!_number(&args, &addr) || (addr & 3) || !_number(&args, &val)) {
+    _print("@err usage: poke <addr> <val>\r\n");
+    return;
+  }
+  *(volatile uint32_t*)addr = val;
+  _printf("@ok %08lx\r\n", *(volatile uint32_t*)addr);
+}
+
 // Extra RF core override words, applied at once and kept until "ovr" alone
 static void _cmd_ovr(char* args)
 {
@@ -1432,6 +1446,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "syncthr")) _cmd_syncthr(args);
   else if (!strcmp(cmd, "ovr")) _cmd_ovr(args);
   else if (!strcmp(cmd, "peek")) _cmd_peek(args);
+  else if (!strcmp(cmd, "poke")) _cmd_poke(args);
   else if (!strcmp(cmd, "sync")) _cmd_sync(args);
   else if (!strcmp(cmd, "nrf")) _cmd_nrf(args);
   else if (!strcmp(cmd, "xn")) _cmd_xn(args);

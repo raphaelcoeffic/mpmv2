@@ -285,7 +285,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `chplan <base_hz> <spacing_hz>` | Channel plan, e.g. CC2500 `FREQ` and `CHANSPC`. Presets set it |
 | `trim <khz>` | Frequency correction added to `ch` and `freq`, as the MPM CC2500 `option` (`FSCTRL0`). It persists across presets: always set it |
 | `autotrim [off\|<offset_khz>]` | During `rx`, `trim` follows the senders: every 8 packets with a good CRC, moved by the mean of their `foff` + offset when 5 kHz or more, so that the CC2652 sits at the sender's frequency + offset (A7105: 35). Prints `@trim <khz>`. Until `autotrim off` |
-| `peek <addr> [n]` | Read up to 16 words (RF core registers: see [rf-core-notes.md](rf-core-notes.md) for what hangs the bus) |
+| `peek <addr> [n]` / `poke <addr> <val>` | Read up to 16 words / write one (RF core registers: see [rf-core-notes.md](rf-core-notes.md) for what hangs the bus or stops RX) |
 | `tx`, `txp`, `seq`, `rx <len>`, `stop`, `info` | As on the MPM. `@rx` lines have `rssi=<dBm>` and `foff=<kHz>`, the modem's estimate of the sender's frequency above the CC2652 (+-20%, not for acks). The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
 
 The XN297 examples (`xn297_1m.txt`, `xn297_250k_cc2500.txt`) run unchanged on

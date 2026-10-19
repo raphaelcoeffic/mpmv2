@@ -119,6 +119,15 @@ chips' crystals and stay needed, as the MPM `option` is today.
   `aaaaaaaaaa`) get about 2%; Nordic advises against such addresses anyway. The
   sensitivity cost of the stricter threshold is unknown; it is only used for
   weak addresses.
+- The correlator also needs a sync word with transitions: runs of ones or
+  zeros and 0101 don't reach the threshold even without bit errors, so
+  `5555555555`, `0000000000` and the 3 byte `000000` (ESky bind, 0%) have no
+  usable window. Its peak and cascade settings don't help (written by the
+  modem firmware at RX start; see
+  [rf-core-notes.md](rf-core-notes.md#sync-correlator)). The MULTI protocols
+  with such constant addresses use XN297 framing (strong on air, its own
+  preamble), but ESky, which only sends. Propel's `9977553311`, the other
+  plain NRF constant flagged weak, gets 250/250.
 
 ### 3. No packet engine for the NRF and XN297 formats (software load)
 
