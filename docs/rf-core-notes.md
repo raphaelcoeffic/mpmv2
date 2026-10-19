@@ -158,6 +158,42 @@ the early syncs `frame.c` avoids: `5555555555` (the preamble run) and
 `000000` (ESky bind) is never received; `5555555555` about 25% synced. No
 correlator setting found brings them back.
 
+## Timing
+
+Measured with the bench `timing` command ([radio-interface.md](radio-interface.md)):
+
+- **PA and LNA enable:**
+  - `RFC_GPO1` is high from the PA ramp-up to the end of the ramp-down: the
+    airtime + about 6 bit times + 20 us.
+  - `RFC_GPO0` is high while RX runs.
+  - A pin routed to them by the IOC (`IOC_PORT_RFC_GPO0/1`) keeps its input
+    buffer and edge interrupt when enabled, so the CPU can timestamp the
+    edges.
+- **TX start:**
+  - `CMD_PROP_TX` turns the PA on 124 us after the doorbell, and 102 us
+    after its start time with `TRIG_ABSTIME`.
+  - It is the same with the synthesizer already tuned in TX mode (`CMD_FS`
+    `synthConf.bTxMode` 1): the TX command relocks it itself, it seems.
+  - `CMD_FS` takes 136 us, the same for a 20 MHz hop or the same frequency.
+- **RX timestamp** (`rxConf.bAppendTimestamp`, 4 bytes after the RSSI byte):
+  - The RAT time of the sync word found, minus the configured preamble
+    (`preamConf.nPreamBytes`) and sync word (`formatConf.nSwBits`) lengths.
+  - Measured: 8 bit times less per preamble or sync word byte, and the same
+    against the packet end at any length.
+  - The RX entry interrupt comes 20 bit times + 40 us after the last bit.
+  - On the Bluetooth LE 2M setup the offset fits its own 2 byte preamble and
+    32 bit access address (24 us).
+- **RAT and CPU:**
+  - The RAT (`RFC_RAT:RATCNT`, `0x40043004`, 4 MHz) runs from the same HF
+    clock as the CPU timers.
+  - Read with `micros()` with interrupts masked, one converts to the other
+    exactly.
+- **Instant RSSI** (`CMD_GET_RSSI`, direct command, the value in `CMDSTA`
+  bits 23:16):
+  - -128 until valid: 99 us after the RX call at 250 kbps and above, 150 us
+    at FrSky D and X.
+  - 10 us per call.
+
 ## CPE parameter table
 
 The CPE keeps the packet settings in a table at `0x21000028`, written by

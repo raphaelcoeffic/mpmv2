@@ -31,6 +31,9 @@ typedef struct {
   uint8_t data[RADIO_MAX_PKT_LEN];
   uint16_t len;
   int8_t rssi;  // dBm
+  // micros() when the RF core found the sync word: its end, plus the
+  // demodulator delay. The packet reaches radio_receive() 20 bit times + 40
+  // us after its last bit (proprietary PHY, measured)
   uint32_t timestamp_us;
   // Sender's carrier above the receive frequency, kHz: the modem's estimate
   // (+-20% and about 2 kHz of noise), RADIO_FREQ_OFFSET_NONE if not known
@@ -67,6 +70,20 @@ void radio_set_rx_sync_alt(uint32_t rx_sync);
 // Send one packet, blocks until sent
 radio_status_t radio_send(const uint8_t* data, uint16_t len);
 
+// Start sending one packet and return. data must stay valid until the end:
+// radio_tx_done() or radio_tx_wait(). The other calls wait for it first
+radio_status_t radio_tx_start(const uint8_t* data, uint16_t len);
+
+// Same, the RF core starting the command at micros() time at_us (0 = now,
+// in the past = now), within about 500 s: the PA turns on 102 us later
+radio_status_t radio_tx_start_at(const uint8_t* data, uint16_t len, uint32_t at_us);
+
+// True once the packet of radio_tx_start() is sent (or failed)
+bool radio_tx_done();
+
+// Wait for the end of radio_tx_start()'s packet: its status
+radio_status_t radio_tx_wait();
+
 // Start continuous reception of fixed length packets
 radio_status_t radio_rx_start(uint16_t len);
 
@@ -81,6 +98,10 @@ void radio_rx_stop();
 
 // True while the RX command runs (it ends on errors, e.g. RX queue full)
 bool radio_rx_active();
+
+// Instant RSSI in dBm while RX runs, RADIO_RSSI_NONE if not (yet) valid
+#define RADIO_RSSI_NONE (-128)
+int8_t radio_rssi();
 
 // RF core receive counters of the current/last RX command
 typedef struct {

@@ -427,6 +427,10 @@ Requirements that came out of these tests, to check on each alternative:
 7. Documentation or vendor support good enough to tune the demodulator without
    reverse engineering.
 8. A per-module frequency trim, a few kHz steps over at least +-100 kHz.
+9. The timing of [radio-interface.md](radio-interface.md): TX start within
+   about 150 us of the call (or at a set time), TX to RX within 130 us,
+   instant RSSI within 400 us of RX start, packet timestamps (CC2652: all
+   met).
 
 ## Next candidate: CC2745R10
 

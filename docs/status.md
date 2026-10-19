@@ -24,7 +24,10 @@ above 255). It also has chained TX -> RX for Enhanced ShockBurst acks, a
 settable sync correlation threshold and a frequency trim, and gives the
 modem's frequency estimate of each packet received: the bench `autotrim`
 follows the sender with it
-([details](interop-results.md#automatic-frequency-trim)). On the CC2652RB it
+([details](interop-results.md#automatic-frequency-trim)). TX can start
+without waiting for its end, or at a set time; RX packets carry the time of
+their sync word, and an instant RSSI is there for LBT
+([interface and timing](radio-interface.md)). On the CC2652RB it
 corrects the BAW oscillator (HPOSC) from TI's factory calibration and the chip
 temperature: about 98 ppm fast on the MPM v2 board, within about 10 kHz of the
 LaunchPad once corrected, no per-board calibration.
@@ -170,11 +173,13 @@ packets 102.4 ms apart.
 - **Real receivers and models.** Every test was chip to chip, against the
   MPM's own chips. Bind, telemetry and the timing of the real protocols with
   real receivers are untested. The E01X CRC question needs a model.
-- **Timing.** Only the ESB ack turnaround was measured (a 150 us window is
-  enough at 1 Mbps). Still to measure, against the MPM protocol periods:
-  - the channel change time (RF core `CMD_FS`) and the TX start latency;
-  - the hop rates of the fast protocols;
-  - the RX to TX turnaround of the telemetry protocols.
+- **Timing.** Measured (bench `timing`, `timing.py`), against what the MPM
+  protocols need ([radio-interface.md](radio-interface.md)): TX starts 124 us
+  after the call (+-1 us), or at a set time; a hop takes 136 us; TX to RX 79
+  us chained, 88 us unchained; instant RSSI valid 100 to 150 us after RX
+  starts; a packet reaches the CPU 20 bit times + 40 us after its end. All
+  within the protocols' needs. Not measured: the absolute delay of the RX
+  timestamps (demodulator).
 - **RSSI and LBT.** No test yet of RSSI accuracy for telemetry, of LQI, or of
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
   CC2652).

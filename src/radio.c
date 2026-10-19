@@ -3,6 +3,7 @@
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include <driverlib/rfc.h>
+#include <inc/hw_rfc_rat.h>
 #include <driverlib/rf_ble_cmd.h>
 #include <driverlib/rf_ble_mailbox.h>
 #include <driverlib/rf_data_entry.h>
@@ -25,10 +26,12 @@
 // RAT ticks (4 MHz) per us
 #define RAT_TICKS_PER_US 4
 
-// RX queue: 4 general entries, packet + appended RSSI
+// RX queue: 4 general entries, packet + appended RSSI and timestamp (RAT
+// time of the sync word)
 #define RX_ENTRIES 4
 #define RX_ENTRY_HDR_LEN 8  // pNextEntry, status, config, length
-#define RX_ENTRY_SIZE ((RX_ENTRY_HDR_LEN + RADIO_MAX_PKT_LEN + 1 + 3) & ~3)
+#define RX_APPENDED 5       // RSSI, timestamp
+#define RX_ENTRY_SIZE ((RX_ENTRY_HDR_LEN + RADIO_MAX_PKT_LEN + RX_APPENDED + 3) & ~3)
 
 // Modem DEMMAFC0 (CC27xx LRFDMDM name): COMPVAL (7:0), the matched filter
 // frequency compensation of the last packet, signed, kept until the next sync.
@@ -148,6 +151,7 @@ static rfc_propRxOutput_t _rx_out;
 
 static uint32_t _freq_khz;
 static bool _rx_running;
+static bool _tx_running;  // radio_tx_start() not waited for yet
 
 static uint8_t _rx_entries[RX_ENTRIES][RX_ENTRY_SIZE] __attribute__((aligned(4)));
 static dataQueue_t _rx_queue;
@@ -159,6 +163,10 @@ static bool _rx_repeat;
 static volatile int16_t _rx_foff[RX_ENTRIES];
 static volatile bool _rx_foff_set[RX_ENTRIES];
 static uint32_t _foff_deviation;  // Hz, scale of the estimate
+// RX timestamps: the RF core gives the sync word detection minus the
+// configured preamble and sync word (TI's nominal packet start); this adds
+// them back (measured, docs/rf-core-notes.md#timing)
+static uint32_t _ts_sync_us;
 
 static uint32_t _tx_sync;
 static uint32_t _rx_sync;
@@ -177,8 +185,8 @@ static bool _cmd_ok(uint16_t status)
   return status == DONE_OK || status == PROP_DONE_OK || status == BLE_DONE_OK;
 }
 
-// Submit a radio operation and wait for its end
-static radio_status_t _run_op(rfc_radioOp_t* op)
+// Submit a radio operation
+static radio_status_t _submit_op(rfc_radioOp_t* op)
 {
   op->status = IDLE;
   uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)op);
@@ -186,7 +194,12 @@ static radio_status_t _run_op(rfc_radioOp_t* op)
     _last_status = cmdsta;
     return RADIO_ERR_CMD;
   }
+  return RADIO_OK;
+}
 
+// Wait for the end of a submitted operation
+static radio_status_t _wait_op(rfc_radioOp_t* op)
+{
   uint32_t timeout = micros() + CMD_TIMEOUT_US;
   while (!_cmd_done(RF_STATUS(op))) {
     if (micros_after(timeout)) {
@@ -197,6 +210,13 @@ static radio_status_t _run_op(rfc_radioOp_t* op)
 
   _last_status = op->status;
   return _cmd_ok(op->status) ? RADIO_OK : RADIO_ERR_CMD;
+}
+
+// Submit a radio operation and wait for its end
+static radio_status_t _run_op(rfc_radioOp_t* op)
+{
+  radio_status_t st = _submit_op(op);
+  return st == RADIO_OK ? _wait_op(op) : st;
 }
 
 // RF core registers may only be accessed while its power domain is on
@@ -221,6 +241,7 @@ static void _power_down()
   }
   _powered = false;
   _rx_running = false;
+  _tx_running = false;
 }
 
 // RX entry done: keep the modem frequency estimate of the packet. The modem
@@ -439,6 +460,9 @@ radio_status_t radio_init(const radio_phy_t* phy)
   _ble = phy->ble_2m;
   // Bluetooth LE 2M PHY (500 kHz deviation): measured as 326 kHz
   _foff_deviation = _ble ? 326000 : phy->deviation;
+  // Bluetooth LE 2M: its own 2 byte preamble and 32 bit access address
+  _ts_sync_us = _ble ? 24
+                     : (phy->preamble_bytes * 8 + phy->sync_bits) * 1000000ULL / phy->symbol_rate;
   radio_status_t st = _power_up(_ble);
   if (st != RADIO_OK) return st;
 
@@ -456,6 +480,7 @@ radio_status_t radio_init(const radio_phy_t* phy)
 void radio_off()
 {
   if (!_powered) return;
+  radio_tx_wait();
   radio_rx_stop();
   RFCSynthPowerDown();
   _power_down();
@@ -465,6 +490,7 @@ radio_status_t radio_set_frequency(uint32_t freq_khz)
 {
   _freq_khz = freq_khz;
   if (!_powered) return RADIO_OK;  // tuned by radio_init()
+  radio_tx_wait();
   radio_rx_stop();
   _hposc_update();
   return _run_fs();
@@ -504,14 +530,52 @@ static void _init_tx(const uint8_t* data, uint16_t len)
   _tx_op = (rfc_radioOp_t*)&_tx;
 }
 
-radio_status_t radio_send(const uint8_t* data, uint16_t len)
+// micros() time to RAT time: both run from the HF clock, read together
+static uint32_t _micros_to_rat(uint32_t us)
+{
+  bool masked = IntMasterDisable();
+  uint32_t now_rat = HWREG(RFC_RAT_BASE + RFC_RAT_O_RATCNT);
+  uint32_t now_us = micros();
+  if (!masked) IntMasterEnable();
+  return now_rat + (int32_t)(us - now_us) * RAT_TICKS_PER_US;
+}
+
+radio_status_t radio_tx_start_at(const uint8_t* data, uint16_t len, uint32_t at_us)
 {
   if (!_powered) return RADIO_ERR_PARAM;
   if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
+  radio_tx_wait();
   radio_rx_stop();
   _init_tx(data, len);
-  return _run_op(_tx_op);
+  if (at_us) {
+    _tx_op->startTrigger.triggerType = TRIG_ABSTIME;
+    _tx_op->startTrigger.pastTrig = 1;  // late: at once
+    _tx_op->startTime = _micros_to_rat(at_us);
+  }
+  radio_status_t st = _submit_op(_tx_op);
+  _tx_running = st == RADIO_OK;
+  return st;
+}
+
+radio_status_t radio_tx_start(const uint8_t* data, uint16_t len)
+{
+  return radio_tx_start_at(data, len, 0);
+}
+
+bool radio_tx_done() { return !_tx_running || _cmd_done(RF_STATUS(_tx_op)); }
+
+radio_status_t radio_tx_wait()
+{
+  if (!_tx_running) return RADIO_OK;
+  _tx_running = false;
+  return _wait_op(_tx_op);
+}
+
+radio_status_t radio_send(const uint8_t* data, uint16_t len)
+{
+  radio_status_t st = radio_tx_start(data, len);
+  return st == RADIO_OK ? radio_tx_wait() : st;
 }
 
 static void _init_rx_queue(uint16_t len)
@@ -522,7 +586,7 @@ static void _init_rx_queue(uint16_t len)
     e->status = DATA_ENTRY_PENDING;
     e->config.type = DATA_ENTRY_TYPE_GEN;
     e->config.lenSz = 0;
-    e->length = len + 1;  // packet + RSSI
+    e->length = len + RX_APPENDED;
     _rx_foff_set[i] = false;
   }
   _rx_queue.pCurrEntry = _rx_entries[0];
@@ -548,6 +612,7 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
     _rx_adv.pktConf.bRepeatNok = repeat;
     _rx_adv.rxConf.bAutoFlushIgnored = 1;
     _rx_adv.rxConf.bAppendRssi = 1;
+    _rx_adv.rxConf.bAppendTimestamp = 1;
     _rx_adv.syncWord0 = sync_word;
     _rx_adv.syncWord1 = sync_alt;
     _rx_adv.maxPktLen = len;
@@ -567,6 +632,7 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
   _rx.pktConf.bVarLen = 0;
   _rx.rxConf.bAutoFlushIgnored = 1;
   _rx.rxConf.bAppendRssi = 1;
+  _rx.rxConf.bAppendTimestamp = 1;
   _rx.syncWord = sync_word;
   _rx.maxPktLen = len;
   _rx.endTrigger.triggerType = TRIG_NEVER;
@@ -580,6 +646,7 @@ radio_status_t radio_rx_start(uint16_t len)
   if (!_powered) return RADIO_ERR_PARAM;
   if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
+  radio_tx_wait();
   radio_rx_stop();
   _init_rx(_rx_sync, _rx_sync_alt, len, true);
 
@@ -607,6 +674,7 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
   // Short packets only: acknowledgments
   if (len == 0 || len > 255 || rx_len == 0 || rx_len > 255) return RADIO_ERR_PARAM;
 
+  radio_tx_wait();
   radio_rx_stop();
   _init_tx(data, len);
   _init_rx(rx_sync, 0, rx_len, false);
@@ -655,6 +723,16 @@ void radio_rx_stop()
 
 bool radio_rx_active() { return _powered && _rx_running && RF_STATUS(_rx_op) == ACTIVE; }
 
+// RAT time to micros(): both run from the HF clock, read together
+static uint32_t _rat_to_micros(uint32_t rat)
+{
+  bool masked = IntMasterDisable();
+  uint32_t now_rat = HWREG(RFC_RAT_BASE + RFC_RAT_O_RATCNT);
+  uint32_t now_us = micros();
+  if (!masked) IntMasterEnable();
+  return now_us - (now_rat - rat) / RAT_TICKS_PER_US;
+}
+
 bool radio_receive(radio_packet_t* pkt)
 {
   rfc_dataEntryGeneral_t* e = (rfc_dataEntryGeneral_t*)_rx_entries[_rx_next];
@@ -664,7 +742,9 @@ bool radio_receive(radio_packet_t* pkt)
   pkt->len = _rx_len;
   memcpy(pkt->data, data, _rx_len);
   pkt->rssi = (int8_t)data[_rx_len];
-  pkt->timestamp_us = micros();
+  uint8_t* ts = data + _rx_len + 1;
+  uint32_t rat = ts[0] | ts[1] << 8 | ts[2] << 16 | (uint32_t)ts[3] << 24;
+  pkt->timestamp_us = _powered ? _rat_to_micros(rat) + _ts_sync_us : micros();
   int16_t foff = _rx_foff_set[_rx_next] ? _rx_foff[_rx_next] : FOFF_NONE;
   pkt->freq_offset = foff == FOFF_NONE ? RADIO_FREQ_OFFSET_NONE
                      : (int16_t)(foff * (int32_t)_foff_deviation /
@@ -675,6 +755,14 @@ bool radio_receive(radio_packet_t* pkt)
   _rx_foff_set[_rx_next] = false;
   _rx_next = (_rx_next + 1) % RX_ENTRIES;
   return true;
+}
+
+int8_t radio_rssi()
+{
+  if (!radio_rx_active()) return RADIO_RSSI_NONE;
+  uint32_t cmdsta = RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_GET_RSSI));
+  if ((cmdsta & 0xFF) != CMDSTA_Done) return RADIO_RSSI_NONE;
+  return (int8_t)(cmdsta >> 16);  // RADIO_RSSI_NONE (-128) until valid
 }
 
 void radio_rx_stats(radio_rx_stats_t* stats)

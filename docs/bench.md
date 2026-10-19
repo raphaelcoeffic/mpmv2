@@ -148,6 +148,7 @@ setup, setups as `;`-separated commands or example files
 | `proto_capture.py` | The MPM runs one of its protocols (`proto`), the CC2652 receives on one channel: E01X, E129, C186, E010R5, FrSky L |
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
+| `timing.py` | Bench `timing` per PHY (NRF, FrSky D and X, AFHDS2A, DSM): TX start, hop, turnarounds, RSSI, as a table ([radio-interface.md](radio-interface.md)) |
 | `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
 
@@ -292,7 +293,8 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `trim <khz>` | Frequency correction added to `ch` and `freq`, as the MPM CC2500 `option` (`FSCTRL0`). It persists across presets: always set it |
 | `autotrim [off\|<offset_khz>]` | During `rx`, `trim` follows the senders: every 8 packets with a good CRC, moved by the mean of their `foff` + offset when 5 kHz or more, so that the CC2652 sits at the sender's frequency + offset (A7105: 35). Prints `@trim <khz>`. Until `autotrim off` |
 | `peek <addr> [n]` / `poke <addr> <val>` | Read up to 16 words / write one (RF core registers: see [rf-core-notes.md](rf-core-notes.md) for what hangs the bus or stops RX) |
-| `tx`, `txp`, `seq`, `rx <len>`, `stop`, `info` | As on the MPM. `@rx` lines have `rssi=<dBm>` and `foff=<kHz>`, the modem's estimate of the sender's frequency above the CC2652 (+-20%, not for acks). The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
+| `timing [n] [len]` | RF core latencies on the current PHY, framing and channel, `n` runs each (default 20), `len` byte payloads (default 16): `@timing <what> n= min= avg= max=` in us, `@edges <what>` the PA / LNA enable edges of the first run. The RF core's PA enable (`RFC_GPO1`) is read back on the MPM v2's PA pin, on the LaunchPad it and the LNA enable (`RFC_GPO0`) go to the LEDs during the test. See `timing.py` |
+| `tx`, `txp`, `seq`, `rx <len>`, `stop`, `info` | As on the MPM, but the `@rx` time is when the RF core found the sync word. `@rx` lines have `rssi=<dBm>` and `foff=<kHz>`, the modem's estimate of the sender's frequency above the CC2652 (+-20%, not for acks). The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
 
 The XN297 examples (`xn297_1m.txt`, `xn297_250k_cc2500.txt`) run unchanged on
 both devices. The `cc2652_*.txt` examples are the CC2652 counterparts of the

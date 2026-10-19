@@ -11,6 +11,7 @@ Radio work so far, see `docs/`:
 - [docs/hardware.md](docs/hardware.md): the MPM v2 board: pins, RF chain, radio bay, changes for the next revision
 - [docs/bench.md](docs/bench.md): the test rig (bench firmwares, host tools in `tools/bench`, unit tests in `tests/frame`)
 - [docs/rf-core-notes.md](docs/rf-core-notes.md): what was found inside the CC2652 RF core (modem registers, CPE parameters)
+- [docs/radio-interface.md](docs/radio-interface.md): the radio driver interface, what the MPM protocols need from it, the CC2652's measured latencies
 
 Credits: the RF core work builds on the 38C3 talk "Beyond BLE: Cracking open
 the black-box of RF microcontrollers" by Adam Batori and Robert Pafford
