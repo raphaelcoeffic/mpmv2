@@ -106,6 +106,10 @@
 //                                each packet at its length; fixed: receive
 //                                the maximum length instead
 //   stop                         stop the current job
+//   sched <period_us> [n]        alarm chain on absolute deadlines (previous +
+//                                period, timer_set_alarm()), n alarms (default
+//                                100): @timing sched_late, callback start after
+//                                its deadline. An rx job goes on meanwhile
 //   timing [n] [len]             RF core latencies on the current PHY, framing
 //                                and channel, n runs each (default 20), len
 //                                byte payloads (default 16): @timing <what> n= min=
@@ -644,6 +648,50 @@ static void _tstat_print(const tstat_t* s)
   }
   if (s->missed) _printf(" missed=%lu", s->missed);
   _print("\r\n");
+}
+
+//
+// Scheduler: timer_set_alarm() chained on absolute deadlines, as the MPM
+// protocol callbacks (each returns the delay to the next)
+//
+
+static void _run_rx();
+
+static uint32_t _sched_at;      // ticks
+static uint32_t _sched_period;  // ticks
+static volatile uint32_t _sched_left;
+static tstat_t _sched_late;
+
+static void _sched_alarm()
+{
+  _tstat_add(&_sched_late, _sched_at, get_ticks());
+  if (--_sched_left == 0) return;
+  _sched_at += _sched_period;
+  timer_set_alarm(_sched_at, _sched_alarm);
+}
+
+static void _cmd_sched(char* args)
+{
+  uint32_t period, n = 100;
+  if (!_number(&args, &period) || period < 10 || period > 10000000) {
+    _print("@err usage: sched <period_us> [n]\r\n");
+    return;
+  }
+  _number(&args, &n);
+  if (n == 0) n = 1;
+
+  _sched_late = (tstat_t){"sched_late"};
+  _sched_period = us2ticks(period);
+  _sched_left = n;
+  _sched_at = get_ticks() + _sched_period;
+  timer_set_alarm(_sched_at, _sched_alarm);
+  uint32_t timeout = millis() + (uint32_t)((uint64_t)n * period / 1000) + 1000;
+  while (_sched_left && millis_before(timeout)) {
+    if (_job == JOB_RX) _run_rx();
+  }
+  timer_cancel_alarm();
+  _tstat_print(&_sched_late);
+  _printf("@ok sched period=%lu n=%lu left=%lu\r\n", period, n, _sched_left);
 }
 
 //
@@ -1877,6 +1925,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "rx")) _cmd_rx(args);
   else if (!strcmp(cmd, "stop")) _cmd_stop();
   else if (!strcmp(cmd, "timing")) _cmd_timing(args);
+  else if (!strcmp(cmd, "sched")) _cmd_sched(args);
   else _printf("@err unknown command %s\r\n", cmd);
 }
 

@@ -34,8 +34,11 @@ void delay_us(uint32_t us);
 #define ticks_before(ms) _timer_before(get_ticks(), ms)
 #define ticks_after(ms) _timer_after(get_ticks(), ms)
 
-// Start timeout
-void timer_start_timeout(uint32_t timeout_us, void (*callback)());
+// Alarm at an absolute get_ticks() time, up to 2^31 ticks (44 s) ahead: the
+// callback runs once, in the GPT3 interrupt, and may set the next alarm. A
+// time already past: at once. Absolute times let a periodic task add its
+// period to the last deadline, without drift
+void timer_set_alarm(uint32_t at_ticks, void (*callback)());
 
-// Stop timeout
-void timer_stop_timeout();
+// Cancel the alarm
+void timer_cancel_alarm();

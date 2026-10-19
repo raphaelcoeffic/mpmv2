@@ -197,9 +197,23 @@ first waits for a TX started before, and stops RX.
    (FrSky X telemetry at 8.6 ms): the variable length RX entries fill as the
    data arrives, `radio_receive()` could hand them out early.
 
-The MPM scheduler (core port, not the radio): a one-shot timer on absolute
-deadlines (previous + delay), 1 us resolution, delays up to 65 ms at least.
-`timer.c` has a relative one-shot today.
+**The scheduler** (`src/timer.h`, for the MPM core port):
+`timer_set_alarm(at_ticks, callback)`, an alarm at an absolute time of the
+48 MHz free-running timer (GPT3 match interrupt), up to 44 s ahead. A
+periodic task adds its period to the last deadline (no drift), as the MPM
+protocol callbacks need. Bench `sched`, October 2026, LaunchPad (the MPM v2
+the same):
+
+| Period | Callback start after its deadline, avg (max) |
+|---|---|
+| 100 us to 9 ms | 1.2 us (1.5) |
+| 32.768 ms, 53.46 ms (FrSky V bind, beyond the MPM's 16 bit timer), 100 ms, 3 s | 1.2 us (1.3) |
+| 1 ms, while receiving and printing 1000 packets/s (variable length RX) | 1.2 us (1.7) |
+
+All interrupts have the same priority: another one running at the deadline
+delays the alarm by its length (the RX interrupt: about 12 us). The MPM port
+can raise the alarm's priority, and start TX on the RF core's clock
+(`radio_tx_start_at()`) one callback ahead.
 
 The SX1281 driver (`src/sx1281.h`, bench `chip sx1281`) has functions of the
 same shape (`sx1281_send()`, `sx1281_rx_start()`, ...), without the ones added

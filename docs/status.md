@@ -180,7 +180,8 @@ packets 102.4 ms apart.
   after the call (+-1 us), or at a set time; a hop takes 136 us; TX to RX 79
   us chained, 88 us unchained; instant RSSI valid 100 to 150 us after RX
   starts; a packet reaches the CPU 20 bit times + 40 us after its end. All
-  within the protocols' needs. Not measured: the absolute delay of the RX
+  within the protocols' needs. The scheduler's alarm (absolute deadlines, up
+  to 44 s) starts its callback 1.2 us after the deadline. Not measured: the absolute delay of the RX
   timestamps (demodulator).
 - **RSSI and LBT.** No test yet of RSSI accuracy for telemetry, of LQI, or of
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
