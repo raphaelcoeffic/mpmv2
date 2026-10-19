@@ -123,7 +123,7 @@ LaunchPad. October 2026, NRF 1 Mbps, average (maximum) in us:
 | Hop within about 100 us (CC2500 with cached calibration) | 136 us, 260 us to TX: fine when TX is scheduled ahead |
 | Instant RSSI within 400 us of RX (LBT) | 100 to 150 us |
 | PHY change (virtual chip reconfigured) | 530 us: only when the PHY itself changes |
-| Packet available soon after its end | 20 bit times + 40 us; no partial packet |
+| Packet available soon after its end | 20 bit times + 40 us after its end, its length read from it (at the earliest 100 us after the sync word); no partial packet |
 
 ## The interface
 
@@ -135,6 +135,11 @@ first waits for a TX started before, and stops RX.
   call it only when the PHY changes; sync words, frequency and power don't
   need it.
 - `radio_off()`.
+
+- `radio_set_tx_power(word)`: `CMD_SET_TX_POWER`, from the next packet on,
+  without `radio_init()` (LBT's reduced power for one packet). The PA sees it
+  on the air: -34 dBm received at the default word, -59 dBm at `0x04c6`,
+  packet by packet.
 
 **Channel.**
 - `radio_set_frequency(khz)`: blocks for the 136 us of `CMD_FS`.
@@ -156,6 +161,20 @@ first waits for a TX started before, and stops RX.
 
 **RX.**
 - `radio_rx_start(len)`: continuous, fixed length.
+- `radio_rx_start_var(hdr_len, max_len, len_fn, ctx)`: continuous, variable
+  length. After `hdr_len` bytes, `len_fn()` (in the RF core interrupt) gives
+  the packet length from them; `frame_rx_hdr_len()` and `frame_rx_var_len()`
+  do it for the NRF dynamic payload length, XN297 enhanced mode, HS6200 and
+  the CC2500 length byte (whitening, FEC).
+  - The RF core takes the length about 100 us after the sync word at the
+    earliest: a shorter packet ends there.
+  - One packet per RF core command: RX starts again from the interrupt at the
+    end of each packet, about 70 us to RX on.
+  - The interrupt takes about 12 us per packet.
+  - On the Bluetooth LE 2M PHY: the maximum length (short packets end with an
+    error there).
+  - Measured: NRF dynamic payload 1 to 32 bytes at 250 kbps and 1 Mbps, all
+    received; CC2500 protocols as with fixed length.
 - `radio_receive(pkt)`: polls. Each packet has its RSSI, the modem's
   frequency estimate and `timestamp_us` (sync word found).
 - `radio_rx_stop()`, `radio_rx_active()`, `radio_rx_stats()`.
@@ -168,21 +187,15 @@ first waits for a TX started before, and stops RX.
 
 **Still to add,** in the order the virtual chips will need them:
 
-1. **TX power without `radio_init()`** (`CMD_SET_TX_POWER`): power per packet,
-   the one-shot reduced power of LBT.
-2. **Variable length RX:** the RF core reads a length field (position, size,
-   offset to the total length: FrSky length byte, NRF dynamic payload in the
-   ESB control field) and ends the packet there. Today `frame.c` receives the
-   maximum length, which delays the packet by the unused bytes.
-3. **RX with an end:** an RX window that ends by itself (`endTrigger`), as
+1. **RX with an end:** an RX window that ends by itself (`endTrigger`), as
    `radio_send_rx()` has; for the telemetry slots.
-4. **A non-blocking channel change:** `CMD_FS` chained in front of the next TX
+2. **A non-blocking channel change:** `CMD_FS` chained in front of the next TX
    or RX command, so that the CPU doesn't wait 136 us per hop.
-5. **LQI:** the RF core has none. The virtual CC2500 can derive it from the
+3. **LQI:** the RF core has none. The virtual CC2500 can derive it from the
    RSSI and the frequency estimate, or report a constant.
-6. **Partial packets:** if a protocol needs the first bytes before the end
-   (FrSky X telemetry at 8.6 ms), RX entries that fill as data arrives
-   (`IRQ_RX_N_DATA_WRITTEN`, partial read entries).
+4. **Partial packets:** if a protocol needs the first bytes before the end
+   (FrSky X telemetry at 8.6 ms): the variable length RX entries fill as the
+   data arrives, `radio_receive()` could hand them out early.
 
 The MPM scheduler (core port, not the radio): a one-shot timer on absolute
 deadlines (previous + delay), 1 us resolution, delays up to 65 ms at least.

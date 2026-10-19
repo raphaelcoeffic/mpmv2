@@ -38,7 +38,7 @@ P = {
     "ikea": ("ikea.txt", "preset ikea;ch 16", 0),
     "corona": ("corona.txt", "preset corona", 0),
     # V2 freezes the CC2500 AGC: lower the CC2652 power
-    "coronav2": ("corona.txt;w 0x0e 8000;w 0x15 0x50;w 0x1b 67fbdc;ch 0", "pwr 0x10c3;preset coronav2;pwr default", 0),
+    "coronav2": ("corona.txt;w 0x0e 8000;w 0x15 0x50;w 0x1b 67fbdc;ch 0", "pwr 0x10c3;preset coronav2", 0),
     "fdv3": ("corona.txt;w 0x15 0x50;ch 0", "preset fdv3", 0),
     "ares": ("ares.txt", "preset ares", 0),
     "radiolink": ("radiolink.txt", "preset radiolink", 0),
@@ -97,10 +97,14 @@ def main():
             period = a.period or max(3000, int(airtime) + 2000)
             if "ch " not in cc_setup:
                 cc_setup += ";ch 0"
+            # pwr applies at once and is kept: the default unless the test sets one
+            if "pwr " not in cc_setup:
+                cc_setup = "pwr default;" + cc_setup
             r = rig.link_test(mpm, cc, payload, mpm_setup=mpm_setup, cc_setup=f"trim {a.trim};{cc_setup}",
                               period=period, count=a.count, direction=a.dir, cc2500=True, verbose=a.verbose)
             rig.print_results(name, r)
             fails += sum(v["good"] < v["count"] for v in r.values())
+        cc.cmd("pwr default")
     return 1 if fails else 0
 
 

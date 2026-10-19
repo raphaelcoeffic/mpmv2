@@ -123,6 +123,15 @@ uint16_t frame_tx_data(frame_t* f, const uint8_t* payload, uint8_t len, uint8_t*
 // (packet control field with a length: maximum length), 0 if not possible
 uint16_t frame_rx_len(const frame_t* f, uint8_t len);
 
+// Variable length RX: bytes to receive after the RX sync word before the
+// length is known, 0 if the length is fixed (frame_rx_len())
+uint8_t frame_rx_hdr_len(const frame_t* f);
+
+// Variable length RX: bytes to receive after the RX sync word, from the first
+// n >= frame_rx_hdr_len() of them. len is the maximum payload length. 0 if
+// the length field is not valid
+uint16_t frame_rx_var_len(const frame_t* f, uint8_t len, const uint8_t* data, uint16_t n);
+
 // Decodes data received after the RX sync word (rx_len bytes). len is the
 // payload length (packet control field with a length: maximum length). Fills
 // payload and payload_len, FRAME_OK if the CRC (if any) and known bytes are right.

@@ -194,6 +194,41 @@ Measured with the bench `timing` command ([radio-interface.md](radio-interface.m
     at FrSky D and X.
   - 10 us per call.
 
+## Variable length RX
+
+`radio_rx_start_var()`: `CMD_PROP_RX_ADV` with `maxPktLen` 0 (unlimited),
+one partial read entry (`DATA_ENTRY_TYPE_PARTIAL`, `lenSz` 0) per command.
+
+- **Data as it comes:** the RF core writes the packet into the entry 2 bytes
+  at a time (`nextIndex`), with `IRQ_RX_DATA_WRITTEN` each time and
+  `IRQ_RX_N_DATA_WRITTEN` every `config.irqIntv` bytes.
+- **`CMD_PROP_SET_LEN`** ends the packet at `rxLen` data bytes; RSSI and
+  timestamp follow, status `PROP_DONE_OK`. Without it the data fills the
+  entry: `PROP_ERROR_RXFULL`.
+  - Send it as the command structure: `CMDR_DIR_CMD_2BYTE` drops the low 2
+    bits of the length.
+  - The RF core takes it about 100 us after the sync word at the earliest
+    (1 Mbps: the doorbell acknowledged 68 us after a command sent 2 bytes in,
+    29 us after one sent 8 bytes in; 250 kbps: 19 us after 8 bytes). A
+    shorter packet ends there, with what came after it.
+  - Waiting for the acknowledgment blocks the CPU that long: `radio.c` writes
+    the doorbell and goes on (the next doorbell command waits for it).
+  - A length below what is received by then: `PROP_DONE_OK` at 1 Mbps for a
+    5 byte length 10 bytes in, `PROP_DONE_RXERR` for 2. On the Bluetooth LE
+    2M setup, `PROP_DONE_RXERR` for packets up to 19 bytes (acknowledged
+    80 to 100 us after the command): `radio.c` receives the maximum length
+    there.
+- **The entry at the end:** `status` stays active while the command runs
+  (`pktStatus.numElements` 1), and the RF core sets it finished at the end of
+  the command, before `IRQ_LAST_COMMAND_DONE`: `radio.c` marks the packets
+  itself.
+- **`CMD_PROP_RESTART_RX`** goes back to sync search but leaves the bytes in
+  the entry, ahead of the next packet (which then ends with
+  `PROP_ERROR_RXFULL`). `radio.c` ends a packet whose length is not valid
+  with `CMD_PROP_SET_LEN` at the bytes received (`PROP_DONE_RXERR`) and
+  starts RX again.
+- **The output counters** (`rfc_propRxOutput_t`) add up over the commands.
+
 ## CPE parameter table
 
 The CPE keeps the packet settings in a table at `0x21000028`, written by

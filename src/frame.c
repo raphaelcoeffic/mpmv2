@@ -784,6 +784,20 @@ static frame_result_t _decode_xn297_enhanced(const frame_t* f, const uint8_t* bu
   return crc == rx_crc ? FRAME_OK : FRAME_BAD;
 }
 
+// CC2500 variable length: bytes after the header needed for the length byte
+static uint8_t _cc2500_len_bytes(const frame_t* f) { return f->fec ? 4 : 1; }
+
+// CC2500 variable length: payload size from the bytes after the header (air)
+static uint16_t _cc2500_size(const frame_t* f, const uint8_t* air)
+{
+  uint8_t b[4];
+  uint8_t n = _cc2500_len_bytes(f);
+  for (uint8_t i = 0; i < n; i++) b[i] = f->invert ? air[i] ^ 0xFF : air[i];
+  if (f->fec) _fec_decode(b, 2, b);
+  // First PN9 byte: 0xFF
+  return (f->whitening ? b[0] ^ 0xFF : b[0]) + 1;
+}
+
 // 'len' is the maximum length with a variable length
 static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint16_t avail,
                                      uint8_t len, uint8_t* payload, uint8_t* payload_len)
@@ -794,16 +808,14 @@ static frame_result_t _decode_cc2500(const frame_t* f, const uint8_t* buf, uint1
   if (f->invert)
     for (uint8_t i = 0; i < n; i++) b[i] ^= 0xFF;
   if (f->fec) {
-    if (avail < _frame_len(f, len)) return FRAME_SHORT;
     uint8_t m = _fec_data_len(len + f->crc_len);
     if (f->var_len) {
-      // Length byte first (first PN9 byte: 0xFF), then the packet only: noise
-      // follows it
-      uint8_t first[2];
-      _fec_decode(b, 2, first);
-      uint8_t size = (f->whitening ? first[0] ^ 0xFF : first[0]) + 1;
+      // Length byte first, then the packet only: noise follows it
+      if (n < _cc2500_len_bytes(f)) return FRAME_SHORT;
+      uint16_t size = _cc2500_size(f, buf + f->hdr_len);
       if (size <= len) m = _fec_data_len(size + f->crc_len);
     }
+    if (n < 2 * m) return FRAME_SHORT;
     _fec_decode(b, m, b);
     n = m;
   }
@@ -1185,6 +1197,56 @@ uint16_t frame_rx_len(const frame_t* f, uint8_t len)
 {
   if (!frame_len_ok(f, len) || len < f->prefix_len) return 0;
   return _frame_len(f, len) - f->rx_first_start;
+}
+
+// End of the length field in the frame, 0 if the length is fixed (the
+// CYRF6936 length field is received as part of a fixed length)
+static uint8_t _len_field_end(const frame_t* f)
+{
+  if ((f->type == FRAME_NRF && f->esb && f->dpl) || f->type == FRAME_HS6200 ||
+      (f->type == FRAME_XN297 && f->enhanced))
+    return f->hdr_len + 1;
+  if (f->type == FRAME_CC2500 && f->var_len) return f->hdr_len + _cc2500_len_bytes(f);
+  return 0;
+}
+
+// Payload size from the length field of a frame
+static uint16_t _var_size(const frame_t* f, const uint8_t* buf)
+{
+  if (f->type == FRAME_CC2500) return _cc2500_size(f, buf + f->hdr_len);
+  if (f->type == FRAME_XN297) return (buf[f->hdr_len] ^ _scramble(f, f->addr_len)) >> 1;
+  return buf[f->hdr_len] >> 2;  // packet control field: 6 bit length first
+}
+
+uint8_t frame_rx_hdr_len(const frame_t* f)
+{
+  uint8_t end = _len_field_end(f);
+  if (!end) return 0;
+  return end > f->rx_first_start ? end - f->rx_first_start : 1;
+}
+
+uint16_t frame_rx_var_len(const frame_t* f, uint8_t len, const uint8_t* data, uint16_t n)
+{
+  // Each sync word position, as frame_decode_pcf() tries them: the longest
+  uint8_t end = _len_field_end(f);
+  uint16_t rx_len = 0;
+  for (int start = f->rx_start; start >= f->rx_first_start; start--) {
+    if (start != f->rx_start &&
+        (start < f->sync_len ||
+         _sync_word(f->known + start - f->sync_len, f->sync_len) != f->rx_sync))
+      continue;
+    uint8_t buf[sizeof(f->known) + 4];
+    memcpy(buf, f->known, start);
+    if (end > start) {
+      if (n < end - start) continue;
+      memcpy(buf + start, data, end - start);
+    }
+    uint16_t size = _var_size(f, buf);
+    if (size > len || !frame_len_ok(f, size)) continue;
+    uint16_t need = _frame_len(f, size) - start;
+    if (need > rx_len) rx_len = need;
+  }
+  return rx_len;
 }
 
 static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t* data,

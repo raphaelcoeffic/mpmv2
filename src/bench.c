@@ -39,8 +39,9 @@
 //                                chip stream, prefix 4e: its first payload byte)
 //   phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]  custom PHY,
 //                                2-GFSK or 2-FSK
-//   pwr <word|default>           RF core TX power word (applied by next preset/phy),
-//                                default: RF_TX_POWER_DEFAULT (board.h)
+//   pwr <word|default>           RF core TX power word (at once, SX1281: by the
+//                                next preset/phy), default: RF_TX_POWER_DEFAULT
+//                                (board.h)
 //   syncthr <n>                  sync correlation threshold, 0 = auto: default
 //                                (0x1F), strict (0x32) for weak RX sync words
 //   ovr [word...]                up to 8 raw RF core override words added to
@@ -98,8 +99,12 @@
 //   tx <hex>                     send one packet
 //   txp <period_us> <count> <hex>  send periodically, count 0 = forever
 //   seq <idx>                    8 bit counter at byte idx for txp, 255 = off
-//   rx <len>                     receive continuously, len = payload size
-//                                (XN297 enhanced: maximum size)
+//   rx <len> [fixed]             receive continuously, len = payload size
+//                                (length field: maximum size). With a length
+//                                field (NRF dynamic payload, XN297 enhanced,
+//                                CC2500 variable length), the RF core ends
+//                                each packet at its length; fixed: receive
+//                                the maximum length instead
 //   stop                         stop the current job
 //   timing [n] [len]             RF core latencies on the current PHY, framing
 //                                and channel, n runs each (default 20), len
@@ -168,6 +173,7 @@ static uint32_t _tx_late_max;  // us, worst txp packet start after its slot
 static uint8_t _seq_idx = SEQ_OFF;
 static uint8_t _seq;
 static uint8_t _rx_len;
+static bool _rx_fixed;  // the maximum length even with a length field
 
 static uint32_t _stat_tx;
 static uint32_t _stat_rx;
@@ -483,9 +489,19 @@ static void _report_ack(const ack_t* ack)
   _printf(" tries=%u rssi=%d\r\n", ack->tries, ack->pkt.rssi);
 }
 
+static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
+{
+  (void)ctx;
+  return frame_rx_var_len(&_frame, _rx_len, data, n);
+}
+
 static bool _rx_start()
 {
-  return _radio_rx_start(frame_rx_len(&_frame, _rx_len)) == RADIO_OK;
+  uint8_t hdr_len = frame_rx_hdr_len(&_frame);
+  uint16_t max_len = frame_rx_len(&_frame, _rx_len);
+  if (!_sx && !_rx_fixed && hdr_len)
+    return radio_rx_start_var(hdr_len, max_len, _rx_var_len, 0) == RADIO_OK;
+  return _radio_rx_start(max_len) == RADIO_OK;
 }
 
 //
@@ -1049,6 +1065,11 @@ static void _cmd_pwr(char* args)
   while (*args == ' ' || *args == '\t') args++;
   if (!strncmp(args, "default", 7)) _tx_power = RF_TX_POWER_DEFAULT;
   else if (_number(&args, &pwr)) _tx_power = pwr;
+  // At once on the CC2652 (the SX1281: at the next preset or phy)
+  if (_phy_ok && !_sx && radio_set_tx_power(_tx_power) != RADIO_OK) {
+    _report_radio_error("pwr");
+    return;
+  }
   _printf("@ok pwr=0x%04x\r\n", _tx_power);
 }
 
@@ -1533,9 +1554,11 @@ static void _cmd_rx(char* args)
 {
   uint32_t len;
   if (!_number(&args, &len) || len == 0 || len > FRAME_PAYLOAD_MAX) {
-    _print("@err usage: rx <payload_len>\r\n");
+    _print("@err usage: rx <payload_len> [fixed]\r\n");
     return;
   }
+  char* opt = _next_arg(&args);
+  bool fixed = opt && !strcmp(opt, "fixed");
   if (!_need_phy()) return;
   uint16_t air_len = frame_rx_len(&_frame, len);
   if (air_len == 0 || air_len > RADIO_MAX_PKT_LEN) {
@@ -1545,6 +1568,7 @@ static void _cmd_rx(char* args)
 
   _job_stop();
   _rx_len = len;
+  _rx_fixed = fixed;
   _stat_tx = _stat_rx = _stat_err = 0;
   if (!_rx_start()) {
     _report_radio_error("rx");
@@ -1553,7 +1577,9 @@ static void _cmd_rx(char* args)
   _job = JOB_RX;
   _printf("@ok rx len=%lu sync=%08lx", len, frame_rx_sync(&_frame));
   if (frame_rx_sync_alt(&_frame)) _printf(",%08lx", frame_rx_sync_alt(&_frame));
-  _printf(" syncthr=0x%02x\r\n", _phy.sync_threshold);
+  _printf(" syncthr=0x%02x", _phy.sync_threshold);
+  if (!_sx && !fixed && frame_rx_hdr_len(&_frame)) _printf(" var=%u", frame_rx_hdr_len(&_frame));
+  _print("\r\n");
 }
 
 // Time to settle after a radio call before reading the edges, us

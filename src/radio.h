@@ -87,6 +87,20 @@ radio_status_t radio_tx_wait();
 // Start continuous reception of fixed length packets
 radio_status_t radio_rx_start(uint16_t len);
 
+// Variable length RX: the length of each packet comes from its first bytes.
+// Called from the RF core interrupt with the first n >= hdr_len bytes (after
+// the sync word): the packet length, 0 to drop the packet
+typedef uint16_t (*radio_len_fn_t)(const uint8_t* data, uint16_t n, void* ctx);
+
+// Start continuous reception of packets of up to max_len bytes, their length
+// given by len_fn() after hdr_len bytes (1 to 16). The RF core takes the
+// length about 100 us after the sync word at the earliest: a shorter packet
+// ends there. One packet per RF core command: RX starts again after each
+// packet (as radio_rx_start(), about 70 us to RX on). The Bluetooth LE PHY:
+// max_len bytes, as radio_rx_start()
+radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
+                                  void* ctx);
+
 // Send one packet, then receive one packet of rx_len bytes with the rx_sync
 // sync word (e.g. an acknowledgment). RX starts right after TX (chained RF core
 // commands) and lasts window_us. Returns RADIO_NO_PACKET if nothing was received.
@@ -98,6 +112,10 @@ void radio_rx_stop();
 
 // True while the RX command runs (it ends on errors, e.g. RX queue full)
 bool radio_rx_active();
+
+// TX power word for the next packets (CMD_SET_TX_POWER), without a new
+// radio_init(): power per packet (LBT). radio_init() sets phy->tx_power again
+radio_status_t radio_set_tx_power(uint16_t tx_power);
 
 // Instant RSSI in dBm while RX runs, RADIO_RSSI_NONE if not (yet) valid
 #define RADIO_RSSI_NONE (-128)

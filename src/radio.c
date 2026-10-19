@@ -29,8 +29,10 @@
 // RX queue: 4 general entries, packet + appended RSSI and timestamp (RAT
 // time of the sync word)
 #define RX_ENTRIES 4
-#define RX_ENTRY_HDR_LEN 8  // pNextEntry, status, config, length
-#define RX_APPENDED 5       // RSSI, timestamp
+// Header: pNextEntry, status, config, length; and pktStatus, nextIndex for
+// partial read entries (variable length RX)
+#define RX_ENTRY_HDR_LEN 12
+#define RX_APPENDED 5  // RSSI, timestamp
 #define RX_ENTRY_SIZE ((RX_ENTRY_HDR_LEN + RADIO_MAX_PKT_LEN + RX_APPENDED + 3) & ~3)
 
 // Modem DEMMAFC0 (CC27xx LRFDMDM name): COMPVAL (7:0), the matched filter
@@ -158,6 +160,25 @@ static dataQueue_t _rx_queue;
 static uint8_t _rx_next;
 static uint16_t _rx_len;
 static bool _rx_repeat;
+// Variable length RX (radio_rx_start_var()): one packet per RX command, in a
+// partial read entry (_var_cur). The RF core interrupts after the first
+// _var_hdr_len bytes, _var_len_fn() gives the length (CMD_PROP_SET_LEN), and
+// the end of the command starts RX again on the next entry, unless it is not
+// read yet (_var_stalled: radio_receive() starts it). The RF core sets the
+// entry finished itself at the end of the command, before its interrupt:
+// _var_ready marks the packets to read
+static bool _var;
+static uint8_t _var_hdr_len;
+static uint16_t _var_max_len;
+static radio_len_fn_t _var_len_fn;
+static void* _var_ctx;
+static uint8_t _var_cur;
+static bool _var_len_set;  // CMD_PROP_SET_LEN sent for the current packet
+static bool _var_drop;     // not a valid length: ended at once, dropped
+static bool _var_stalled;
+static uint16_t _var_len[RX_ENTRIES];
+static volatile bool _var_ready[RX_ENTRIES];
+#define VAR_IRQS (IRQ_RX_N_DATA_WRITTEN | IRQ_LAST_COMMAND_DONE)
 // Frequency estimate of each finished entry, from the RX entry interrupt:
 // DEMMAFC0 or FOFF_NONE, _rx_foff_set: entry done
 static volatile int16_t _rx_foff[RX_ENTRIES];
@@ -244,22 +265,125 @@ static void _power_down()
   _tx_running = false;
 }
 
-// RX entry done: keep the modem frequency estimate of the packet. The modem
-// is clocked only while an RX command runs, and reading it with the clock off
-// hangs the bus until a reset: read only during a repeated RX with a free
-// entry left, which goes on after the packet (a packet without a free entry
-// ends it, as CMD_ABORT, sent after _rx_running = false)
+// The modem frequency estimate of the last packet. The modem is clocked only
+// while an RX command runs, and reading it with the clock off hangs the bus
+// until a reset: call only while the command goes on
+static int16_t _read_foff()
+{
+  if (!(HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) & RFC_PWR_PWMCLKEN_MDM))
+    return FOFF_NONE;
+  return (int8_t)HWREG(MDM_DEMMAFC0);
+}
+
+// Doorbell commands from outside the interrupt while RX runs: the variable
+// length RX interrupt sends commands too
+static uint32_t _doorbell(uint32_t cmd)
+{
+  IntDisable(INT_RFC_CPE_0);
+  uint32_t cmdsta = RFCDoorbellSendTo(cmd);
+  IntEnable(INT_RFC_CPE_0);
+  return cmdsta;
+}
+
+// Submit an immediate command without waiting for the RF core to take it: it
+// takes the length of a packet only about 100 us after its sync word
+// (measured). The next doorbell command waits for it (RFCDoorbellSendTo())
+static void _doorbell_post(uint32_t cmd)
+{
+  while (HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) != 0) {
+  }
+  RFCAckIntClear();
+  HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) = cmd;
+}
+
+// Start the RX command on the entry _var_cur, if read
+static void _var_start()
+{
+  rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
+  _var_stalled = _var_ready[_var_cur];
+  if (_var_stalled) return;
+
+  e->status = DATA_ENTRY_PENDING;
+  memset(&e->pktStatus, 0, sizeof(e->pktStatus));
+  e->nextIndex = 0;
+  _rx_queue.pCurrEntry = (uint8_t*)e;
+  _rx_queue.pLastEntry = (uint8_t*)e;
+  _var_len_set = false;
+  _var_drop = false;
+  _rx_foff[_var_cur] = FOFF_NONE;
+  _rx_op->status = IDLE;
+  uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)_rx_op);
+  if ((cmdsta & 0xFF) != CMDSTA_Done) {
+    _last_status = cmdsta;
+    _rx_running = false;
+  }
+}
+
+// End of a variable length RX command: keep its packet, and start RX again
+static void _var_done(bool restart)
+{
+  uint16_t status = RF_STATUS(_rx_op);
+  rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
+  if (status == PROP_DONE_OK && _var_len_set && !_var_drop && e->nextIndex >= RX_APPENDED) {
+    _var_len[_var_cur] = e->nextIndex - RX_APPENDED;
+    _rx_foff_set[_var_cur] = true;
+    _var_ready[_var_cur] = true;
+    _var_cur = (_var_cur + 1) % RX_ENTRIES;
+  }
+  if (!restart) return;
+
+  // Packet errors: next packet. Others (parameters, overflow): stop
+  if ((status & 0xFF00) != (PROP_DONE_OK & 0xFF00) && status != PROP_ERROR_RXFULL) {
+    _last_status = status;
+    _rx_running = false;
+    return;
+  }
+  _var_start();
+}
+
+// Variable length RX: the length after the first bytes, the end of the packet
+static void _var_isr()
+{
+  uint32_t flags = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG) & VAR_IRQS;
+  RFCCpeIntClear(flags);
+  if (!_rx_running) return;
+
+  if (_cmd_done(RF_STATUS(_rx_op))) {
+    _var_done(true);
+    return;
+  }
+  rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
+  uint16_t n = *(volatile uint16_t*)&e->nextIndex;
+  if (_var_len_set || n < _var_hdr_len) return;
+
+  _var_len_set = true;
+  _rx_foff[_var_cur] = _read_foff();
+  uint16_t len = _var_len_fn(&e->rxData, n, _var_ctx);
+  // Not valid: end it at once and drop it (CMD_PROP_RESTART_RX leaves its
+  // bytes in the entry, ahead of the next packet). Already received: end there
+  _var_drop = !len || len > _var_max_len;
+  static rfc_CMD_PROP_SET_LEN_t set_len = {.commandNo = CMD_PROP_SET_LEN};
+  set_len.rxLen = _var_drop || len < n ? n : len;
+  _doorbell_post((uint32_t)&set_len);
+}
+
+// Fixed length RX, RX entry done: keep the modem frequency estimate of the
+// packet. Read only during a repeated RX with a free entry left, which goes on
+// after the packet (a packet without a free entry ends it, as CMD_ABORT, sent
+// after _rx_running = false)
 static void _cpe0_isr()
 {
+  if (_var) {
+    _var_isr();
+    return;
+  }
   RFCCpeIntClear(IRQ_RX_ENTRY_DONE);
 
   int free = 0;
   for (int i = 0; i < RX_ENTRIES; i++)
     if (ENTRY_STATUS((rfc_dataEntryGeneral_t*)_rx_entries[i]) != DATA_ENTRY_FINISHED) free++;
   int16_t foff = FOFF_NONE;
-  if (_rx_running && _rx_repeat && free && RF_STATUS(_rx_op) == ACTIVE &&
-      (HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) & RFC_PWR_PWMCLKEN_MDM))
-    foff = (int8_t)HWREG(MDM_DEMMAFC0);
+  if (_rx_running && _rx_repeat && free && RF_STATUS(_rx_op) == ACTIVE) foff = _read_foff();
 
   for (int i = 0; i < RX_ENTRIES; i++) {
     if (ENTRY_STATUS((rfc_dataEntryGeneral_t*)_rx_entries[i]) == DATA_ENTRY_FINISHED &&
@@ -595,15 +719,36 @@ static void _init_rx_queue(uint16_t len)
   _rx_len = len;
 }
 
-// repeat: continuous reception, else stop after the first packet
+// Variable length RX: partial read entries, one per packet
+static void _init_var_queue(uint8_t hdr_len, uint16_t max_len)
+{
+  for (int i = 0; i < RX_ENTRIES; i++) {
+    rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[i];
+    e->pNextEntry = 0;
+    e->status = DATA_ENTRY_PENDING;
+    e->config.type = DATA_ENTRY_TYPE_PARTIAL;
+    e->config.lenSz = 0;
+    e->config.irqIntv = hdr_len & 0x0F;  // 0: 16
+    e->length = sizeof(e->pktStatus) + sizeof(e->nextIndex) + max_len + RX_APPENDED;
+    _rx_foff_set[i] = false;
+    _var_ready[i] = false;
+  }
+  _rx_next = 0;
+  _var_cur = 0;
+}
+
+// repeat: continuous reception, else stop after the first packet. len 0:
+// unlimited (variable length RX)
 static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool repeat)
 {
   _init_rx_queue(len);
   _rx_repeat = repeat;
+  _var = false;
   memset(&_rx_out, 0, sizeof(_rx_out));
+  HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIEN) = IRQ_RX_ENTRY_DONE;
 
   // Fixed length: no header, no length field
-  if (len > 255 || sync_alt || _ble) {
+  if (len == 0 || len > 255 || sync_alt || _ble) {
     memset(&_rx_adv, 0, sizeof(_rx_adv));
     _rx_adv.commandNo = CMD_PROP_RX_ADV;
     _rx_adv.startTrigger.triggerType = TRIG_NOW;
@@ -641,6 +786,17 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
   _rx_op = (rfc_radioOp_t*)&_rx;
 }
 
+// Wait for the RX command to be running
+static radio_status_t _wait_rx_active()
+{
+  uint32_t timeout = micros() + CMD_TIMEOUT_US;
+  while (RF_STATUS(_rx_op) < ACTIVE) {
+    if (micros_after(timeout)) return RADIO_ERR_TIMEOUT;
+  }
+  _last_status = RF_STATUS(_rx_op);
+  return _last_status == ACTIVE ? RADIO_OK : RADIO_ERR_CMD;
+}
+
 radio_status_t radio_rx_start(uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
@@ -657,14 +813,41 @@ radio_status_t radio_rx_start(uint16_t len)
     return RADIO_ERR_CMD;
   }
   _rx_running = true;
+  return _wait_rx_active();
+}
 
-  // Wait for the command to be running
-  uint32_t timeout = micros() + CMD_TIMEOUT_US;
-  while (RF_STATUS(_rx_op) < ACTIVE) {
-    if (micros_after(timeout)) return RADIO_ERR_TIMEOUT;
-  }
-  _last_status = RF_STATUS(_rx_op);
-  return _last_status == ACTIVE ? RADIO_OK : RADIO_ERR_CMD;
+radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
+                                  void* ctx)
+{
+  if (!_powered) return RADIO_ERR_PARAM;
+  if (hdr_len == 0 || hdr_len > 16 || max_len < hdr_len || max_len > RADIO_MAX_PKT_LEN ||
+      !len_fn)
+    return RADIO_ERR_PARAM;
+  // The Bluetooth LE PHY ends short packets with an error when their length
+  // comes after their end (measured): the maximum length
+  if (_ble) return radio_rx_start(max_len);
+
+  radio_tx_wait();
+  radio_rx_stop();
+  _init_rx(_rx_sync, _rx_sync_alt, 0, false);
+  _init_var_queue(hdr_len, max_len);
+  _var_hdr_len = hdr_len;
+  _var_max_len = max_len;
+  _var_len_fn = len_fn;
+  _var_ctx = ctx;
+
+  IntDisable(INT_RFC_CPE_0);
+  _var = true;
+  HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIEN) = VAR_IRQS;
+  RFCCpe0IntSelect(VAR_IRQS);
+  RFCCpeIntClear(VAR_IRQS);
+  _rx_running = true;
+  _var_start();
+  IntEnable(INT_RFC_CPE_0);
+  // A first packet may end it already: the interrupt starts the next one
+  radio_status_t st = _wait_rx_active();
+  if (!_rx_running) return RADIO_ERR_CMD;
+  return st == RADIO_ERR_TIMEOUT ? st : RADIO_OK;
 }
 
 radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
@@ -712,16 +895,24 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
 void radio_rx_stop()
 {
   if (!_powered || !_rx_running) return;
+  IntDisable(INT_RFC_CPE_0);
   _rx_running = false;
-  if (_cmd_done(RF_STATUS(_rx_op))) return;
-
-  RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
-  uint32_t timeout = micros() + CMD_TIMEOUT_US;
-  while (!_cmd_done(RF_STATUS(_rx_op)) && micros_before(timeout)) {
+  if (!_cmd_done(RF_STATUS(_rx_op))) {
+    RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
+    uint32_t timeout = micros() + CMD_TIMEOUT_US;
+    while (!_cmd_done(RF_STATUS(_rx_op)) && micros_before(timeout)) {
+    }
   }
+  // A packet that ended before the abort
+  if (_var && !_var_stalled) _var_done(false);
+  IntEnable(INT_RFC_CPE_0);
 }
 
-bool radio_rx_active() { return _powered && _rx_running && RF_STATUS(_rx_op) == ACTIVE; }
+// Variable length RX: between two packets, or stalled, the command is done
+bool radio_rx_active()
+{
+  return _powered && _rx_running && (_var || RF_STATUS(_rx_op) == ACTIVE);
+}
 
 // RAT time to micros(): both run from the HF clock, read together
 static uint32_t _rat_to_micros(uint32_t rat)
@@ -736,13 +927,14 @@ static uint32_t _rat_to_micros(uint32_t rat)
 bool radio_receive(radio_packet_t* pkt)
 {
   rfc_dataEntryGeneral_t* e = (rfc_dataEntryGeneral_t*)_rx_entries[_rx_next];
-  if (ENTRY_STATUS(e) != DATA_ENTRY_FINISHED) return false;
+  if (_var ? !_var_ready[_rx_next] : ENTRY_STATUS(e) != DATA_ENTRY_FINISHED) return false;
 
-  uint8_t* data = &e->data;
-  pkt->len = _rx_len;
-  memcpy(pkt->data, data, _rx_len);
-  pkt->rssi = (int8_t)data[_rx_len];
-  uint8_t* ts = data + _rx_len + 1;
+  uint8_t* data = _var ? &((rfc_dataEntryPartial_t*)e)->rxData : &e->data;
+  uint16_t len = _var ? _var_len[_rx_next] : _rx_len;
+  pkt->len = len;
+  memcpy(pkt->data, data, len);
+  pkt->rssi = (int8_t)data[len];
+  uint8_t* ts = data + len + 1;
   uint32_t rat = ts[0] | ts[1] << 8 | ts[2] << 16 | (uint32_t)ts[3] << 24;
   pkt->timestamp_us = _powered ? _rat_to_micros(rat) + _ts_sync_us : micros();
   int16_t foff = _rx_foff_set[_rx_next] ? _rx_foff[_rx_next] : FOFF_NONE;
@@ -753,14 +945,34 @@ bool radio_receive(radio_packet_t* pkt)
   // Pending first: the interrupt only sets finished entries
   ENTRY_STATUS(e) = DATA_ENTRY_PENDING;
   _rx_foff_set[_rx_next] = false;
+  _var_ready[_rx_next] = false;
   _rx_next = (_rx_next + 1) % RX_ENTRIES;
+  if (_var) {
+    IntDisable(INT_RFC_CPE_0);
+    if (_rx_running && _var_stalled) _var_start();
+    IntEnable(INT_RFC_CPE_0);
+  }
   return true;
+}
+
+radio_status_t radio_set_tx_power(uint16_t tx_power)
+{
+  if (!_powered) return RADIO_ERR_PARAM;
+  radio_tx_wait();
+  static rfc_CMD_SET_TX_POWER_t cmd = {.commandNo = CMD_SET_TX_POWER};
+  cmd.txPower = tx_power;
+  uint32_t cmdsta = _doorbell((uint32_t)&cmd);
+  if ((cmdsta & 0xFF) != CMDSTA_Done) {
+    _last_status = cmdsta;
+    return RADIO_ERR_CMD;
+  }
+  return RADIO_OK;
 }
 
 int8_t radio_rssi()
 {
-  if (!radio_rx_active()) return RADIO_RSSI_NONE;
-  uint32_t cmdsta = RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_GET_RSSI));
+  if (!radio_rx_active() || RF_STATUS(_rx_op) != ACTIVE) return RADIO_RSSI_NONE;
+  uint32_t cmdsta = _doorbell(CMDR_DIR_CMD(CMD_GET_RSSI));
   if ((cmdsta & 0xFF) != CMDSTA_Done) return RADIO_RSSI_NONE;
   return (int8_t)(cmdsta >> 16);  // RADIO_RSSI_NONE (-128) until valid
 }

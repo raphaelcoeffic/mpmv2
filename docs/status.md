@@ -20,13 +20,15 @@ rig.
 bare-metal. Only `rfc.c`/`rfc.h` and the proprietary CPE patch come from TI's
 radio code. It is a raw packet engine: preamble, a 32 bit sync word (plus an
 alternative one), fixed-length data up to 1100 bytes (the advanced commands
-above 255). It also has chained TX -> RX for Enhanced ShockBurst acks, a
+above 255), or variable length, each packet ended at its length field
+(NRF dynamic payload, XN297 enhanced, CC2500 length byte). It also has chained TX -> RX for Enhanced ShockBurst acks, a
 settable sync correlation threshold and a frequency trim, and gives the
 modem's frequency estimate of each packet received: the bench `autotrim`
 follows the sender with it
 ([details](interop-results.md#automatic-frequency-trim)). TX can start
 without waiting for its end, or at a set time; RX packets carry the time of
-their sync word, and an instant RSSI is there for LBT
+their sync word, an instant RSSI is there for LBT, and the TX power can
+change from one packet to the next
 ([interface and timing](radio-interface.md)). On the CC2652RB it
 corrects the BAW oscillator (HPOSC) from TI's factory calibration and the chip
 temperature: about 98 ppm fast on the MPM v2 board, within about 10 kHz of the
