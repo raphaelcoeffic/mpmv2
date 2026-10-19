@@ -40,6 +40,15 @@ openocd -f board/ti_cc26x2_launchpad.cfg -c init -c "mdw 0x40045000 256" -c exit
 | `0x40046000` | RFE |
 | `0x40047000` | **Don't read it**: the bus hangs, only a hardware reset (`reset_config srst_only`) brings the chip back |
 
+The modem block hangs the bus the same way, from the CPU or the debugger:
+
+- `0x5058..0x509F` (FIFO / mailbox words) during RX.
+- Any modem register while its clock is off. The CPE turns it on and off
+  itself (`RFC_PWR` `PWMCLKEN`, MDM bit 3): on while an RX or TX command runs,
+  off after its end, e.g. an RX ended by a full queue. `radio.c` reads the
+  modem only from the RX entry interrupt, during a repeated RX with a free
+  entry left ([Frequency estimate](#frequency-estimate)).
+
 The bench `ovr` command appends raw override words to the setup (both PHYs):
 any register or parameter can be tried without rebuilding.
 
@@ -59,10 +68,42 @@ other offsets). Checked: TI's Bluetooth values decode the same on both
 | `0x5114` | `DEMC1BE1` | Sync thresholds B (15:8) and A (7:0): the bench `syncthr` |
 | `0x5118` | `DEMC1BE2` | PEAKCONF (9:8), THRESHOLDC (7:0) |
 | `0x50C0`, `0x50C4` | `MDMBAUD`, `MDMBAUDPRE` | Symbol rate (0x8000 / 12 on the Bluetooth 2M PHY) |
+| `0x51C0` | `DEMMAFC0` | COMPVAL (7:0): frequency offset of the last packet, signed ([below](#frequency-estimate)) |
+| `0x52C4` | `DEMDSBU1` | AVGVAL (15:0): follows the offset too, with an offset of its own per PHY |
 
 For NRF 2 Mbps on the Bluetooth LE 2M PHY, two values of TI's CC27xx NESB PHY
 (`nesb_1m_2m_cc27xx.json`) are used: MAFCGAIN 1 and the matched filter for
 modulation index 0.32 ([results](interop-results.md#2-mbps-rx-the-bluetooth-le-2m-phy)).
+
+## Frequency estimate
+
+`DEMMAFC0` (COMPVAL, "matched filter AFC compensation" it seems) holds the
+frequency offset of the last packet received, from its start: it changes at
+the next sync, and between packets it reads the same. It is there on every
+proprietary PHY, without TI's MAFCGAIN override. Measured against the trim,
+which moves the CC2652 by a known amount:
+
+- Linear over +-100 kHz (narrow PHYs: as far as packets get through), noise
+  of about 1 count from packet to packet.
+- Positive when the sender is above the receive frequency.
+- About 61 counts per deviation (52 to 65 on most setups: NRF 1 Mbps,
+  FrSky X 51, Redpine slow 34): 0.5 kHz per count at FrSky D (31.75 kHz
+  deviation), 4 kHz at the A7105 PHYs (250 kHz). On the Bluetooth LE 2M PHY
+  (500 kHz deviation): as 326 kHz, about 5 kHz per count.
+- Its zero moves a little with the PHY: against the same chip, NRF 1 Mbps and
+  250 kbps 13 kHz apart, A7105 500 and 100 kbps 22 kHz, DSM and Devo 38 kHz
+  (same CYRF6936, other channel and setup).
+
+`DEMDSBU1` (AVGVAL) moves the same way, at the same scale, but its zero
+depends more on the PHY (NRF 1 Mbps: 74 kHz from `DEMMAFC0`'s, Devo: 0).
+
+`radio.c` reads `DEMMAFC0` in the RX entry interrupt (`IRQ_RX_ENTRY_DONE`):
+later, the next packet or a new RX command could have replaced it (late
+reads during DSM reception gave 36 on many packets), and the modem clock
+could be off. `radio_packet_t`
+gives it in kHz (`freq_offset`, counts x deviation / 61), the bench prints it
+as `@rx ... foff=` and its `autotrim` follows it
+([results](interop-results.md#automatic-frequency-trim)).
 
 ## CPE parameter table
 

@@ -21,7 +21,10 @@ bare-metal. Only `rfc.c`/`rfc.h` and the proprietary CPE patch come from TI's
 radio code. It is a raw packet engine: preamble, a 32 bit sync word (plus an
 alternative one), fixed-length data up to 1100 bytes (the advanced commands
 above 255). It also has chained TX -> RX for Enhanced ShockBurst acks, a
-settable sync correlation threshold and a frequency trim. On the CC2652RB it
+settable sync correlation threshold and a frequency trim, and gives the
+modem's frequency estimate of each packet received: the bench `autotrim`
+follows the sender with it
+([details](interop-results.md#automatic-frequency-trim)). On the CC2652RB it
 corrects the BAW oscillator (HPOSC) from TI's factory calibration and the chip
 temperature: about 98 ppm fast on the MPM v2 board, within about 10 kHz of the
 LaunchPad once corrected, no per-board calibration.
@@ -125,7 +128,10 @@ and E010R5) are explained in
    frequency offset or GFSK vs 2-FSK; Joysway's errors depend on the data
    and on its RX table ([details](interop-results.md#a7105)). An SDR view of
    both chips shows the CC2652 signal clean, with a wider eye than the
-   A7105's own: the errors are on the A7105 receiver side. Next: a real
+   A7105's own: the errors are on the A7105 receiver side. Sending 35 kHz
+   above the A7105's own frequency, learned from its packets, gets WFLY2 to
+   98 to 99.6% on the LaunchPad
+   ([autotrim](interop-results.md#automatic-frequency-trim)). Next: a real
    FlySky / AFHDS2A receiver (FS-iA6B).
 2. **CYRF6936, CC2652 -> CYRF6936:** with the bench output fix all 100%
    but Kyosho3 (99%, single misses at a 10 ms period). MLINK is only received
@@ -221,7 +227,9 @@ packets 102.4 ms apart.
    next revision are listed in [hardware.md](hardware.md). Its own frequency
    needs no per-board calibration (HPOSC correction). The receivers' crystals
    still vary: the 4-in-1 chips of the bench are 35 kHz (CC2500) and 90 kHz
-   (A7105) off, which the MPM `option` corrects per model today.
+   (A7105) off, which the MPM `option` corrects per model today. The CC2652
+   measures it on each packet received (`autotrim`): protocols with telemetry
+   or a bind reply could tune themselves.
 7. **Update from the radio.** Boot loader in flash sector 0
    (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
    MULTI-Module, works over USB; EdgeTX branch `mpm-v2-flash` for the MPM v2

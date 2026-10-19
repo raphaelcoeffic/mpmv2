@@ -32,7 +32,13 @@ typedef struct {
   uint16_t len;
   int8_t rssi;  // dBm
   uint32_t timestamp_us;
+  // Sender's carrier above the receive frequency, kHz: the modem's estimate
+  // (+-20% and about 2 kHz of noise), RADIO_FREQ_OFFSET_NONE if not known
+  // (single packet RX of radio_send_rx())
+  int16_t freq_offset;
 } radio_packet_t;
+
+#define RADIO_FREQ_OFFSET_NONE INT16_MIN
 
 typedef enum {
   RADIO_OK = 0,

@@ -395,6 +395,7 @@ static void _read_packet(radio_packet_t* pkt, uint8_t len)
   uint8_t tx[7] = {CMD_GET_PACKET_STATUS}, rx[7];
   _xfer(tx, rx, 7);
   pkt->rssi = -(int)rx[3] / 2;  // rssiSync
+  pkt->freq_offset = RADIO_FREQ_OFFSET_NONE;
 }
 
 radio_status_t sx1281_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,

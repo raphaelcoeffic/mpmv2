@@ -1,4 +1,5 @@
 #include <driverlib/aon_batmon.h>
+#include <driverlib/interrupt.h>
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include <driverlib/rfc.h>
@@ -28,6 +29,14 @@
 #define RX_ENTRIES 4
 #define RX_ENTRY_HDR_LEN 8  // pNextEntry, status, config, length
 #define RX_ENTRY_SIZE ((RX_ENTRY_HDR_LEN + RADIO_MAX_PKT_LEN + 1 + 3) & ~3)
+
+// Modem DEMMAFC0 (CC27xx LRFDMDM name): COMPVAL (7:0), the matched filter
+// frequency compensation of the last packet, signed, kept until the next sync.
+// About 61 counts per deviation, positive when the sender is above the
+// receive frequency (docs/rf-core-notes.md)
+#define MDM_DEMMAFC0 0x400451C0
+#define FOFF_COUNTS_PER_DEVIATION 61
+#define FOFF_NONE INT16_MIN
 
 // Overrides from the TI radio configuration database
 // (cc2652r_prop_pg21, setting tc901: 250 kbps 2-GFSK, 2.4 GHz)
@@ -144,6 +153,12 @@ static uint8_t _rx_entries[RX_ENTRIES][RX_ENTRY_SIZE] __attribute__((aligned(4))
 static dataQueue_t _rx_queue;
 static uint8_t _rx_next;
 static uint16_t _rx_len;
+static bool _rx_repeat;
+// Frequency estimate of each finished entry, from the RX entry interrupt:
+// DEMMAFC0 or FOFF_NONE, _rx_foff_set: entry done
+static volatile int16_t _rx_foff[RX_ENTRIES];
+static volatile bool _rx_foff_set[RX_ENTRIES];
+static uint32_t _foff_deviation;  // Hz, scale of the estimate
 
 static uint32_t _tx_sync;
 static uint32_t _rx_sync;
@@ -192,6 +207,8 @@ static bool _domain_on()
 
 static void _power_down()
 {
+  // The interrupt reads RF core registers
+  IntDisable(INT_RFC_CPE_0);
   if (_domain_on()) RFCClockDisable();
 
   PRCMDomainDisable(PRCM_DOMAIN_RFCORE);
@@ -204,6 +221,32 @@ static void _power_down()
   }
   _powered = false;
   _rx_running = false;
+}
+
+// RX entry done: keep the modem frequency estimate of the packet. The modem
+// is clocked only while an RX command runs, and reading it with the clock off
+// hangs the bus until a reset: read only during a repeated RX with a free
+// entry left, which goes on after the packet (a packet without a free entry
+// ends it, as CMD_ABORT, sent after _rx_running = false)
+static void _cpe0_isr()
+{
+  RFCCpeIntClear(IRQ_RX_ENTRY_DONE);
+
+  int free = 0;
+  for (int i = 0; i < RX_ENTRIES; i++)
+    if (ENTRY_STATUS((rfc_dataEntryGeneral_t*)_rx_entries[i]) != DATA_ENTRY_FINISHED) free++;
+  int16_t foff = FOFF_NONE;
+  if (_rx_running && _rx_repeat && free && RF_STATUS(_rx_op) == ACTIVE &&
+      (HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) & RFC_PWR_PWMCLKEN_MDM))
+    foff = (int8_t)HWREG(MDM_DEMMAFC0);
+
+  for (int i = 0; i < RX_ENTRIES; i++) {
+    if (ENTRY_STATUS((rfc_dataEntryGeneral_t*)_rx_entries[i]) == DATA_ENTRY_FINISHED &&
+        !_rx_foff_set[i]) {
+      _rx_foff[i] = foff;
+      _rx_foff_set[i] = true;
+    }
+  }
 }
 
 static radio_status_t _power_up(bool ble)
@@ -231,6 +274,18 @@ static radio_status_t _power_up(bool ble)
     if (micros_after(timeout)) return RADIO_ERR_BOOT;
   }
   HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG) = 0;
+
+  // Only RX entry done to CPE0 (the other flags are set but not enabled)
+  static bool isr;
+  if (!isr) {
+    isr = true;
+    IntRegister(INT_RFC_CPE_0, _cpe0_isr);
+  }
+  HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIEN) = IRQ_RX_ENTRY_DONE;
+  RFCCpe0IntSelect(IRQ_RX_ENTRY_DONE);
+  RFCCpeIntClear(IRQ_RX_ENTRY_DONE);
+  IntPendClear(INT_RFC_CPE_0);
+  IntEnable(INT_RFC_CPE_0);
 
   // The patches copy their image once and count on the retained RF core RAM:
   // with two of them, load the whole image every time
@@ -382,6 +437,8 @@ radio_status_t radio_init(const radio_phy_t* phy)
   _hposc_init();
 
   _ble = phy->ble_2m;
+  // Bluetooth LE 2M PHY (500 kHz deviation): measured as 326 kHz
+  _foff_deviation = _ble ? 326000 : phy->deviation;
   radio_status_t st = _power_up(_ble);
   if (st != RADIO_OK) return st;
 
@@ -466,6 +523,7 @@ static void _init_rx_queue(uint16_t len)
     e->config.type = DATA_ENTRY_TYPE_GEN;
     e->config.lenSz = 0;
     e->length = len + 1;  // packet + RSSI
+    _rx_foff_set[i] = false;
   }
   _rx_queue.pCurrEntry = _rx_entries[0];
   _rx_queue.pLastEntry = 0;  // circular
@@ -477,6 +535,7 @@ static void _init_rx_queue(uint16_t len)
 static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool repeat)
 {
   _init_rx_queue(len);
+  _rx_repeat = repeat;
   memset(&_rx_out, 0, sizeof(_rx_out));
 
   // Fixed length: no header, no length field
@@ -606,8 +665,14 @@ bool radio_receive(radio_packet_t* pkt)
   memcpy(pkt->data, data, _rx_len);
   pkt->rssi = (int8_t)data[_rx_len];
   pkt->timestamp_us = micros();
+  int16_t foff = _rx_foff_set[_rx_next] ? _rx_foff[_rx_next] : FOFF_NONE;
+  pkt->freq_offset = foff == FOFF_NONE ? RADIO_FREQ_OFFSET_NONE
+                     : (int16_t)(foff * (int32_t)_foff_deviation /
+                                 (FOFF_COUNTS_PER_DEVIATION * 1000));
 
+  // Pending first: the interrupt only sets finished entries
   ENTRY_STATUS(e) = DATA_ENTRY_PENDING;
+  _rx_foff_set[_rx_next] = false;
   _rx_next = (_rx_next + 1) % RX_ENTRIES;
   return true;
 }

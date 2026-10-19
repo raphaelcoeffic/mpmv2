@@ -148,6 +148,7 @@ setup, setups as `;`-separated commands or example files
 | `proto_capture.py` | The MPM runs one of its protocols (`proto`), the CC2652 receives on one channel: E01X, E129, C186, E010R5, FrSky L |
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
+| `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
 
 ### ESP32-S3 as a third receiver
@@ -197,7 +198,7 @@ One ASCII command per line (`\n` or `\r\n`). Numbers are decimal or `0x` hex.
 `<hex>` is a byte string: `0a1b2c`, `0a 1b 2c` or `0x0a 0x1b 0x2c`.
 
 Each command gets exactly one answer line, `@ok [data]` or `@err <message>`.
-Asynchronous events are lines starting with `@rx`, `@ack` or `@ev`. All other
+Asynchronous events are lines starting with `@rx`, `@ack`, `@ev` or `@trim`. All other
 lines are debug output and are ignored by the host.
 
 Received packets: `@rx <time_us> <channel> <hex> [crc=ok|bad] [...]`.
@@ -283,7 +284,9 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `ch <n>` / `freq <khz>` | Channel of the channel plan (default 2400 + n MHz) / any frequency |
 | `chplan <base_hz> <spacing_hz>` | Channel plan, e.g. CC2500 `FREQ` and `CHANSPC`. Presets set it |
 | `trim <khz>` | Frequency correction added to `ch` and `freq`, as the MPM CC2500 `option` (`FSCTRL0`). It persists across presets: always set it |
-| `tx`, `txp`, `seq`, `rx <len>`, `stop`, `info` | As on the MPM. `@rx` lines have `rssi=<dBm>`. The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
+| `autotrim [off\|<offset_khz>]` | During `rx`, `trim` follows the senders: every 8 packets with a good CRC, moved by the mean of their `foff` + offset when 5 kHz or more, so that the CC2652 sits at the sender's frequency + offset (A7105: 35). Prints `@trim <khz>`. Until `autotrim off` |
+| `peek <addr> [n]` | Read up to 16 words (RF core registers: see [rf-core-notes.md](rf-core-notes.md) for what hangs the bus) |
+| `tx`, `txp`, `seq`, `rx <len>`, `stop`, `info` | As on the MPM. `@rx` lines have `rssi=<dBm>` and `foff=<kHz>`, the modem's estimate of the sender's frequency above the CC2652 (+-20%, not for acks). The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
 
 The XN297 examples (`xn297_1m.txt`, `xn297_250k_cc2500.txt`) run unchanged on
 both devices. The `cc2652_*.txt` examples are the CC2652 counterparts of the

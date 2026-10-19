@@ -691,3 +691,51 @@ arrive:
   received with the AFHDS2A table, ETH 3 bits; WFLY2 and Joysway with their
   own). Joysway's losses don't depend on the offset (byte 0 bit 4, above).
 - CYRF6936 (DSSS) and the A7105 at 100 to 250 kbps don't care about 100 kHz.
+
+## Automatic frequency trim
+
+The CC2652 modem estimates the frequency offset of each packet it receives
+([rf-core-notes.md](rf-core-notes.md#frequency-estimate)): `@rx ... foff=<kHz>`,
+the sender above the CC2652. The bench `autotrim <offset>` moves `trim` by
+the mean of every 8 estimates (when 5 kHz or more off), so that the CC2652
+sits at the sender's frequency + offset. From the MPM's packets it then knows
+where to send back: what a protocol with telemetry, or a bind exchange,
+would do with a real receiver, instead of a fixed tuning option.
+
+Scale (`autotrim.py <family> <name> --sweep <trims>`, the estimate against
+the trim, LaunchPad): -0.84 to -1.04 kHz per kHz of trim on NRF 1 Mbps /
+250 kbps, Devo, DSM, FlySky, Hubsan, Bugs, FrSky D / X, Corona; Redpine slow
+-0.53 (one packet per trim). Spread from packet to packet: up to 2.5 kHz. With a scale under 2
+the steps still converge: 1 to 3 steps of 8 packets from trim 0.
+
+Where the estimate puts the MPM chips (trim at estimate 0, LaunchPad):
+
+| Chip | Setups | Trim |
+|---|---|---|
+| CC2500 | FrSky D, X, X LBT, V8, HoTT, Hitec, Redpine, Corona, Ares, SFHSS | -22 to -35 (nominal -35) |
+| A7105 | 500 kbps (FlySky, AFHDS2A, Kyosho, Joysway, WFLY2) | 61 to 66 |
+| A7105 | 100 / 250 kbps (Hubsan, Pelikan, Bugs) | 64 to 88 |
+| NRF24L01 | 1 Mbps / 250 kbps / 2 Mbps (Bluetooth LE 2M PHY) | -22 / -9 / 0 |
+| CYRF6936 | Devo / DSM | +5 / -33 |
+
+CC2652 -> MPM after learning from 48 MPM packets, starting at trim 0
+(`autotrim.py`, 200 or 250 packets):
+
+| Setup | Fixed trim (nominal) | `autotrim 0` | `autotrim 35` (A7105) / `-20` (CC2500) |
+|---|---|---|---|
+| WFLY2, LaunchPad, 2 rounds (trim 0: 42 to 52%) | 92.4 to 96% | 88 to 90% (trim 65) | 98 to 99.6% (trim 98 to 100) |
+| WFLY2, MPM v2, 2 rounds | 94.4 to 98.8% | 93.2 to 95.2% (trim 57) | 93.2 to 96.8% (trim 92) |
+| FlySky, AFHDS2A, Kyosho, Joysway, Pelikan, Hubsan | 98 to 100% | 97 to 100% | 98 to 100% |
+| CC2500, the 10 setups above | 100% | 100% | 99.5 to 100% |
+
+- The A7105 receives best about 35 kHz above where it sends (offsets 0 / 15 /
+  25 / 35 / 50 on WFLY2: 88-90 / 95 / 96-98 / 98-99.6 / 98%); the SDR had
+  put the best point 23 kHz above the A7105's carrier ([A7105](#a7105)). `autotrim 35` lands on the hand-tuned trim 90 on
+  both boards, a little above on the LaunchPad.
+- The CC2500 windows are wide enough for any of these trims (+-45 kHz): its
+  window centre, 15 to 20 kHz below the nominal trim
+  ([Frequency margin](#frequency-margin)), suggests `autotrim -20`.
+- Learning needs packets: on the narrow PHYs (FrSky D) the CC2652 receives
+  within about +-65 kHz only.
+- Not measured: drift tracking over temperature (the A7105 crystal, the MPM v2
+  HPOSC), the reason for doing this at run time.

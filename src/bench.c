@@ -89,6 +89,9 @@
 //   chplan <base_hz> <spacing_hz>  channel plan (CC2500: FREQ and CHANSPC)
 //   trim <khz>                   frequency correction added to ch and freq, signed
 //                                (crystal offsets: the MULTI-Module CC2500 option)
+//   autotrim [off | <offset_khz>]  trim follows the senders received: our
+//                                frequency at theirs + offset_khz (default 0),
+//                                from the modem's estimate (@rx foff=)
 //   freq <khz>                   frequency in kHz
 //   tx <hex>                     send one packet
 //   txp <period_us> <count> <hex>  send periodically, count 0 = forever
@@ -97,7 +100,9 @@
 //                                (XN297 enhanced: maximum size)
 //   stop                         stop the current job
 //
-// Events: @rx <time_us> <ch> <hex> [crc=ok|bad] rssi=<dBm> [pid=<n>]
+// Events: @rx <time_us> <ch> <hex> [crc=ok|bad] rssi=<dBm> [foff=<khz>] [pid=<n>]
+//           foff: sender's carrier above ours, estimate
+//         @trim <khz> (autotrim changed the trim)
 //         @ack <time_us> <ch> <hex> tries=<n> rssi=<dBm> (ack payloads)
 //         @ev txdone <n>
 
@@ -126,6 +131,16 @@ static int _channel = 40;
 static uint32_t _ch_base_hz = 2400000000;
 static uint32_t _ch_spacing_hz = 1000000;
 static int32_t _trim_khz;
+// autotrim: mean of AUTOTRIM_PACKETS estimates, applied when it is
+// AUTOTRIM_MIN_KHZ off (estimate steps of 0.5 to 4 kHz, noise of about 2).
+// Scale errors of the estimate (+-20%) only add a step or two
+#define AUTOTRIM_PACKETS 8
+#define AUTOTRIM_MIN_KHZ 5
+#define TRIM_MAX_KHZ 500
+static bool _autotrim;
+static int32_t _autotrim_offset;
+static int32_t _autotrim_sum;
+static uint8_t _autotrim_n;
 
 // TI default sync word
 static frame_t _frame = {
@@ -432,7 +447,8 @@ static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
   return true;
 }
 
-static void _report_packet(const radio_packet_t* pkt)
+// Returns true if the frame is valid (CRC)
+static bool _report_packet(const radio_packet_t* pkt)
 {
   uint8_t payload[FRAME_PAYLOAD_MAX];
   uint8_t len;
@@ -445,9 +461,11 @@ static void _report_packet(const radio_packet_t* pkt)
   _print_hex(payload, len);
   if (_frame.crc_len) _printf(" crc=%s", res == FRAME_OK ? "ok" : "bad");
   _printf(" rssi=%d", pkt->rssi);
+  if (pkt->freq_offset != RADIO_FREQ_OFFSET_NONE) _printf(" foff=%d", pkt->freq_offset);
   if ((_frame.type == FRAME_NRF && _frame.esb) || _frame.type == FRAME_HS6200)
     _printf(" pid=%u", (pcf >> 1) & 3);
   _print("\r\n");
+  return res == FRAME_OK;
 }
 
 static void _report_ack(const ack_t* ack)
@@ -486,11 +504,11 @@ static void _print_chip()
 static void _cmd_info()
 {
   _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
-          "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld hposc=%d ",
+          "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld autotrim=%s hposc=%d ",
           _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
           _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
           _frame.type == FRAME_NRF && _frame.esb, _ack_on, _tx_power, _trim_khz,
-          radio_hposc_offset());
+          _autotrim ? "on" : "off", radio_hposc_offset());
   _print_chip();
   _print("\r\n");
 }
@@ -831,6 +849,20 @@ static void _cmd_syncthr(char* args)
     return;
   }
   _printf("@ok syncthr=0x%02x\r\n", _sync_threshold);
+}
+
+// Read 32 bit words. RF core: some registers hang the bus (docs/rf-core-notes.md)
+static void _cmd_peek(char* args)
+{
+  uint32_t addr, n = 1;
+  if (!_number(&args, &addr) || (addr & 3)) {
+    _print("@err usage: peek <addr> [n]\r\n");
+    return;
+  }
+  _number(&args, &n);
+  _print("@ok");
+  for (uint32_t i = 0; i < n && i < 16; i++) _printf(" %08lx", *(volatile uint32_t*)(addr + 4 * i));
+  _print("\r\n");
 }
 
 // Extra RF core override words, applied at once and kept until "ovr" alone
@@ -1187,11 +1219,56 @@ static void _cmd_ch(char* args)
   if (_set_frequency(khz)) _printf("@ok ch=%lu freq=%lu\r\n", ch, khz);
 }
 
+static void _autotrim_reset()
+{
+  _autotrim_sum = 0;
+  _autotrim_n = 0;
+}
+
+// Returns true when the trim changed
+static bool _autotrim_packet(const radio_packet_t* pkt)
+{
+  if (pkt->freq_offset == RADIO_FREQ_OFFSET_NONE) return false;
+  _autotrim_sum += pkt->freq_offset + _autotrim_offset;
+  if (++_autotrim_n < AUTOTRIM_PACKETS) return false;
+
+  int32_t step = _autotrim_sum / AUTOTRIM_PACKETS;
+  _autotrim_reset();
+  if (step > -AUTOTRIM_MIN_KHZ && step < AUTOTRIM_MIN_KHZ) return false;
+  int32_t trim = _trim_khz + step;
+  if (trim > TRIM_MAX_KHZ) trim = TRIM_MAX_KHZ;
+  if (trim < -TRIM_MAX_KHZ) trim = -TRIM_MAX_KHZ;
+  if (trim == _trim_khz) return false;
+  _trim_khz = trim;
+  return true;
+}
+
+static void _cmd_autotrim(char* args)
+{
+  uint32_t offset = 0;
+  char* p = args;
+  while (*p == ' ') p++;
+  if (!strncmp(p, "off", 3)) {
+    _autotrim = false;
+  } else if (!*p || (_number(&args, &offset) && (int32_t)offset >= -TRIM_MAX_KHZ &&
+                     (int32_t)offset <= TRIM_MAX_KHZ)) {
+    _autotrim = true;
+    _autotrim_offset = (int32_t)offset;
+  } else {
+    _print("@err usage: autotrim [off | <offset_khz>]\r\n");
+    return;
+  }
+  _autotrim_reset();
+  if (_autotrim) _printf("@ok autotrim=%ld trim=%ld\r\n", _autotrim_offset, _trim_khz);
+  else _printf("@ok autotrim=off trim=%ld\r\n", _trim_khz);
+}
+
 static void _cmd_trim(char* args)
 {
   uint32_t trim;
-  if (_number(&args, &trim) && (int32_t)trim >= -500 && (int32_t)trim <= 500) {
+  if (_number(&args, &trim) && (int32_t)trim >= -TRIM_MAX_KHZ && (int32_t)trim <= TRIM_MAX_KHZ) {
     _trim_khz = (int32_t)trim;
+    _autotrim_reset();
     if (!_set_frequency(_freq_khz)) return;
   }
   _printf("@ok trim=%ld\r\n", _trim_khz);
@@ -1354,6 +1431,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "pwr")) _cmd_pwr(args);
   else if (!strcmp(cmd, "syncthr")) _cmd_syncthr(args);
   else if (!strcmp(cmd, "ovr")) _cmd_ovr(args);
+  else if (!strcmp(cmd, "peek")) _cmd_peek(args);
   else if (!strcmp(cmd, "sync")) _cmd_sync(args);
   else if (!strcmp(cmd, "nrf")) _cmd_nrf(args);
   else if (!strcmp(cmd, "xn")) _cmd_xn(args);
@@ -1366,6 +1444,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "ch")) _cmd_ch(args);
   else if (!strcmp(cmd, "chplan")) _cmd_chplan(args);
   else if (!strcmp(cmd, "trim")) _cmd_trim(args);
+  else if (!strcmp(cmd, "autotrim")) _cmd_autotrim(args);
   else if (!strcmp(cmd, "cc2500")) _cmd_cc2500(args);
   else if (!strcmp(cmd, "a7105")) _cmd_a7105(args);
   else if (!strcmp(cmd, "cyrf")) _cmd_cyrf(args);
@@ -1419,9 +1498,15 @@ static void _run_txp()
 static void _run_rx()
 {
   radio_packet_t pkt;
+  bool retune = false;
   while (_radio_receive(&pkt)) {
     _stat_rx++;
-    _report_packet(&pkt);
+    if (_report_packet(&pkt) && _autotrim) retune |= _autotrim_packet(&pkt);
+  }
+  if (retune) {
+    _printf("@trim %ld\r\n", _trim_khz);
+    _set_frequency(_freq_khz);
+    return;
   }
 
   // RX ends on errors (e.g. queue overflow): restart it
