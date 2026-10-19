@@ -110,14 +110,15 @@ the "non-BLE commands", `rf_patch_cpe_bt5`) followed by `CMD_PROP_TX_ADV` /
 (`radio_phy_t.ble_2m`), with the NRF framing unchanged. Found on the
 LaunchPad, October 2026:
 
-- **Bit order:** the sync word and every byte go LSB first. NRF packets were
-  received (248/250) once the sync word was reversed on 32 bits, with every
-  byte reversed. `radio.c` reverses both: the caller stays MSB first.
-- **Whitening:** the packet after the sync word is whitened with the
-  Bluetooth LFSR (x^7 + x^4 + 1) seeded 0x65 (advertising channel 37), the
-  same on every channel and every packet. `radio.c` XORs it out in RX and in
-  TX (it is the CC27xx BLE generic setting's `WHITEINIT` = 101 too). No
-  register to turn it off was found.
+- **Bit order and whitening:** as set up, the sync word and every byte go
+  LSB first (NRF packets were received, 248/250, once the sync word was
+  reversed on 32 bits, with every byte reversed), and the packet after the
+  sync word is whitened with the Bluetooth LFSR (x^7 + x^4 + 1) seeded 0x65
+  (advertising channel 37), the same on every channel and every packet. Both
+  come from one byte of the CPE parameter table, found by diffing the RF core
+  with the proprietary whitening on and off: an override sets it as on the
+  proprietary PHY (MSB first, no whitening), see
+  [RF core notes](rf-core-notes.md#cpe-parameter-table).
 - **Demodulator:** with the Bluetooth settings, every packet had bit errors,
   always 0 bits turned to 1 inside runs of zeros; `trim` from -800 to +150
   kHz gave 0 to 26%. The fix came from TI's NESB 2 Mbps PHY of the CC27xx
@@ -127,9 +128,10 @@ LaunchPad, October 2026:
   0x7b20 on the CC2652 = C3C5 123, C2C6 32 on the CC27xx; TI's CC2652
   "symbol tracking" override 0x00F9 on `0x50D4` = the CC27xx `DEMMISC2`
   Bluetooth values). Register names by offset come from the Beyond BLE tools
-  (`modem_reg_create.py`, 38C3); the debugger reads the modem registers
-  (`0x40045000`) while the RF core runs. Two NESB values on top of the wBMS
-  overrides do it:
+  of Adam Batori and Robert Pafford (38C3, see
+  [RF core notes](rf-core-notes.md#credits)); the debugger reads the modem
+  registers (`0x40045000`) while the RF core runs. Two NESB values on top of
+  the wBMS overrides do it:
 
   | Override | Value | Without it |
   |---|---|---|
@@ -148,14 +150,14 @@ Results (`losses.py nrf nrf2m --cc-extra "preset nrf2mble"`, `esb.py --rate
 
 | Test | LaunchPad | MPM v2 |
 |---|---|---|
-| NRF -> CC2652, ch 2 / 40 / 80 | 1000/1000 each | 95.8 / 98.8 / 99% (500 each; ch 40 flat over `trim` -200 to +200) |
-| CC2652 -> NRF, ch 40 | 500/500 | 500/500 |
+| NRF -> CC2652, ch 2 / 40 / 80 | 1500/1500 each | 92 to 95.8 / 98.8 to 99.6 / 99 to 99.4% (500 per run; ch 40 flat over `trim` -200 to +200) |
+| CC2652 -> NRF, ch 40 | 1000/1000 | 1000/1000 |
 | ESB, CC2652 PTX, acked on the 1st try | 250/250, no retries | 250/250, 7 retries |
-| ESB ack payloads (4 and 31 bytes) | 250/250 | 250/250 |
+| ESB ack payloads (4, 31 and 32 bytes) | 250/250 | 250/250 |
 
-CC2652 -> NRF at ch 40 got 500/500 on this PHY (500 kHz deviation), where the
-proprietary PHY (320 kHz) loses 2 to 3% there ([above](#2-mbps-cc2652---nrf)):
-a single run each, to be confirmed. The proprietary setups ran unchanged after
+CC2652 -> NRF at ch 40 got 1000/1000 on this PHY (500 kHz deviation) from
+each board, where the proprietary PHY (320 kHz) loses 2 to 3% there
+([above](#2-mbps-cc2652---nrf)): to be confirmed with interleaved runs. The proprietary setups ran unchanged after
 this (`suite_cc2500.py`, `suite_a7105.py`, NRF 250 kbps and 1 Mbps, ESB 1
 Mbps). Not measured: the sensitivity of either PHY (no attenuator).
 

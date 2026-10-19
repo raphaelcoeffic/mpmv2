@@ -144,7 +144,7 @@ chips' crystals and stay needed, as the MPM `option` is today.
   RFE (`0x40046000`) registers while the RF core runs, the Beyond BLE tools
   (38C3) name the modem registers by offset, and the CC27xx headers and PHY
   files of TI's LPF3 SDK give the fields and TI's values for the same modem
-  IP (used for 2 Mbps RX).
+  IP (used for 2 Mbps RX). Collected in [rf-core-notes.md](rf-core-notes.md).
 
 ### 5. Not evaluated yet
 

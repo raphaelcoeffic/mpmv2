@@ -41,8 +41,11 @@ static const uint32_t _base_overrides[] = {
 };
 #define BASE_OVERRIDES (sizeof(_base_overrides) / sizeof(_base_overrides[0]))
 
-// Base + anti-aliasing filter + sync threshold + HPOSC + end marker
-static uint32_t _overrides[BASE_OVERRIDES + 4];
+static uint32_t _extra_overrides[RADIO_EXTRA_OVERRIDES];
+static uint8_t _n_extra_overrides;
+
+// Base + anti-aliasing filter + sync threshold + HPOSC + extra + end marker
+static uint32_t _overrides[BASE_OVERRIDES + 4 + RADIO_EXTRA_OVERRIDES];
 
 // Bluetooth LE 2M PHY under the proprietary packet commands, as TI's wBMS
 // setting (cc2652r_ble_pg21, setting_wbms_2m: CMD_BLE5_RADIO_SETUP, then
@@ -76,6 +79,12 @@ static const uint32_t _ble_base_overrides[] = {
     0x0007DD44,
     // Bluetooth 5: Set enhanced TX shape
     0x000D8C73,
+    // Packet format byte of the CPE parameters (index 0x10, next to the CRC
+    // length of TI's wBMS overrides): 0x04 = MSB first, no whitening, as the
+    // proprietary setup with bMsbFirst. The Bluetooth setup leaves 0x01: LSB
+    // first, whitened with the Bluetooth LFSR seeded 0x65 (measured; 0x07 with
+    // the proprietary PN9 whitening)
+    0x00048103,
 };
 #define BLE_BASE_OVERRIDES (sizeof(_ble_base_overrides) / sizeof(_ble_base_overrides[0]))
 
@@ -101,10 +110,10 @@ static uint32_t _ble_2m_overrides[] = {
     0xFFFFFFFF,
 };
 
-// Base + sync threshold + HPOSC + end marker. The lists are in RAM and all
+// Base + sync threshold + HPOSC + extra + end marker. The lists are in RAM and all
 // four are given, as TI's settings (a const list in flash and NULL lists got
 // BLE_ERROR_PAR)
-static uint32_t _ble_overrides[BLE_BASE_OVERRIDES + 3];
+static uint32_t _ble_overrides[BLE_BASE_OVERRIDES + 3 + RADIO_EXTRA_OVERRIDES];
 static uint32_t _ble_no_overrides[] = {0xFFFFFFFF};
 
 // HPOSC (BAW oscillator of the CC2652RB): the RF core is told the HF clock
@@ -118,50 +127,6 @@ static uint32_t _hposc_check;
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_BLE5_RADIO_SETUP_t _ble_setup;
 static bool _ble;  // _ble_setup: Bluetooth LE 2M PHY
-
-// The Bluetooth LE PHY sends the sync word and each byte LSB first (measured:
-// NRF24L01 packets are received with the sync word reversed on 32 bits and
-// every byte reversed): the bits are reversed here, the caller stays MSB first.
-// It also whitens the packet after the sync word with the Bluetooth LFSR
-// (x^7 + x^4 + 1) seeded 0x65 (advertising channel 37), on every channel
-// (measured): undone here. Packets of up to 255 bytes
-#define BLE_MAX_PKT_LEN 255
-#define BLE_WHITE_SEED 0x65
-static uint8_t _ble_tx_buf[BLE_MAX_PKT_LEN];
-static uint8_t _ble_white[BLE_MAX_PKT_LEN];  // air order: bit 0 first
-
-static void _init_ble_white()
-{
-  uint8_t lfsr = BLE_WHITE_SEED;  // bit 6 = position 0
-  for (int i = 0; i < BLE_MAX_PKT_LEN; i++) {
-    uint8_t b = 0;
-    for (int bit = 0; bit < 8; bit++) {
-      uint8_t out = lfsr & 1;  // position 6
-      lfsr >>= 1;
-      if (out) lfsr ^= 0x44;   // into position 0, and position 4
-      b |= out << bit;
-    }
-    _ble_white[i] = b;
-  }
-}
-
-static inline uint32_t _rbit(uint32_t x)
-{
-  __asm__("rbit %0, %1" : "=r"(x) : "r"(x));
-  return x;
-}
-
-// Packet bytes between the caller (MSB first) and the Bluetooth LE PHY
-static void _ble_bytes(uint8_t* dst, const uint8_t* src, uint16_t len, bool to_air)
-{
-  for (uint16_t i = 0; i < len; i++) {
-    uint8_t b = to_air ? src[i] : src[i] ^ _ble_white[i];
-    b = _rbit(b) >> 24;
-    dst[i] = to_air ? b ^ _ble_white[i] : b;
-  }
-}
-
-static uint32_t _air_sync(uint32_t sync) { return _ble ? _rbit(sync) : sync; }
 
 static rfc_CMD_FS_t _fs;
 static rfc_CMD_PROP_TX_t _tx;
@@ -360,6 +325,7 @@ static void _init_setup(const radio_phy_t* phy)
     _hposc_offset = _hposc_get_offset();
     _overrides[n++] = HPOSC_OVERRIDE((uint32_t)(uint16_t)_hposc_offset);
   }
+  for (uint8_t i = 0; i < _n_extra_overrides; i++) _overrides[n++] = _extra_overrides[i];
   _overrides[n] = 0xFFFFFFFF;
   _setup.pRegOverride = _overrides;
 }
@@ -383,6 +349,9 @@ static void _init_ble_setup(const radio_phy_t* phy)
     _hposc_offset = _hposc_get_offset();
     _ble_overrides[n++] = HPOSC_OVERRIDE((uint32_t)(uint16_t)_hposc_offset);
   }
+  // The common list comes before the 2 Mbps one: the extra words can't change
+  // what the latter sets
+  for (uint8_t i = 0; i < _n_extra_overrides; i++) _ble_overrides[n++] = _extra_overrides[i];
   _ble_overrides[n] = 0xFFFFFFFF;
   _ble_setup.pRegOverrideCommon = _ble_overrides;
   _ble_setup.pRegOverride1Mbps = _ble_no_overrides;
@@ -417,7 +386,6 @@ radio_status_t radio_init(const radio_phy_t* phy)
   if (st != RADIO_OK) return st;
 
   if (_ble) {
-    _init_ble_white();
     _init_ble_setup(phy);
     st = _run_op((rfc_radioOp_t*)&_ble_setup);
   } else {
@@ -455,10 +423,6 @@ void radio_set_rx_sync_alt(uint32_t rx_sync) { _rx_sync_alt = rx_sync; }
 
 static void _init_tx(const uint8_t* data, uint16_t len)
 {
-  if (_ble) {
-    _ble_bytes(_ble_tx_buf, data, len, true);
-    data = _ble_tx_buf;
-  }
   if (len > 255 || _ble) {
     memset(&_tx_adv, 0, sizeof(_tx_adv));
     _tx_adv.commandNo = CMD_PROP_TX_ADV;
@@ -466,7 +430,7 @@ static void _init_tx(const uint8_t* data, uint16_t len)
     _tx_adv.condition.rule = COND_NEVER;
     _tx_adv.pktLen = len;
     _tx_adv.preTrigger.triggerType = TRIG_NOW;  // one preamble, as configured
-    _tx_adv.syncWord = _air_sync(_tx_sync);
+    _tx_adv.syncWord = _tx_sync;
     _tx_adv.pPkt = (uint8_t*)data;
     _tx_op = (rfc_radioOp_t*)&_tx_adv;
     return;
@@ -478,7 +442,7 @@ static void _init_tx(const uint8_t* data, uint16_t len)
   _tx.pktConf.bUseCrc = 0;
   _tx.pktConf.bVarLen = 0;
   _tx.pktLen = len;
-  _tx.syncWord = _air_sync(_tx_sync);
+  _tx.syncWord = _tx_sync;
   _tx.pPkt = (uint8_t*)data;
   _tx_op = (rfc_radioOp_t*)&_tx;
 }
@@ -486,7 +450,7 @@ static void _init_tx(const uint8_t* data, uint16_t len)
 radio_status_t radio_send(const uint8_t* data, uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > (_ble ? BLE_MAX_PKT_LEN : RADIO_MAX_PKT_LEN)) return RADIO_ERR_PARAM;
+  if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_tx(data, len);
@@ -525,8 +489,8 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
     _rx_adv.pktConf.bRepeatNok = repeat;
     _rx_adv.rxConf.bAutoFlushIgnored = 1;
     _rx_adv.rxConf.bAppendRssi = 1;
-    _rx_adv.syncWord0 = _air_sync(sync_word);
-    _rx_adv.syncWord1 = sync_alt ? _air_sync(sync_alt) : 0;
+    _rx_adv.syncWord0 = sync_word;
+    _rx_adv.syncWord1 = sync_alt;
     _rx_adv.maxPktLen = len;
     _rx_adv.endTrigger.triggerType = TRIG_NEVER;
     _rx_adv.pQueue = &_rx_queue;
@@ -555,7 +519,7 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
 radio_status_t radio_rx_start(uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > (_ble ? BLE_MAX_PKT_LEN : RADIO_MAX_PKT_LEN)) return RADIO_ERR_PARAM;
+  if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_rx(_rx_sync, _rx_sync_alt, len, true);
@@ -639,8 +603,7 @@ bool radio_receive(radio_packet_t* pkt)
 
   uint8_t* data = &e->data;
   pkt->len = _rx_len;
-  if (_ble) _ble_bytes(pkt->data, data, _rx_len, false);
-  else memcpy(pkt->data, data, _rx_len);
+  memcpy(pkt->data, data, _rx_len);
   pkt->rssi = (int8_t)data[_rx_len];
   pkt->timestamp_us = micros();
 
@@ -654,6 +617,13 @@ void radio_rx_stats(radio_rx_stats_t* stats)
   stats->ok = _rx_out.nRxOk;
   stats->nok = _rx_out.nRxNok;
   stats->buf_full = _rx_out.nRxBufFull;
+}
+
+void radio_set_extra_overrides(const uint32_t* words, uint8_t n)
+{
+  if (n > RADIO_EXTRA_OVERRIDES) n = RADIO_EXTRA_OVERRIDES;
+  memcpy(_extra_overrides, words, n * sizeof(uint32_t));
+  _n_extra_overrides = n;
 }
 
 uint16_t radio_last_status() { return _last_status; }

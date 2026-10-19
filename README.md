@@ -10,6 +10,13 @@ Radio work so far, see `docs/`:
 - [docs/interop-results.md](docs/interop-results.md): over-the-air results against the CC2500, NRF24L01, A7105 and CYRF6936 of a 4-in-1 module
 - [docs/hardware.md](docs/hardware.md): the MPM v2 board: pins, RF chain, radio bay, changes for the next revision
 - [docs/bench.md](docs/bench.md): the test rig (bench firmwares, host tools in `tools/bench`, unit tests in `tests/frame`)
+- [docs/rf-core-notes.md](docs/rf-core-notes.md): what was found inside the CC2652 RF core (modem registers, CPE parameters)
+
+Credits: the RF core work builds on the 38C3 talk "Beyond BLE: Cracking open
+the black-box of RF microcontrollers" by Adam Batori and Robert Pafford
+([talk](https://events.ccc.de/congress/2024/hub/en/event/beyond-ble-cracking-open-the-black-box-of-rf-microcontrollers/),
+[tools](https://github.com/rjp5th/beyond-ble-tools)): thanks for the ideas
+and the inspiration.
 
 Radio bench build (LaunchPad, `src/bench.c` command shell on UART0 at 921600
 baud instead of the MPM):

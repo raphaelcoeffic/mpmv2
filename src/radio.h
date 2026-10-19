@@ -88,6 +88,11 @@ void radio_rx_stats(radio_rx_stats_t* stats);
 // Returns true and fills pkt if a packet has been received
 bool radio_receive(radio_packet_t* pkt);
 
+// Extra RF core override words (HW_REG_OVERRIDE() etc.), appended to the
+// setup overrides of the next radio_init(): register experiments. n <= 8
+#define RADIO_EXTRA_OVERRIDES 8
+void radio_set_extra_overrides(const uint32_t* words, uint8_t n);
+
 // Last RF core command status, for diagnostics
 uint16_t radio_last_status();
 

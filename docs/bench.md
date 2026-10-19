@@ -258,7 +258,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | Command | Description |
 |---|---|
 | `chip <cc2652\|sx1281> [dbm]` | Radio for the PHY (applied at once and kept): the RF core, or the MPM v2's SX1281 (GFSK 125 kbps to 2 Mbps, rates within 1%, nearest modulation index, TX power in dBm into the PA: default 0, max 2). `info` shows what the SX1281 got, `stop` its counters (`sx_*`). `ack` works with both |
-| `preset <nrf1m\|nrf2m\|nrf2mble\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation). `nrf2mble`: 2 Mbps on the RF core's Bluetooth LE 2M PHY (500 kHz deviation in TX), which receives 2 Mbps, unlike `nrf2m`; 32 bit sync word, packets up to 255 bytes |
+| `preset <nrf1m\|nrf2m\|nrf2mble\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation). `nrf2mble`: 2 Mbps on the RF core's Bluetooth LE 2M PHY (500 kHz deviation in TX), which receives 2 Mbps, unlike `nrf2m`; 32 bit sync word (not tried above 255 byte packets) |
 | `preset <name>` | CC2500 PHYs of the MPM protocols, with their channel plan and `cc2500` framing: same `ch` numbers as `CHANNR`. `frskyd`, `frskyv`, `frskyx`, `frskyx2`, `frskyxeu`, `frskyx2eu`, `hott`, `hitec`, `redpine`, `redpineslow`, `skyartec`, `corona`, `coronav2`, `fdv3`, `ares`, `radiolink`, `ikea`, `sfhss`. Sync words from the ID (Hitec, Skyartec data packets, RadioLink variants): `cc2500` after the preset |
 | `preset <flysky\|afhds2a\|hubsan\|bugs\|height\|pelikan\|kyosho\|kyoshohype\|wfly2\|joysway>` | A7105 PHYs with their `a7105` framing and channel plan (2400 MHz + `ch` x 500 kHz, `ch` = `PLL_I`) |
 | `preset <dsm\|dsmbind\|devo>` | CYRF6936 PHY (1 Mchip/s GFSK, 250 kHz deviation) with the `cyrf` framing and the codes of the MPM presets (`devo`: `examples/devo.txt`), channel plan 2401 MHz + `ch` x 1 MHz |
@@ -266,6 +266,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `preset frskyl` | FrSky L: 125 kbaud 2-FSK, 47.5 kHz deviation, FrSky channel plan, `frskyl` framing (the 256 byte chip stream, 11 chips per bit), `prefix 4e` for the RX sync word. `rx 17`; the packet CRC is not checked |
 | `phy <rate> <dev_hz> <rx_bw> [preamble_bytes] [if_freq] [fsk]` | Custom PHY. `rx_bw` is the RF core code (85 = 175 kHz, 87 = 265 kHz, 89 = 350 kHz, 94 = 882 kHz, 97 = 1399 kHz, 100 = 2458 kHz). `fsk=1`: 2-FSK instead of 2-GFSK |
 | `pwr <word>` | RF core TX power word, used by the next `preset`/`phy` (default `RF_TX_POWER_DEFAULT` in `board.h`: `0x7217` = +5 dBm on the LaunchPad, `0x2853` = 0 dBm on MPM v2, in front of a 22 dB PA whose input is +5 dBm max) |
+| `ovr [word...]` | Up to 8 raw RF core override words (`HW_REG_OVERRIDE()` etc., see [rf-core-notes.md](rf-core-notes.md)) appended to the setup of both PHYs, applied at once and kept; `ovr` alone clears them |
 | `syncthr <n>` | Sync word correlation threshold (RF core register 0x5114), `0` = auto: TI default 0x1F, 0x32 when the RX sync word is weak. Applies at once |
 | `sync <hex>` | Raw framing, 1 to 4 byte sync word |
 | `nrf <addr> [crc_bytes] [sync_bytes]` | NRF24L01 framing (EN_AA=0, static payload): address in `TX_ADDR` order, CRC computed in software |

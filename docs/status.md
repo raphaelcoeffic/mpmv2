@@ -172,9 +172,8 @@ packets 102.4 ms apart.
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
   CC2652).
 - **2 Mbps RX.** Done on the CC2652's Bluetooth LE 2M PHY. Open: its
-  sensitivity against the proprietary PHY, a register to turn the whitening off
-  (undone in software now), and whether the 500 kHz deviation in TX helps the
-  NRF at ch 30 to 41 (one run: 500/500).
+  sensitivity against the proprietary PHY, and whether the 500 kHz deviation
+  in TX helps the NRF at ch 30 to 41 (two runs: 1000/1000).
 - **TX power and the front end.** The MPM v2 board has an external PA/LNA
   (SKY66112, about +20 dBm). Output power, harmonics and the LNA's effect on
   sensitivity and blocking are not measured (no RF equipment yet).

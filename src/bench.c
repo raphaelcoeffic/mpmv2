@@ -42,6 +42,8 @@
 //                                default: RF_TX_POWER_DEFAULT (board.h)
 //   syncthr <n>                  sync correlation threshold, 0 = auto: default
 //                                (0x1F), strict (0x32) for weak RX sync words
+//   ovr [word...]                up to 8 raw RF core override words added to
+//                                the setup (register experiments), none = clear
 //   sync <hex>                   raw framing: sync word, 1 to 4 bytes
 //   nrf <addr> [crc_bytes] [sync_bytes]  NRF24L01 framing, addr as written to
 //                                TX_ADDR (LSByte first), 3 to 5 bytes, crc 0..2
@@ -831,6 +833,21 @@ static void _cmd_syncthr(char* args)
   _printf("@ok syncthr=0x%02x\r\n", _sync_threshold);
 }
 
+// Extra RF core override words, applied at once and kept until "ovr" alone
+static void _cmd_ovr(char* args)
+{
+  uint32_t words[RADIO_EXTRA_OVERRIDES];
+  uint8_t n = 0;
+  while (n < RADIO_EXTRA_OVERRIDES && _number(&args, &words[n])) n++;
+  radio_set_extra_overrides(words, n);
+  _job_stop();
+  if (_phy_ok && !_apply_phy()) {
+    _report_radio_error("radio init");
+    return;
+  }
+  _printf("@ok ovr=%u\r\n", n);
+}
+
 static void _cmd_pwr(char* args)
 {
   uint32_t pwr;
@@ -1336,6 +1353,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "phy")) _cmd_phy(args);
   else if (!strcmp(cmd, "pwr")) _cmd_pwr(args);
   else if (!strcmp(cmd, "syncthr")) _cmd_syncthr(args);
+  else if (!strcmp(cmd, "ovr")) _cmd_ovr(args);
   else if (!strcmp(cmd, "sync")) _cmd_sync(args);
   else if (!strcmp(cmd, "nrf")) _cmd_nrf(args);
   else if (!strcmp(cmd, "xn")) _cmd_xn(args);
