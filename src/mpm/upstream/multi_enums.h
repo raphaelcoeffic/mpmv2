@@ -1,0 +1,510 @@
+// Protocol numbers and sub protocols of the MULTI-Module: Multiprotocol.h
+// (DIY-Multiprotocol-TX-Module v1.3.4.74, GPL v3), unchanged
+#pragma once
+
+//******************
+// Protocols
+//******************
+enum PROTOCOLS
+{
+	PROTO_PROTOLIST	= 0,	// NO RF
+	PROTO_FLYSKY 	= 1,	// =>A7105
+	PROTO_HUBSAN	= 2,	// =>A7105
+	PROTO_FRSKYD	= 3,	// =>CC2500
+	PROTO_HISKY		= 4,	// =>NRF24L01
+	PROTO_V2X2		= 5,	// =>NRF24L01
+	PROTO_DSM		= 6,	// =>CYRF6936
+	PROTO_DEVO		= 7,	// =>CYRF6936
+	PROTO_YD717		= 8,	// =>NRF24L01
+	PROTO_KN		= 9,	// =>NRF24L01
+	PROTO_SYMAX		= 10,	// =>NRF24L01
+	PROTO_SLT		= 11,	// =>NRF24L01
+	PROTO_CX10		= 12,	// =>NRF24L01
+	PROTO_CG023		= 13,	// =>NRF24L01
+	PROTO_BAYANG	= 14,	// =>NRF24L01
+	PROTO_FRSKYX	= 15,	// =>CC2500
+	PROTO_ESKY		= 16,	// =>NRF24L01
+	PROTO_MT99XX	= 17,	// =>NRF24L01
+	PROTO_MJXQ		= 18,	// =>NRF24L01
+	PROTO_SHENQI	= 19,	// =>NRF24L01
+	PROTO_FY326		= 20,	// =>NRF24L01
+	PROTO_FUTABA	= 21,	// =>CC2500
+	PROTO_J6PRO		= 22,	// =>CYRF6936
+	PROTO_FQ777		= 23,	// =>NRF24L01
+	PROTO_ASSAN		= 24,	// =>NRF24L01
+	PROTO_FRSKYV	= 25,	// =>CC2500
+	PROTO_HONTAI	= 26,	// =>NRF24L01
+	PROTO_OPENLRS	= 27,	// =>OpenLRS hardware
+	PROTO_AFHDS2A	= 28,	// =>A7105
+	PROTO_Q2X2		= 29,	// =>NRF24L01, extension of CX-10 protocol
+	PROTO_WK2x01	= 30,	// =>CYRF6936
+	PROTO_Q303		= 31,	// =>NRF24L01
+	PROTO_GW008		= 32,	// =>NRF24L01
+	PROTO_DM002		= 33,	// =>NRF24L01
+	PROTO_CABELL	= 34,	// =>NRF24L01
+	PROTO_ESKY150	= 35,	// =>NRF24L01
+	PROTO_H8_3D		= 36,	// =>NRF24L01
+	PROTO_CORONA	= 37,	// =>CC2500
+	PROTO_CFLIE     = 38,   // =>NRF24L01
+	PROTO_HITEC     = 39,   // =>CC2500
+	PROTO_WFLY		= 40,	// =>CYRF6936
+	PROTO_BUGS		= 41,	// =>A7105
+	PROTO_BUGSMINI	= 42,	// =>NRF24L01
+	PROTO_TRAXXAS	= 43,	// =>CYRF6936
+	PROTO_NCC1701	= 44,	// =>NRF24L01
+	PROTO_E01X		= 45,	// =>CYRF6936
+	PROTO_V911S		= 46,	// =>NRF24L01
+	PROTO_GD00X		= 47,	// =>CC2500 & NRF24L01
+	PROTO_V761		= 48,	// =>NRF24L01
+	PROTO_KF606		= 49,	// =>NRF24L01
+	PROTO_REDPINE	= 50,	// =>CC2500
+	PROTO_POTENSIC	= 51,	// =>NRF24L01
+	PROTO_ZSX		= 52,	// =>NRF24L01
+	PROTO_HEIGHT	= 53,	// =>A7105
+	PROTO_SCANNER	= 54,	// =>CC2500
+	PROTO_FRSKY_RX	= 55,	// =>CC2500
+	PROTO_AFHDS2A_RX= 56,	// =>A7105
+	PROTO_HOTT		= 57,	// =>CC2500
+	PROTO_FX		= 58,	// =>NRF24L01
+	PROTO_BAYANG_RX	= 59,	// =>NRF24L01
+	PROTO_PELIKAN	= 60,	// =>A7105
+	PROTO_EAZYRC	= 61,	// =>NRF24L01
+	PROTO_XK		= 62,	// =>NRF24L01
+	PROTO_XN297DUMP	= 63,	// =>NRF24L01
+	PROTO_FRSKYX2	= 64,	// =>CC2500
+	PROTO_FRSKY_R9	= 65,	// =>SX1276
+	PROTO_PROPEL	= 66,	// =>NRF24L01
+	PROTO_FRSKYL	= 67,	// =>CC2500
+	PROTO_SKYARTEC	= 68,	// =>CC2500
+	PROTO_ESKY150V2	= 69,	// =>CC2500+NRF24L01
+	PROTO_DSM_RX	= 70,	// =>CYRF6936
+	PROTO_JJRC345	= 71,	// =>NRF24L01
+	PROTO_Q90C		= 72,	// =>NRF24L01 or CC2500
+	PROTO_KYOSHO	= 73,	// =>A7105
+	PROTO_RLINK		= 74,	// =>CC2500
+	PROTO_REALACC	= 76,	// =>NRF24L01
+	PROTO_OMP		= 77,	// =>CC2500 & NRF24L01
+	PROTO_MLINK		= 78,	// =>CYRF6936
+	PROTO_WFLY2		= 79,	// =>A7105
+	PROTO_E016HV2	= 80,	// =>CC2500 & NRF24L01
+	PROTO_E010R5	= 81,	// =>CYRF6936
+	PROTO_LOLI		= 82,	// =>NRF24L01
+	PROTO_E129		= 83,	// =>CYRF6936
+	PROTO_JOYSWAY	= 84,	// =>A7105
+	PROTO_E016H		= 85,	// =>NRF24L01
+	PROTO_CONFIG	= 86,	// Module config
+	PROTO_IKEAANSLUTA = 87, // =>CC2500
+	PROTO_WILLIFM	= 88,	// 27/35ab/40/41/72 MHz module external project
+	PROTO_LOSI		= 89,	// =>CYRF6936
+	PROTO_MOULDKG	= 90,	// =>NRF24L01
+	PROTO_XERALL	= 91,	// =>NRF24L01
+	PROTO_MT99XX2	= 92,	// =>NRF24L01, extension of MT99XX protocol
+	PROTO_KYOSHO2	= 93,	// =>NRF24L01
+	PROTO_SCORPIO	= 94,	// =>CYRF6936
+	PROTO_BLUEFLY	= 95,	// =>CC2500 & NRF24L01
+	PROTO_BUMBLEB	= 96,	// =>CC2500 & NRF24L01
+	PROTO_SGF22		= 97,	// =>NRF24L01
+	PROTO_KYOSHO3	= 98,	// =>CYRF6936
+	PROTO_XK2		= 99,	// =>CC2500 & NRF24L01
+	PROTO_YUXIANG	= 100,	// =>NRF24L01
+	PROTO_UDIRC		= 101,	// =>CC2500 & NRF24L01
+	PROTO_JIABAILE	= 102,	// =>NRF24L01
+	PROTO_H36		= 103,	// =>NRF24L01
+	PROTO_KAMTOM	= 104,	// =>NRF24L01
+	PROTO_SHENQI2	= 105,	// =>NRF24L01
+	PROTO_WL91X		= 106,	// =>CC2500 & NRF24L01
+	PROTO_WPL		= 107,	// =>NRF24L01
+	PROTO_ARES		= 108,	// =>CC2500
+	PROTO_MOFLY		= 109,	// =>CC2500 & NRF24L01
+	
+	PROTO_NANORF	= 126,	// =>NRF24L01
+	PROTO_TEST		= 127,	// =>CC2500
+};
+
+enum Flysky
+{
+	Flysky	= 0,
+	V9X9	= 1,
+	V6X6	= 2,
+	V912	= 3,
+	CX20	= 4,
+};
+enum Height
+{
+	FZ410	= 0,
+};
+enum Hubsan
+{
+	H107	= 0,
+	H301	= 1,
+	H501	= 2,
+};
+enum AFHDS2A
+{
+	PWM_IBUS			= 0,
+	PPM_IBUS			= 1,
+	PWM_SBUS			= 2,
+	PPM_SBUS			= 3,
+	AFHDS2A_GYRO_OFF	= 4,
+	AFHDS2A_GYRO_ON		= 5,
+	AFHDS2A_GYRO_ON_REV	= 6,
+};
+enum Hisky
+{
+	Hisky	= 0,
+	HK310	= 1,
+};
+enum DSM
+{
+	DSM2_1F		= 0,
+	DSM2_2F		= 1,
+	DSMX_1F		= 2,
+	DSMX_2F		= 3,
+	DSM_AUTO	= 4,
+	DSMR		= 5,
+	DSM2_SFC	= 6,
+};
+enum DSM_RX
+{
+	DSM_RX		= 0,
+	DSM_CLONE	= 1,
+	DSM_ERASE	= 2,
+};
+enum YD717
+{       			
+	YD717	= 0,
+	SKYWLKR	= 1,
+	SYMAX4	= 2,
+	XINXUN	= 3,
+	NIHUI	= 4,
+};
+enum KN
+{
+	WLTOYS	= 0,
+	FEILUN	= 1,
+};
+enum SYMAX
+{
+	SYMAX	= 0,
+	SYMAX5C	= 1,
+};
+enum SLT
+{
+	SLT_V1		= 0,
+	SLT_V2		= 1,
+	Q100		= 2,
+	Q200		= 3,
+	MR100		= 4,
+	SLT_V1_4	= 5,
+	RF_SIM		= 6,
+	SLT6TX		= 7,
+};
+enum CX10
+{
+	CX10_GREEN	= 0,
+	CX10_BLUE	= 1,	// also compatible with CX10-A, CX12
+	DM007		= 2,
+	JC3015_1	= 4,
+	JC3015_2	= 5,
+	MK33041		= 6,
+};
+enum Q2X2
+{
+	Q222		= 0,
+	Q242		= 1,
+	Q282		= 2,
+	F_Q222		= 8,
+	F_Q242		= 9,
+	F_Q282		= 10,
+};
+enum CG023
+{
+    CG023	= 0,
+    YD829	= 1,
+};
+enum BAYANG
+{
+    BAYANG	= 0,
+    H8S3D	= 1,
+    X16_AH  = 2,
+	IRDRONE = 3,
+	DHD_D4	= 4,
+	QX100   = 5,
+};
+enum MT99XX
+{
+	MT99	= 0,
+	H7		= 1,
+	YZ		= 2,
+	LS		= 3,
+	FY805	= 4,
+	A180	= 5,
+	DRAGON	= 6,
+	F949G	= 7,
+};
+enum MT99XX2
+{
+	PA18	= 0,  
+	SU35	= 1,
+};
+enum MJXQ
+{
+	WLH08	= 0,
+	X600	= 1,
+	X800	= 2,
+	H26D	= 3,
+	E010	= 4,
+	H26WH	= 5,
+	PHOENIX = 6,
+};
+enum FRSKYD
+{
+	FRSKYD	= 0,
+	DCLONE	= 1,
+};
+enum FRSKYX
+{
+	CH_16		= 0,
+	CH_8		= 1,
+	EU_16		= 2,
+	EU_8		= 3,
+	XCLONE_16	= 4,
+	XCLONE_8	= 5,
+};
+enum HONTAI
+{
+	HONTAI			= 0,
+	JJRCX1			= 1,
+	X5C1			= 2,
+	FQ777_951		= 3,
+	HONTAI_XKK170	= 4,
+};
+enum V2X2
+{
+	V2X2	= 0,
+	JXD506	= 1,
+	V2X2_MR101 = 2,
+};
+enum FY326
+{
+	FY326	= 0,
+	FY319	= 1,
+};
+enum WK2x01
+{
+	WK2801	= 0,
+	WK2401	= 1,
+	W6_5_1	= 2,
+	W6_6_1	= 3,
+	W6_HEL	= 4,
+	W6_HEL_I= 5,
+};
+enum Q303
+{
+	Q303	= 0,
+	CX35	= 1,
+	CX10D	= 2,
+	CX10WD	= 3,
+};
+enum CABELL
+{
+	CABELL_V3			= 0,
+	CABELL_V3_TELEMETRY	= 1,
+	CABELL_SET_FAIL_SAFE= 6,
+	CABELL_UNBIND		= 7,
+};
+enum H8_3D
+{
+	H8_3D	= 0,
+	H20H	= 1,
+	H20MINI	= 2,
+	H30MINI	= 3,
+};
+enum CORONA
+{
+	COR_V1	= 0,
+	COR_V2	= 1,
+	FD_V3	= 2,
+};
+enum HITEC
+{
+	OPT_FW	= 0,
+	OPT_HUB	= 1,
+	MINIMA	= 2,
+};
+enum E01X
+{
+	E012	= 0,
+	E015	= 1,
+	E016H	= 2,
+};
+enum GD00X
+{
+	GD_V1	= 0,
+	GD_V2	= 1,
+};
+enum BUGSMINI
+{
+	BUGSMINI= 0,
+	BUGS3H	= 1,
+};
+enum REDPINE
+{
+	RED_FAST= 0,
+	RED_SLOW= 1,
+};
+enum TRAXXAS
+{
+	TRAXXAS_TQ2	= 0,
+	TRAXXAS_TQ1	= 1,
+};
+enum ESKY150
+{
+	ESKY150_4CH	= 0,
+	ESKY150_7CH	= 1,
+};
+enum V911S
+{
+	V911S_STD	= 0,
+	V911S_E119	= 1,
+};
+enum XK
+{
+	X450	= 0,
+	X420	= 1,
+	XK_CARS	= 2,
+};
+enum XN297DUMP
+{
+	XN297DUMP_250K	= 0,
+	XN297DUMP_1M	= 1,
+	XN297DUMP_2M	= 2,
+	XN297DUMP_AUTO	= 3,
+	XN297DUMP_NRF	= 4,
+	XN297DUMP_CC2500	= 5,
+	XN297DUMP_XN297	= 6,
+};
+enum FRSKY_R9
+{
+	R9_915		= 0,
+	R9_868		= 1,
+	R9_915_8CH	= 2,
+	R9_868_8CH	= 3,
+	R9_FCC		= 4,
+	R9_EU		= 5,
+	R9_FCC_8CH	= 6,
+	R9_EU_8CH	= 7,
+};
+enum ESKY
+{
+	ESKY_STD	= 0,
+	ESKY_ET4	= 1,
+};
+enum FQ777
+{
+	FQ777	= 0,
+	XBM37	= 1,
+};
+enum FRSKY_RX
+{
+	FRSKY_RX	= 0,
+	FRSKY_CLONE	= 1,
+	FRSKY_ERASE	= 2,
+	FRSKY_CPPM  = 3,
+};
+enum FRSKYL
+{
+	LR12		= 0,
+	LR12_6CH	= 1,
+};
+enum HOTT
+{
+	HOTT_SYNC	= 0,
+	HOTT_NO_SYNC= 1,
+};
+enum PELIKAN
+{
+	PELIKAN_PRO	= 0,
+	PELIKAN_LITE= 1,
+	PELIKAN_SCX24=2,
+};
+enum V761
+{
+	V761_3CH	= 0,
+	V761_4CH	= 1,
+	V761_TOPRC	= 2,
+};
+enum HEIGHT
+{
+	HEIGHT_5CH	= 0,
+	HEIGHT_8CH	= 1,
+};
+enum KYOSHO
+{
+	KYOSHO_FHSS	= 0,
+	KYOSHO_HYPE	= 1,
+};
+enum JJRC345
+{
+	JJRC345		= 0,
+	SKYTMBLR	= 1,
+};
+enum RLINK
+{
+	RLINK_SURFACE	= 0,
+	RLINK_AIR		= 1,
+	RLINK_DUMBORC	= 2,
+	RLINK_RC4G		= 3,
+	RLINK_DUMBORC_P	= 4,
+};
+enum REALACC
+{
+	REALACC_R11		= 0,
+	REALACC_WLV8TX	= 1,
+};
+enum MOULDKG
+{
+	MOULDKG_ANALOG4	= 0,
+	MOULDKG_DIGIT4	= 1,
+	MOULDKG_ANALOG6	= 2,
+};
+enum KF606
+{
+	KF606_KF606		= 0,
+	KF606_MIG320	= 1,
+	KF606_ZCZ50		= 2,
+};
+enum E129
+{
+	E129_E129		= 0,
+	E129_C186		= 1,
+};
+enum FX
+{
+	FX816			= 0,
+	FX620			= 1,
+    FX9630          = 2,
+	FX_Q560			= 3,
+	FX_QF012		= 4,
+	FX_BM26			= 5,
+	FX_A570			= 6,
+};
+enum SGF22
+{
+	SGF22_F22		= 0,
+	SGF22_F22S		= 1,
+	SGF22_J20 		= 2,
+	SGF22_CX10		= 3,
+	SGF22_T28 		= 4,
+};
+enum JIABAILE
+{
+	JIABAILE_STD	= 0,
+	JIABAILE_GYRO	= 1,
+};
+enum XK2
+{
+	XK2_X4	= 0,
+	XK2_P10	= 1,
+};
+

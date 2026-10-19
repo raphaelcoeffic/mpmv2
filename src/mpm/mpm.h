@@ -33,12 +33,14 @@
 
 #define MPM_PROTO_LIST 0
 
+// As the MPM's mm_protocol_definition (Multi_Protos.ino)
 typedef struct {
   uint8_t id;             // protocol number of the serial link
   const char* name;       // up to 7 characters
+  // Sub protocol names: the length of a name, then n_sub names of that
+  // length (the MPM's STR_SUBTYPE_*). NULL if none
+  const char* sub_names;
   uint8_t n_sub;          // sub protocols, 0 = none
-  uint8_t sub_len;        // length of a sub protocol name
-  const char* sub_names;  // n_sub names of sub_len characters each
   uint8_t option_type;    // mpm_option_type_t
   bool failsafe;          // supports failsafe
   bool ch_map;            // supports disabling the channel mapping
@@ -46,7 +48,7 @@ typedef struct {
   // May reject the sub protocol: mpm_sub_invalid()
   void (*init)();
   // Called again after the returned number of microseconds
-  uint32_t (*callback)();
+  uint16_t (*callback)();
   // The radio clears the bind flag, NULL = mpm_bind_done()
   void (*end_bind)();
 } mpm_protocol_t;
@@ -79,6 +81,9 @@ typedef struct {
   bool bind_in_progress;
   bool input;                // frames from the radio
   bool proto_valid;          // protocol and sub protocol found and started
+  // Option type shown by the radio instead of the protocol's (0..15),
+  // 0xFF = the protocol's. Reset at each protocol start
+  uint8_t option_override;
 } mpm_state_t;
 
 extern mpm_state_t mpm;
@@ -95,5 +100,6 @@ void mpm_run();
 // For protocols
 void mpm_bind_done();
 void mpm_sub_invalid();
+bool mpm_sub_valid();
 // Telemetry frame of the given type: header + data
 void mpm_telem_send(uint8_t type, const uint8_t* data, uint8_t len);

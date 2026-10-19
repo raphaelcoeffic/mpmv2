@@ -12,6 +12,9 @@ set(firmware_sources
     mpm/mpm_port.c
     mpm/protocols.c
     mpm/proto_test.c
+    mpm/upstream/mpm_compat.c
+    mpm/upstream/xn297.c
+    mpm/upstream/Bayang_nrf24l01.c
     nor_flash.c
     ppm.c
     frame.c

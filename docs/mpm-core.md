@@ -14,6 +14,7 @@ is not a drop-in build of the MPM sources: protocols are ported to it.
 | `mpm_port.c` | The board port: UART0 at 100000 baud 8E2 (LaunchPad: XDS110 back channel, MPM v2: USB console) |
 | `protocols.c/h` | The protocol table |
 | `proto_test.c` | Test protocol 127 |
+| `upstream/` | Protocol files of the MPM, and what they need from it ([below](#mpm-protocol-files)) |
 
 ## Behaviour
 
@@ -44,8 +45,56 @@ As the MPM:
 
 Not there yet: PPM input, the module bay (UART1, inverted, `telem_invert`),
 channel order remapping (`disable_ch_map` is decoded only), the telemetry
-buffer level flag, wait-for-bind, the bind button, `option_override`,
-`MULTI_SYNC` (input sync frames).
+buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
+frames), protocol telemetry to the radio (`Telemetry.ino`).
+
+## MPM protocol files
+
+`src/mpm/upstream/`: protocol files of the MPM (v1.3.4.74) compiled as C,
+with one line added (`#include "mpm_compat.h"`).
+
+| File | Content |
+|---|---|
+| `multi_enums.h` | The protocol and sub protocol enums of `Multiprotocol.h`, unchanged |
+| `mpm_config.h` | The protocols built, as `_Config.h` / `Validate.h` |
+| `mpm_compat.h/c` | The globals and helpers of `Multiprotocol.ino`, `Multiprotocol.h`, `TX_Def.h` and `Convert.ino`; the MPM names of the core's state (`Channel_data`, `rx_tx_addr`, `option`, the `IS_*` flags) are macros on `mpm` |
+| `iface_xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames |
+| `Bayang_nrf24l01.c` | Bayang |
+
+The protocol table entries follow the MPM's: sub protocol names with their
+length byte first (`STR_SUBTYPE_*`), the callback returns `uint16_t`, an
+`end_bind` hook (`end_bind_counter()`: what `BIND_DONE` does for the
+protocols that count their bind packets). The core calls
+`mpm_protocol_prepare()` before each protocol's init: what `protocol_init()`
+resets (CRC polynomials, telemetry, `prev_power`). `option_override` (RF
+tune for the XN297 at 250 kbps, as on the CC2500) goes to the status.
+
+The XN297 emulation, as the NRF24L01 in the MPM:
+
+- TX starts at `XN297_WritePayload()`, RX runs from
+  `XN297_SetTxRxMode(RX_EN)` to the next mode change, also across
+  `XN297_RFChannel()`; one packet is kept until read.
+- RX length: the payload, 2 bytes for an enhanced packet control field,
+  the CRC.
+- Channel n: 2400 + n MHz. At 250 kbps the PHY of the CC2500 emulation
+  (127 kHz deviation) and the option as its frequency offset
+  (1.587 kHz a step).
+- Power: the board default when bound, `RF_TX_POWER_LOW` (`0x04C6`, about
+  25 dB lower) for bind and range check. `XN297_HoppingCalib()` does nothing.
+- Weak RX addresses get the stricter sync threshold, as on the bench.
+
+`tools/bench/proto_compare.py` checks a port against the MPM: the LaunchPad
+(MPM core, driven by `radio_sim.py`'s frames) and the 4-in-1 (MPM bench
+firmware, `id` command for the same module id) run the protocol with the
+same channels, the MPM v2 board receives each in the bind phase and after.
+
+| Protocol | Bind | Data |
+|---|---|---|
+| Bayang (sub 0) | same payload, 2000 µs | same payload, 8001 µs |
+
+At bind power (about -59 dBm at the receiver) one or the other loses 0 to
+16% of the bind packets from run to run, in bursts; at full power the port
+loses about 1%. Bayang telemetry (XN297 RX) is not tested yet.
 
 ## Test protocol
 

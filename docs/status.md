@@ -10,9 +10,9 @@ LaunchPad, now on an MPM v2 prototype board (CC2652RB, SKY66112 PA/LNA, see
 Status in October 2026: on the bench, the CC2652 sends and receives the
 on-air format of every MPM protocol of the four chips, against the chips of a
 real 4-in-1 module, from the LaunchPad and from the MPM v2 board, NRF 2 Mbps
-RX included (on the Bluetooth LE 2M PHY). No protocol runs on the CC2652 yet: what exists
-is the radio driver, the framing layer, the MPM v2 board support and the test
-rig.
+RX included (on the Bluetooth LE 2M PHY). The MPM core runs on it, with a
+first MPM protocol (Bayang, through the MPM's XN297 emulation) sending the
+same packets as the real MPM.
 
 ## Done
 
@@ -84,6 +84,10 @@ start and bind, status telemetry and the protocol list EdgeTX reads. A test
 protocol (NRF24L01 every 4 ms) runs on the LaunchPad against a simulated
 radio (`radio_sim.py`): the 4-in-1 receives it with all channels right,
 callback period within ±5 µs while frames and telemetry are processed.
+MPM protocol files compile unchanged but for an include, over the MPM's
+XN297 functions on the CC2652 (`src/mpm/upstream/`): Bayang sends the same
+bind and data packets as the 4-in-1, at the same intervals
+(`proto_compare.py`).
 
 **Results** ([interop-results.md](interop-results.md)):
 

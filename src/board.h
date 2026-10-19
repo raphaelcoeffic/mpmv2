@@ -22,6 +22,8 @@
   //
   // RF core TX power word: +5 dBm (TI table)
   #define RF_TX_POWER_DEFAULT 0x7217
+  // Bind and range check (the NRF24L01's -18 dBm): 25 dB lower
+  #define RF_TX_POWER_LOW     0x04C6
   //
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
@@ -85,6 +87,8 @@
   // is +5 dBm max, -2 dBm recommended, 22 dB gain (+21 dBm out):
   // see doc/SKY66112-11_203225P.pdf
   #define RF_TX_POWER_DEFAULT 0x2853
+  // Bind and range check (the NRF24L01's -18 dBm): about 20 dB lower
+  #define RF_TX_POWER_LOW     0x04C6
   //
   #define BUTTON        IOID_0
   //

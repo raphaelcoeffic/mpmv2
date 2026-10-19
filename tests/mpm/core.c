@@ -61,7 +61,7 @@ static int _inits;
 static int _end_binds;
 
 static void _test_init() { _inits++; }
-static uint32_t _test_callback()
+static uint16_t _test_callback()
 {
   if (_cb_n < 4096) _cb_times[_cb_n] = _us;
   _cb_n++;
@@ -73,10 +73,11 @@ static void _test_end_bind() { _end_binds++; }
 static void _nosub_init() { mpm_sub_invalid(); }
 
 const mpm_protocol_t mpm_protocols[] = {
-  {10, "Alpha", 0, 0, 0, MPM_OPTION_NONE, false, false, _test_init, _test_callback, 0},
-  {127, "Test", 3, 4, "One Two Thr ", MPM_OPTION_RFCHAN, true, true, _test_init, _test_callback,
-   _test_end_bind},
-  {20, "NoSub", 2, 3, "A  B  ", MPM_OPTION_OPTION, false, false, _nosub_init, _test_callback, 0},
+  {10, "Alpha", 0, 0, MPM_OPTION_NONE, false, false, _test_init, _test_callback, 0},
+  {127, "Test", "\x04" "One Two Thr ", 3, MPM_OPTION_RFCHAN, true, true, _test_init,
+   _test_callback, _test_end_bind},
+  {20, "NoSub", "\x03" "A  B  ", 2, MPM_OPTION_OPTION, false, false, _nosub_init,
+   _test_callback, 0},
 };
 const uint8_t mpm_protocol_count = sizeof(mpm_protocols) / sizeof(mpm_protocols[0]);
 

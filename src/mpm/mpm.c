@@ -23,7 +23,7 @@ static uint32_t _module_id;
 // Protocol
 static const mpm_protocol_t* _proto;  // NULL: not in the table
 static bool _sub_valid;
-static uint32_t (*_callback)();       // NULL: no protocol running
+static uint16_t (*_callback)();       // NULL: no protocol running
 static bool _change;                  // protocol to (re)start
 
 // Last frame: protocol change and bind detection
@@ -67,6 +67,8 @@ void mpm_bind_done() { mpm.bind_in_progress = false; }
 
 void mpm_sub_invalid() { _sub_valid = false; }
 
+bool mpm_sub_valid() { return _sub_valid; }
+
 static void _send_status_frame()
 {
   uint8_t d[STATUS_LEN] = {0};
@@ -93,16 +95,19 @@ static void _send_status_frame()
     d[6] = mpm_protocols[i + 1 < mpm_protocol_count ? i + 1 : i].id;
     d[7] = mpm_protocols[i > 0 ? i - 1 : i].id;
     strncpy((char*)d + 8, _proto->name, STATUS_NAME_LEN);
-    d[15] = _proto->n_sub | _proto->option_type << 4;
-    if (_sub_valid && _proto->n_sub)
-      memcpy(d + 16, _proto->sub_names + _proto->sub_len * mpm.sub_protocol,
-             _proto->sub_len < STATUS_SUB_NAME_LEN ? _proto->sub_len : STATUS_SUB_NAME_LEN);
+    uint8_t option_type = mpm.option_override <= 0x0F ? mpm.option_override : _proto->option_type;
+    d[15] = _proto->n_sub | option_type << 4;
+    if (_sub_valid && _proto->n_sub) {
+      uint8_t len = _proto->sub_names[0];
+      memcpy(d + 16, _proto->sub_names + 1 + len * mpm.sub_protocol,
+             len < STATUS_SUB_NAME_LEN ? len : STATUS_SUB_NAME_LEN);
+    }
   }
   mpm_telem_send(MPM_TELEM_STATUS, d, STATUS_LEN);
 }
 
 // Protocol 0: the protocol table for the radio, the entry given by the option
-static uint32_t _proto_list_callback()
+static uint16_t _proto_list_callback()
 {
   uint8_t idx = (uint8_t)mpm.option;
   if (idx == _list_option) return 1000;
@@ -121,9 +126,9 @@ static uint32_t _proto_list_callback()
     d[n++] = p->option_type << 4 | (p->ch_map ? 0x02 : 0) | (p->failsafe ? 0x01 : 0);
     d[n++] = p->n_sub;
     if (p->n_sub) {
-      d[n++] = p->sub_len;
-      memcpy(d + n, p->sub_names, p->n_sub * p->sub_len);
-      n += p->n_sub * p->sub_len;
+      uint8_t len = p->sub_names[0];
+      memcpy(d + n, p->sub_names, 1 + p->n_sub * len);
+      n += 1 + p->n_sub * len;
     }
   }
   mpm_telem_send(MPM_TELEM_PROTO_LIST, d, n);
@@ -140,6 +145,10 @@ static void _update_telem(uint32_t ms)
   }
 }
 
+// Protocol layer hook (upstream/mpm_compat.c): what the MPM's protocol_init()
+// resets before a protocol starts
+__attribute__((weak)) void mpm_protocol_prepare() {}
+
 static void _protocol_init()
 {
   _callback = 0;
@@ -147,6 +156,7 @@ static void _protocol_init()
   _proto = 0;
   _sub_valid = false;
   mpm.failsafe_valid = false;
+  mpm.option_override = 0xFF;
   mpm_port_reset_rf();
 
   mpm.id = _module_id + mpm.rx_num;
@@ -169,7 +179,10 @@ static void _protocol_init()
       if (p->id != mpm.protocol) continue;
       _proto = p;
       _sub_valid = mpm.sub_protocol == 0 || mpm.sub_protocol < p->n_sub;
-      if (_sub_valid) p->init();
+      if (_sub_valid) {
+        mpm_protocol_prepare();
+        p->init();
+      }
       if (_sub_valid) _callback = p->callback;
       break;
     }

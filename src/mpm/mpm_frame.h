@@ -15,7 +15,7 @@
 // Channel values: 11 bits
 #define MPM_CHANNEL_MIN 204     // -100%
 #define MPM_CHANNEL_CENTER 1024
-#define MPM_CHANNEL_MAX 1843    // +100%
+#define MPM_CHANNEL_MAX 1844    // +100%
 // Failsafe values
 #define MPM_FAILSAFE_NO_PULSE 0
 #define MPM_FAILSAFE_HOLD 2047

@@ -28,7 +28,7 @@ import serial
 from mpm_bench import Bench, find_port
 
 FRAME_PERIOD = 0.007
-CH_MIN, CH_CENTER, CH_MAX = 204, 1024, 1843
+CH_MIN, CH_CENTER, CH_MAX = 204, 1024, 1844
 PROTO_TEST = 127
 TEST_ADDR = "32764d504d"  # TX_ADDR order: "MPMv2" on air
 TEST_LEN = 30

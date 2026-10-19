@@ -151,6 +151,7 @@ setup, setups as `;`-separated commands or example files
 | `timing.py` | Bench `timing` per PHY (NRF, FrSky D and X, AFHDS2A, DSM): TX start, hop, turnarounds, RSSI, as a table ([radio-interface.md](radio-interface.md)) |
 | `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
 | `radio_sim.py` | The radio side of the MPM serial link for the firmware without `BENCH` (MPM core): frames every 7 ms at 100000 8E2, status, protocol list scan, bind, test protocol to the 4-in-1 ([mpm-core.md](mpm-core.md)) |
+| `proto_compare.py` | A protocol ported to the MPM core (LaunchPad) against the 4-in-1 running it, same module id and channels: the MPM v2 receives both, bind phase and data, payloads and intervals compared ([mpm-core.md](mpm-core.md#mpm-protocol-files)) |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
 
 ### ESP32-S3 as a third receiver
@@ -230,7 +231,8 @@ Received packets: `@rx <time_us> <channel> <hex> [crc=ok|bad] [...]`.
 | `seq <idx>` | `txp` puts an 8 bit counter at byte `idx` of the packet, `255` = off |
 | `rx [len]` | Receive continuously, see below |
 | `stop` | Stop the current job: `@ok stop tx=<n> rx=<n> err=<n>` |
-| `chan <i> <value>` | Channel value 0..2047 (1024 = center) used by `proto` |
+| `chan <i> <value>` | Channel value 0..2047 (1024 = center) used by `proto` (CH5 to CH12 switches updated too) |
+| `id [value]` | Module id used by `proto` (`MProtocol_id_master`), as the CC2652's to compare a port: `@ok id=<hex>` |
 | `proto <num> [sub] [rxnum] [option] [bind]` | Run a built-in protocol with the normal scheduler, `num` as in `Multiprotocol.h` |
 | `user [hex]` | Run `Bench_user_init()` / `Bench_user_callback()` from `_Bench_User.ino` |
 

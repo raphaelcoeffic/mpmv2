@@ -72,7 +72,7 @@ void TEST_init()
   _bind_count = 0;
 }
 
-uint32_t TEST_callback()
+uint16_t TEST_callback()
 {
   uint32_t now = micros();
   if (mpm.option != _option) {
