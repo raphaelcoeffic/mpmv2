@@ -282,6 +282,16 @@ the MPM reports the bad packets with their data):
   A7105 receives best a little above where it sends. MULTI has the same
   problem with real receivers: `FORCE_<PROTO>_TUNING` in `_Config.h` for
   each A7105 protocol (`A7105_AdjustLOBaseFreq`).
+- AFHDS2A tolerates the offset far better (same day, two rounds): trim 0 /
+  45 / 90 / 135 / 180 kHz gave 93-95 / 98-99 / 99.6 / 96-98 / 86%. Its table
+  sets ETH to 3 bits (`0x20` 0x1E) and the packets carry FEC. In the WFLY2
+  table at trim 0 and 180, ETH 3 turns most missing packets into CRC errors
+  (trim 0: 113 good, 52 bad, 85 missing -> 166, 58, 26), while AFHDS2A's
+  `0x1A` / `0x1B` 0xFF and `0x1C` 0x2A change nothing. So the A7105 makes
+  more bit errors as the offset grows, whatever the table: AFHDS2A hides them
+  with the ID tolerance and FEC, the protocols without FEC at 500 kbps (FlySky,
+  WFLY2, Joysway) don't. An AFHDS2A link between two
+  4-in-1 modules (trainer) is reported rock solid.
 - The bench A7105 RX settings are the protocols' own tables, checked
   against the datasheet (WFLY2, trim 95 unless noted):
   - RF switch: `A7105_SetTxRxMode` drives GIO1 / GIO2 as constant outputs
