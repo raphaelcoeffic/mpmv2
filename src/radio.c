@@ -2,10 +2,13 @@
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include <driverlib/rfc.h>
+#include <driverlib/rf_ble_cmd.h>
+#include <driverlib/rf_ble_mailbox.h>
 #include <driverlib/rf_data_entry.h>
 #include <driverlib/rf_mailbox.h>
 #include <driverlib/rf_prop_cmd.h>
 #include <driverlib/rf_prop_mailbox.h>
+#include <rf_patches/rf_patch_cpe_bt5.h>
 #include <rf_patches/rf_patch_cpe_prop.h>
 
 #include <string.h>
@@ -41,6 +44,69 @@ static const uint32_t _base_overrides[] = {
 // Base + anti-aliasing filter + sync threshold + HPOSC + end marker
 static uint32_t _overrides[BASE_OVERRIDES + 4];
 
+// Bluetooth LE 2M PHY under the proprietary packet commands, as TI's wBMS
+// setting (cc2652r_ble_pg21, setting_wbms_2m: CMD_BLE5_RADIO_SETUP, then
+// CMD_PROP_TX_ADV / CMD_PROP_RX_ADV). Its CRC overrides are left out
+static const uint32_t _ble_base_overrides[] = {
+    // DC/DC regulator: In Tx, use DCDCCTL5[3:0]=0x3 (DITHER_EN=0 and IPEAK=3).
+    0x00F388D3,
+    // Bluetooth 5: Set pilot tone length to 20 us Common
+    HW_REG_OVERRIDE(0x6024, 0x2E20),
+    // Bluetooth 5: Compensate for reduced pilot tone length
+    0x01280263,
+    // Bluetooth 5: Default to no CTE.
+    HW_REG_OVERRIDE(0x5328, 0x0000),
+    // Synth: Increase mid code calibration time to 5 us
+    0x00058683,
+    HW32_ARRAY_OVERRIDE(0x4004, 1),
+    0x38183C30,
+    // Bluetooth 5: Move synth start code
+    HW_REG_OVERRIDE(0x4064, 0x3C),
+    // Bluetooth 5: Set DTX gain -5% for 1 Mbps, threshold
+    0x00E787E3,
+    0x00950803,
+    // Bluetooth 5: Set DTX gain -2.5% for 2 Mbps, threshold
+    0x00F487F3,
+    0x012A0823,
+    // Bluetooth 5: Set synth fine code calibration interval
+    HW32_ARRAY_OVERRIDE(0x4020, 1),
+    0x41005F00,
+    // Bluetooth 5: Adapt to synth fine code calibration interval
+    0xC0040141,
+    0x0007DD44,
+    // Bluetooth 5: Set enhanced TX shape
+    0x000D8C73,
+};
+#define BLE_BASE_OVERRIDES (sizeof(_ble_base_overrides) / sizeof(_ble_base_overrides[0]))
+
+static uint32_t _ble_2m_overrides[] = {
+    // Bluetooth 5: Set pilot tone length to 20 us
+    HW_REG_OVERRIDE(0x5320, 0x03C0),
+    // Bluetooth 5: Compensate syncTimeAdjust
+    0x00F102A3,
+    // Bluetooth 5: increase low gain AGC delay for 2 Mbps
+    HW_REG_OVERRIDE(0x60A4, 0x7D00),
+    // nRF24L01 signal (modulation index 0.32): modem values of TI's NESB
+    // 2 Mbps PHY of the CC27xx (nesb_1m_2m_cc27xx.json), whose modem has the
+    // same registers and fields (TI's BLE values match on both). Measured on
+    // NRF 2 Mbps packets without them: none received, 25% at best with any trim
+    // (bit errors in runs of zeros). DEMMISC2 MAFCGAIN 1 (frequency offset
+    // tracking): without it, nothing
+    HW_REG_OVERRIDE(0x50D4, 0x15F9),
+    // Matched filter DEMMAFI0..2: C1C7 3, C2C6 21, C3C5 79, C4 124 (BLE: 4, 32,
+    // 123, 193): without it, 97%
+    HW_REG_OVERRIDE(0x5100, 0x0300),
+    HW_REG_OVERRIDE(0x5104, 0x4F15),
+    HW_REG_OVERRIDE(0x5108, 0x007C),
+    0xFFFFFFFF,
+};
+
+// Base + sync threshold + HPOSC + end marker. The lists are in RAM and all
+// four are given, as TI's settings (a const list in flash and NULL lists got
+// BLE_ERROR_PAR)
+static uint32_t _ble_overrides[BLE_BASE_OVERRIDES + 3];
+static uint32_t _ble_no_overrides[] = {0xFFFFFFFF};
+
 // HPOSC (BAW oscillator of the CC2652RB): the RF core is told the HF clock
 // offset, from the factory calibration and the chip temperature, as the TI
 // RF driver does (HPOSC_OVERRIDE at setup, CMD_UPDATE_HPOSC_FREQ afterwards)
@@ -50,6 +116,53 @@ static int16_t _hposc_offset;  // 2^-22 relative
 static uint32_t _hposc_check;
 
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
+static rfc_CMD_BLE5_RADIO_SETUP_t _ble_setup;
+static bool _ble;  // _ble_setup: Bluetooth LE 2M PHY
+
+// The Bluetooth LE PHY sends the sync word and each byte LSB first (measured:
+// NRF24L01 packets are received with the sync word reversed on 32 bits and
+// every byte reversed): the bits are reversed here, the caller stays MSB first.
+// It also whitens the packet after the sync word with the Bluetooth LFSR
+// (x^7 + x^4 + 1) seeded 0x65 (advertising channel 37), on every channel
+// (measured): undone here. Packets of up to 255 bytes
+#define BLE_MAX_PKT_LEN 255
+#define BLE_WHITE_SEED 0x65
+static uint8_t _ble_tx_buf[BLE_MAX_PKT_LEN];
+static uint8_t _ble_white[BLE_MAX_PKT_LEN];  // air order: bit 0 first
+
+static void _init_ble_white()
+{
+  uint8_t lfsr = BLE_WHITE_SEED;  // bit 6 = position 0
+  for (int i = 0; i < BLE_MAX_PKT_LEN; i++) {
+    uint8_t b = 0;
+    for (int bit = 0; bit < 8; bit++) {
+      uint8_t out = lfsr & 1;  // position 6
+      lfsr >>= 1;
+      if (out) lfsr ^= 0x44;   // into position 0, and position 4
+      b |= out << bit;
+    }
+    _ble_white[i] = b;
+  }
+}
+
+static inline uint32_t _rbit(uint32_t x)
+{
+  __asm__("rbit %0, %1" : "=r"(x) : "r"(x));
+  return x;
+}
+
+// Packet bytes between the caller (MSB first) and the Bluetooth LE PHY
+static void _ble_bytes(uint8_t* dst, const uint8_t* src, uint16_t len, bool to_air)
+{
+  for (uint16_t i = 0; i < len; i++) {
+    uint8_t b = to_air ? src[i] : src[i] ^ _ble_white[i];
+    b = _rbit(b) >> 24;
+    dst[i] = to_air ? b ^ _ble_white[i] : b;
+  }
+}
+
+static uint32_t _air_sync(uint32_t sync) { return _ble ? _rbit(sync) : sync; }
+
 static rfc_CMD_FS_t _fs;
 static rfc_CMD_PROP_TX_t _tx;
 static rfc_CMD_PROP_RX_t _rx;
@@ -81,7 +194,7 @@ static bool _cmd_done(uint16_t status) { return status >= DONE_OK; }
 
 static bool _cmd_ok(uint16_t status)
 {
-  return status == DONE_OK || status == PROP_DONE_OK;
+  return status == DONE_OK || status == PROP_DONE_OK || status == BLE_DONE_OK;
 }
 
 // Submit a radio operation and wait for its end
@@ -128,7 +241,7 @@ static void _power_down()
   _rx_running = false;
 }
 
-static radio_status_t _power_up()
+static radio_status_t _power_up(bool ble)
 {
   // All RF modes are 0 on CC13x2/CC26x2: the PHY is chosen by patches and setup
   HWREG(PRCM_BASE + PRCM_O_RFCMODESEL) = RF_MODE_AUTO;
@@ -154,7 +267,12 @@ static radio_status_t _power_up()
   }
   HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG) = 0;
 
-  rf_patch_cpe_prop();
+  // The patches copy their image once and count on the retained RF core RAM:
+  // with two of them, load the whole image every time
+  cleanBt5Patch();
+  cleanPropPatch();
+  if (ble) rf_patch_cpe_bt5();
+  else rf_patch_cpe_prop();
 
   // Allow the RF core to access the system bus (RX queue in RAM)
   RFCDoorbellSendTo(CMDR_DIR_CMD_1BYTE(CMD_BUS_REQUEST, 1));
@@ -246,6 +364,32 @@ static void _init_setup(const radio_phy_t* phy)
   _setup.pRegOverride = _overrides;
 }
 
+static void _init_ble_setup(const radio_phy_t* phy)
+{
+  memset(&_ble_setup, 0, sizeof(_ble_setup));
+  _ble_setup.commandNo = CMD_BLE5_RADIO_SETUP;
+  _ble_setup.startTrigger.triggerType = TRIG_NOW;
+  _ble_setup.condition.rule = COND_NEVER;
+  _ble_setup.defaultPhy.mainMode = 1;  // 2 Mbps for the non-BLE commands
+  _ble_setup.config.frontEndMode = 0;  // differential
+  _ble_setup.config.biasMode = 0;      // internal bias
+  _ble_setup.txPower = phy->tx_power;
+
+  uint32_t n = BLE_BASE_OVERRIDES;
+  memcpy(_ble_overrides, _ble_base_overrides, sizeof(_ble_base_overrides));
+  if (phy->sync_threshold)
+    _ble_overrides[n++] = HW_REG_OVERRIDE(0x5114, phy->sync_threshold << 8 | phy->sync_threshold);
+  if (_hposc) {
+    _hposc_offset = _hposc_get_offset();
+    _ble_overrides[n++] = HPOSC_OVERRIDE((uint32_t)(uint16_t)_hposc_offset);
+  }
+  _ble_overrides[n] = 0xFFFFFFFF;
+  _ble_setup.pRegOverrideCommon = _ble_overrides;
+  _ble_setup.pRegOverride1Mbps = _ble_no_overrides;
+  _ble_setup.pRegOverride2Mbps = _ble_2m_overrides;
+  _ble_setup.pRegOverrideCoded = _ble_no_overrides;
+}
+
 static radio_status_t _run_fs()
 {
   memset(&_fs, 0, sizeof(_fs));
@@ -259,6 +403,7 @@ static radio_status_t _run_fs()
 
 radio_status_t radio_init(const radio_phy_t* phy)
 {
+  if (phy->ble_2m && phy->sync_bits != 32) return RADIO_ERR_PARAM;
   if (phy->deviation > 511750 || phy->sync_bits < 8 || phy->sync_bits > 32 ||
       phy->preamble_bytes == 0 || phy->preamble_bytes > 32 ||
       phy->rx_bw < 64 || phy->rx_bw > 103)
@@ -267,11 +412,18 @@ radio_status_t radio_init(const radio_phy_t* phy)
   if (_powered) radio_off();
   _hposc_init();
 
-  radio_status_t st = _power_up();
+  _ble = phy->ble_2m;
+  radio_status_t st = _power_up(_ble);
   if (st != RADIO_OK) return st;
 
-  _init_setup(phy);
-  st = _run_op((rfc_radioOp_t*)&_setup);
+  if (_ble) {
+    _init_ble_white();
+    _init_ble_setup(phy);
+    st = _run_op((rfc_radioOp_t*)&_ble_setup);
+  } else {
+    _init_setup(phy);
+    st = _run_op((rfc_radioOp_t*)&_setup);
+  }
   if (st == RADIO_OK && _freq_khz) st = _run_fs();
   return st;
 }
@@ -303,14 +455,18 @@ void radio_set_rx_sync_alt(uint32_t rx_sync) { _rx_sync_alt = rx_sync; }
 
 static void _init_tx(const uint8_t* data, uint16_t len)
 {
-  if (len > 255) {
+  if (_ble) {
+    _ble_bytes(_ble_tx_buf, data, len, true);
+    data = _ble_tx_buf;
+  }
+  if (len > 255 || _ble) {
     memset(&_tx_adv, 0, sizeof(_tx_adv));
     _tx_adv.commandNo = CMD_PROP_TX_ADV;
     _tx_adv.startTrigger.triggerType = TRIG_NOW;
     _tx_adv.condition.rule = COND_NEVER;
     _tx_adv.pktLen = len;
     _tx_adv.preTrigger.triggerType = TRIG_NOW;  // one preamble, as configured
-    _tx_adv.syncWord = _tx_sync;
+    _tx_adv.syncWord = _air_sync(_tx_sync);
     _tx_adv.pPkt = (uint8_t*)data;
     _tx_op = (rfc_radioOp_t*)&_tx_adv;
     return;
@@ -322,7 +478,7 @@ static void _init_tx(const uint8_t* data, uint16_t len)
   _tx.pktConf.bUseCrc = 0;
   _tx.pktConf.bVarLen = 0;
   _tx.pktLen = len;
-  _tx.syncWord = _tx_sync;
+  _tx.syncWord = _air_sync(_tx_sync);
   _tx.pPkt = (uint8_t*)data;
   _tx_op = (rfc_radioOp_t*)&_tx;
 }
@@ -330,7 +486,7 @@ static void _init_tx(const uint8_t* data, uint16_t len)
 radio_status_t radio_send(const uint8_t* data, uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
+  if (len == 0 || len > (_ble ? BLE_MAX_PKT_LEN : RADIO_MAX_PKT_LEN)) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_tx(data, len);
@@ -360,7 +516,7 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
   memset(&_rx_out, 0, sizeof(_rx_out));
 
   // Fixed length: no header, no length field
-  if (len > 255 || sync_alt) {
+  if (len > 255 || sync_alt || _ble) {
     memset(&_rx_adv, 0, sizeof(_rx_adv));
     _rx_adv.commandNo = CMD_PROP_RX_ADV;
     _rx_adv.startTrigger.triggerType = TRIG_NOW;
@@ -369,8 +525,8 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
     _rx_adv.pktConf.bRepeatNok = repeat;
     _rx_adv.rxConf.bAutoFlushIgnored = 1;
     _rx_adv.rxConf.bAppendRssi = 1;
-    _rx_adv.syncWord0 = sync_word;
-    _rx_adv.syncWord1 = sync_alt;
+    _rx_adv.syncWord0 = _air_sync(sync_word);
+    _rx_adv.syncWord1 = sync_alt ? _air_sync(sync_alt) : 0;
     _rx_adv.maxPktLen = len;
     _rx_adv.endTrigger.triggerType = TRIG_NEVER;
     _rx_adv.pQueue = &_rx_queue;
@@ -399,7 +555,7 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
 radio_status_t radio_rx_start(uint16_t len)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
+  if (len == 0 || len > (_ble ? BLE_MAX_PKT_LEN : RADIO_MAX_PKT_LEN)) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
   _init_rx(_rx_sync, _rx_sync_alt, len, true);
@@ -425,7 +581,7 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  // Short packets only (basic commands): acknowledgments
+  // Short packets only: acknowledgments
   if (len == 0 || len > 255 || rx_len == 0 || rx_len > 255) return RADIO_ERR_PARAM;
 
   radio_rx_stop();
@@ -434,24 +590,29 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
 
   // RX right after TX, until a packet or the end of the window (from the RX
   // start)
-  _tx.condition.rule = COND_STOP_ON_FALSE;
-  _tx.pNextOp = (rfc_radioOp_t*)&_rx;
-  _rx.endTrigger.triggerType = TRIG_REL_START;
-  _rx.endTime = window_us * RAT_TICKS_PER_US;
+  _tx_op->condition.rule = COND_STOP_ON_FALSE;
+  _tx_op->pNextOp = _rx_op;
+  if (_rx_op == (rfc_radioOp_t*)&_rx_adv) {
+    _rx_adv.endTrigger.triggerType = TRIG_REL_START;
+    _rx_adv.endTime = window_us * RAT_TICKS_PER_US;
+  } else {
+    _rx.endTrigger.triggerType = TRIG_REL_START;
+    _rx.endTime = window_us * RAT_TICKS_PER_US;
+  }
 
-  radio_status_t st = _run_op((rfc_radioOp_t*)&_tx);
+  radio_status_t st = _run_op(_tx_op);
   if (st != RADIO_OK) return st;
 
   // The TX status is final when the RX command starts
   uint32_t timeout = micros() + window_us + CMD_TIMEOUT_US;
-  while (!_cmd_done(RF_STATUS(&_rx))) {
+  while (!_cmd_done(RF_STATUS(_rx_op))) {
     if (micros_after(timeout)) {
-      _last_status = RF_STATUS(&_rx);
+      _last_status = RF_STATUS(_rx_op);
       RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
       return RADIO_ERR_TIMEOUT;
     }
   }
-  _last_status = _rx.status;
+  _last_status = _rx_op->status;
   if (_last_status == PROP_DONE_RXTIMEOUT) return RADIO_NO_PACKET;
   if (!_cmd_ok(_last_status)) return RADIO_ERR_CMD;
   return radio_receive(pkt) ? RADIO_OK : RADIO_NO_PACKET;
@@ -478,7 +639,8 @@ bool radio_receive(radio_packet_t* pkt)
 
   uint8_t* data = &e->data;
   pkt->len = _rx_len;
-  memcpy(pkt->data, data, _rx_len);
+  if (_ble) _ble_bytes(pkt->data, data, _rx_len, false);
+  else memcpy(pkt->data, data, _rx_len);
   pkt->rssi = (int8_t)data[_rx_len];
   pkt->timestamp_us = micros();
 

@@ -27,7 +27,8 @@ same suites on the MPM v2 board are in [MPM v2](#mpm-v2).
 | NRF -> CC2652, 1 Mbps and 250 kbps, addresses `e7e7e7e7e7`, `c3c3c3c3c3`, `6565656565`, `a1b2c3d4e5`, `0102030405` | 100% |
 | NRF -> CC2652, `0f0f0f0f0f`, 1 Mbps / 250 kbps | 97.6 to 99.6% / 100% |
 | NRF -> CC2652, `5555555555` (looks like the preamble everywhere) | ~2% |
-| NRF -> CC2652, 2 Mbps | 0% (no 2 Mbps receiver) |
+| NRF -> CC2652, 2 Mbps, proprietary PHY | 0% (no 2 Mbps receiver) |
+| NRF -> CC2652, 2 Mbps, Bluetooth LE 2M PHY (`preset nrf2mble`) | 100% ([2 Mbps RX](#2-mbps-rx-the-bluetooth-le-2m-phy)) |
 
 The RF core sync detection tolerates bit errors: a sync word that nearly
 matches the bits sent before it triggers early and the packet is lost. With
@@ -97,6 +98,66 @@ interleaved with the CC2652:
 
 The SX1281 loses the same packets the CC2652 does, all missing. So it is not
 the CC2652's waveform: the channel or this NRF's receiver.
+
+### 2 Mbps RX: the Bluetooth LE 2M PHY
+
+The CC2652's proprietary PHY receives nothing at 2 Mbps, but its Bluetooth LE
+2M PHY does, and the RF core runs the proprietary packet commands on it: TI's
+wBMS setting for the CC2652R (`cc2652r_ble_pg21/setting_wbms_2m.json` in the
+CC13xx/CC26xx SDK radio configuration) is `CMD_BLE5_RADIO_SETUP` (2 Mbps for
+the "non-BLE commands", `rf_patch_cpe_bt5`) followed by `CMD_PROP_TX_ADV` /
+`CMD_PROP_RX_ADV` with a 32 bit sync word. `preset nrf2mble` does the same
+(`radio_phy_t.ble_2m`), with the NRF framing unchanged. Found on the
+LaunchPad, October 2026:
+
+- **Bit order:** the sync word and every byte go LSB first. NRF packets were
+  received (248/250) once the sync word was reversed on 32 bits, with every
+  byte reversed. `radio.c` reverses both: the caller stays MSB first.
+- **Whitening:** the packet after the sync word is whitened with the
+  Bluetooth LFSR (x^7 + x^4 + 1) seeded 0x65 (advertising channel 37), the
+  same on every channel and every packet. `radio.c` XORs it out in RX and in
+  TX (it is the CC27xx BLE generic setting's `WHITEINIT` = 101 too). No
+  register to turn it off was found.
+- **Demodulator:** with the Bluetooth settings, every packet had bit errors,
+  always 0 bits turned to 1 inside runs of zeros; `trim` from -800 to +150
+  kHz gave 0 to 26%. The fix came from TI's NESB 2 Mbps PHY of the CC27xx
+  (`nesb_1m_2m_cc27xx.json` in the LPF3 SDK), tuned for the nRF24L01. Its
+  modem registers have the same names and the same fields as the CC2652's:
+  TI's Bluetooth values decode the same on both (matched filter `DEMMAFI1` =
+  0x7b20 on the CC2652 = C3C5 123, C2C6 32 on the CC27xx; TI's CC2652
+  "symbol tracking" override 0x00F9 on `0x50D4` = the CC27xx `DEMMISC2`
+  Bluetooth values). Register names by offset come from the Beyond BLE tools
+  (`modem_reg_create.py`, 38C3); the debugger reads the modem registers
+  (`0x40045000`) while the RF core runs. Two NESB values on top of the wBMS
+  overrides do it:
+
+  | Override | Value | Without it |
+  |---|---|---|
+  | `0x50D4` `DEMMISC2`: MAFCGAIN 1 (frequency offset tracking) | `0x15F9` | nothing received |
+  | `0x5100..0x5108` `DEMMAFI0..2`: matched filter for index 0.32 (C4 124, BLE 193) | `0x0300`, `0x4F15`, `0x007C` | 97% |
+
+  NESB's sync correlator values (`DEMC1BE0..2`) made no difference (500/500
+  without them) and are left out.
+- **Switching PHYs:** the TI patches copy their image once per boot and count
+  on the retained RF core RAM. After the proprietary patch, the Bluetooth setup
+  hung (status ACTIVE): `radio.c` now resets both patches' state before
+  loading one.
+
+Results (`losses.py nrf nrf2m --cc-extra "preset nrf2mble"`, `esb.py --rate
+2mble`):
+
+| Test | LaunchPad | MPM v2 |
+|---|---|---|
+| NRF -> CC2652, ch 2 / 40 / 80 | 1000/1000 each | 95.8 / 98.8 / 99% (500 each; ch 40 flat over `trim` -200 to +200) |
+| CC2652 -> NRF, ch 40 | 500/500 | 500/500 |
+| ESB, CC2652 PTX, acked on the 1st try | 250/250, no retries | 250/250, 7 retries |
+| ESB ack payloads (4 and 31 bytes) | 250/250 | 250/250 |
+
+CC2652 -> NRF at ch 40 got 500/500 on this PHY (500 kHz deviation), where the
+proprietary PHY (320 kHz) loses 2 to 3% there ([above](#2-mbps-cc2652---nrf)):
+a single run each, to be confirmed. The proprietary setups ran unchanged after
+this (`suite_cc2500.py`, `suite_a7105.py`, NRF 250 kbps and 1 Mbps, ESB 1
+Mbps). Not measured: the sensitivity of either PHY (no attenuator).
 
 ### SX1281 (MPM v2)
 
@@ -172,7 +233,8 @@ payload, address `a1b2c3d4e5`):
 |---|---|---|
 | 250 kbps / 1 Mbps, dynamic or static length | 100% | 100% |
 | 1 Mbps, 150 us ack window | 100% | 100% |
-| 2 Mbps | 0% (2 Mbps RX) | 100% |
+| 2 Mbps, proprietary PHY | 0% (2 Mbps RX) | 100% |
+| 2 Mbps, Bluetooth LE 2M PHY (`--rate 2mble`), with ack payloads | 100%, no retries | 100% |
 | NRF DPL packets (EN_AA=0) -> CC2652 `esb 1 1`, 250 kbps / 1 Mbps | | 100% |
 | Ack payloads, 4 / 32 bytes, 250 kbps / 1 Mbps | 100% with payload (32 bytes at 250 kbps: `--window 1500`) | 100% |
 

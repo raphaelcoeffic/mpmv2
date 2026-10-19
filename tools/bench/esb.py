@@ -12,7 +12,8 @@ MPM NRF24L01 PRX (EN_AA), address a1b2c3d4e5, ch 40, 16 byte payload.
   esb.py --rate 250k --ackpl <32 bytes> --window 1500
 
 The ack window must cover the ack with its payload (the NRF's ARD): 1500 us
-for 32 bytes at 250 kbps. 2 Mbps: the NRF receives, the CC2652 gets no ack.
+for 32 bytes at 250 kbps. 2 Mbps: the NRF receives, the CC2652 gets no ack on
+its proprietary PHY (--rate 2m), it does on the Bluetooth LE 2M PHY (--rate 2mble).
 """
 
 import argparse
@@ -22,7 +23,8 @@ import time
 import rig
 
 ADDR = "a1b2c3d4e5"
-RF_SETUP = {"250k": "0x22", "1m": "0x02", "2m": "0x0a"}
+# 2mble: CC2652 on the Bluetooth LE 2M PHY (preset nrf2mble), which receives 2 Mbps
+RF_SETUP = {"250k": "0x22", "1m": "0x02", "2m": "0x0a", "2mble": "0x0a"}
 
 
 def main():

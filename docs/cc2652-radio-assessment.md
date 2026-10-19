@@ -23,7 +23,11 @@ chips' crystals and stay needed, as the MPM `option` is today.
   directions, including Enhanced ShockBurst auto-ack with retransmissions and
   ack payloads. Bare-metal, with two TI files (`rfc.c`/`rfc.h` and the
   proprietary CPE patch).
-- Hard limit: no 2 Mbps reception. CFlie models set to 2 Mbps would not work.
+- 2 Mbps reception: not on the proprietary PHY, but on the Bluetooth LE 2M
+  PHY with the proprietary packet commands (TI's wBMS setting) and two modem
+  overrides from TI's CC27xx NESB PHY: 100% from the NRF, ESB acks included
+  ([details](interop-results.md#2-mbps-rx-the-bluetooth-le-2m-phy)). CFlie at
+  2 Mbps is no longer blocked.
 - Works: every MPM CC2500 protocol tried, both directions: FrSky D8/V8/D16
   (FCC and LBT), HoTT, Hitec, Redpine, Skyartec, Corona, Flydream, Ares,
   RadioLink, IKEA, SFHSS, FrSky L (a 125 kbaud chip stream). That covers
@@ -56,9 +60,9 @@ chips' crystals and stay needed, as the MPM `option` is today.
 | NRF24L01 TX, 250 kbps / 1 Mbps / 2 Mbps | works | 100% / 99.6% / 96.5% |
 | NRF24L01 RX, 250 kbps and 1 Mbps | works | 100% with ordinary addresses |
 | NRF24L01 RX, repeated addresses, 1 Mbps | mitigated | `e7..`, `c3..`, `65..`: 100%, `0f..`: 97.6%, `55..`: ~2% |
-| NRF24L01 RX, 2 Mbps | not possible | 0% |
+| NRF24L01 RX, 2 Mbps | works, Bluetooth LE 2M PHY | 100% (proprietary PHY: 0%) |
 | XN297 standard and enhanced, 250 kbps / 1 Mbps | works | 100% both ways |
-| ESB transmitter with auto-ack (YD717, Propel, CFlie) | works | 100% acked on the 1st try, 250 kbps and 1 Mbps |
+| ESB transmitter with auto-ack (YD717, Propel, CFlie) | works | 100% acked on the 1st try, 250 kbps, 1 Mbps and 2 Mbps (Bluetooth LE 2M PHY) |
 | ESB ack payloads, 4 and 32 bytes (Propel, CFlie telemetry) | works | 100% |
 | TX to RX turnaround for acks | works | a 150 us ack window is enough at 1 Mbps |
 | CC2500 FrSky D8 (31 kbps GFSK, CRC, 16 bit sync) | works | 100% both ways, with a 35 kHz trim for CC2652 -> CC2500 |
@@ -79,8 +83,14 @@ chips' crystals and stay needed, as the MPM `option` is today.
 
 ## Weaknesses, by impact
 
-### 1. No 2 Mbps reception (blocks CFlie at 2 Mbps)
+### 1. No 2 Mbps reception on the proprietary PHY (solved)
 
+- Solved, October 2026: the Bluetooth LE 2M PHY runs the proprietary packet
+  commands (TI's wBMS setting). With the bit order, whitening and two modem
+  overrides taken from TI's CC27xx NESB PHY, it receives NRF 2 Mbps at 100%
+  and does ESB with acks ([details](interop-results.md#2-mbps-rx-the-bluetooth-le-2m-phy)).
+  None of the obstacles below applied: no BLE access address or length field,
+  the sync word is free (32 bits).
 - What: the proprietary mode modem detects nothing at 2 Msps. Six
   combinations of RX bandwidth (up to the maximum) and deviation (250 to 500
   kHz) gave zero sync detections, not even false ones. TI's radio
@@ -89,10 +99,8 @@ chips' crystals and stay needed, as the MPM `option` is today.
 - Impact: 2 Mbps TX works (96.5%), so ESky150 (2 Mbps, TX only) is fine.
   CFlie selects 2 Mbps for some models, and its bind and data steps wait for
   ACKs (`packet_ack() == PKT_ACKED`), so those models would not work.
-- Way out, untested: receive with the BLE 2M PHY. It needs TI's larger
-  multi-protocol CPE patch, the modulation index differs (BLE 0.5, nRF24L01
-  about 0.32), and the BLE receiver expects its access address right after the
-  preamble and reads a length from the packet.
+- The way out considered before (BLE `CMD_BLE5_GENERIC_RX` with its access
+  address and length field) was not needed.
 
 ### 2. Sync detection fooled by repeated bit patterns (mitigated)
 
@@ -132,6 +140,11 @@ chips' crystals and stay needed, as the MPM `option` is today.
   from documentation.
 - Impact: each new PHY (CC2500, A7105 or CYRF6936 emulation) may need trial
   and error tuning with little vendor documentation to lean on.
+- Less opaque than it was: the debugger reads the modem (`0x40045000`) and
+  RFE (`0x40046000`) registers while the RF core runs, the Beyond BLE tools
+  (38C3) name the modem registers by offset, and the CC27xx headers and PHY
+  files of TI's LPF3 SDK give the fields and TI's values for the same modem
+  IP (used for 2 Mbps RX).
 
 ### 5. Not evaluated yet
 
@@ -424,6 +437,9 @@ measured:
   instead loaded with precompiled images" from the SimpleLink Low Power F3
   SDK. The datasheet only describes BLE. The LaunchPad page also lists 2.4 GHz
   proprietary RF, through the SDK's radio driver (RCL).
+- Since the CC2652 now receives 2 Mbps, the CC27xx is no longer needed for
+  CFlie. Its modem is the same IP as the CC2652's (same register names and
+  fields), so what is learned on one carries over.
 
 What carries over: `frame.c`, `bench.c` and the whole rig are chip-agnostic.
 The framings are software over a raw "preamble + sync word + fixed length"

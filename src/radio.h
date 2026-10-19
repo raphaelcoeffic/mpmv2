@@ -21,6 +21,10 @@ typedef struct {
   uint16_t tx_power;      // RF core TX power word
   uint8_t sync_threshold; // sync word correlation threshold, 0 = default (0x1F)
   bool fsk;               // 2-FSK instead of 2-GFSK
+  // Bluetooth LE 2M PHY (2 Mbps GFSK, 500 kHz deviation, 32 bit sync word)
+  // under the same packet commands: symbol_rate, deviation, rx_bw,
+  // preamble_bytes, if_freq and fsk are ignored
+  bool ble_2m;
 } radio_phy_t;
 
 typedef struct {

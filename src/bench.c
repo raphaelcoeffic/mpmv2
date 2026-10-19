@@ -533,6 +533,7 @@ typedef struct {
   uint8_t cc2500;    // CC2500 / A7105 framing options, CC_*
   uint8_t preamble;  // preamble bytes, 0 = 4
   uint32_t sync;     // CC2500 SYNC1 SYNC0, 0 = 0xD391. A7105: ID
+  bool ble_2m;       // RF core Bluetooth LE 2M PHY (radio_phy_t)
 } preset_t;
 
 #define CC_CRC 0x01
@@ -570,6 +571,9 @@ static const uint8_t _cyrf_default_code[16] = {0x6F, 0xBE, 0x32, 0x01, 0xDB, 0xF
 static const preset_t _presets[] = {
     {"nrf1m", 1000000, 160000, 97, false, NRF_CH_BASE, NRF_CH_SPACING},     // 1399 kHz
     {"nrf2m", 2000000, 320000, 100, false, NRF_CH_BASE, NRF_CH_SPACING},    // 2458 kHz
+    // 2 Mbps on the Bluetooth LE 2M PHY (500 kHz deviation): the RF core
+    // receives it, unlike its proprietary 2 Mbps PHY
+    {"nrf2mble", 2000000, 500000, 100, false, NRF_CH_BASE, NRF_CH_SPACING, 0, 0, 0, 0, true},
     {"nrf250k", 250000, 160000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},    // 882 kHz
     {"xn250k", 250000, 127000, 94, false, NRF_CH_BASE, NRF_CH_SPACING},     // 882 kHz
     // FrSky D: 31.04 kbps GFSK, 31.7 kHz deviation, CRC, sync 15/16
@@ -751,6 +755,7 @@ static bool _load_preset(const char* name)
       .preamble_bytes = p->preamble ? p->preamble : 4,
       .if_freq = 0x8000,  // RF core default
       .fsk = p->fsk,
+      .ble_2m = p->ble_2m,
   };
   strncpy(_phy_name, name, sizeof(_phy_name) - 1);
   _ch_base_hz = p->ch_base_hz;

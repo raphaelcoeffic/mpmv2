@@ -12,6 +12,7 @@ bits are wrong, the RSSI, the receiver counters and the timing of the losses.
   losses.py a7105 wfly2 --dir rev --cc-extra "pwr 0x04c6" -q
   losses.py nrf nrf2m --dir rev --addr 6565656565
   losses.py nrf nrf2m --cc-extra "chip sx1281"   NRF -> MPM v2 SX1281, 2 Mbps
+  losses.py nrf nrf2m --cc-extra "preset nrf2mble"   NRF -> CC2652 Bluetooth LE 2M PHY
 
 Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups), nrf
 (the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m). The
@@ -144,9 +145,10 @@ def main():
     names = {"cyrf": suite_cyrf.P, "a7105": suite_a7105.P, "nrf": suite_nrf.NRF}[a.family]
     if a.name not in names:
         ap.error(f"unknown {a.family} setup {a.name}: {' '.join(names)}")
-    sx1281 = "sx1281" in a.cc_extra + os.environ.get("CC_INIT", "")
-    if a.family == "nrf" and a.name == "nrf2m" and a.dir == "fwd" and not sx1281:
-        ap.error('nrf2m: the CC2652 has no 2 Mbps receiver: --dir rev, or the SX1281 '
+    rx_2m = any(s in a.cc_extra + os.environ.get("CC_INIT", "") for s in ("sx1281", "nrf2mble"))
+    if a.family == "nrf" and a.name == "nrf2m" and a.dir == "fwd" and not rx_2m:
+        ap.error('nrf2m: the CC2652 proprietary PHY has no 2 Mbps receiver: --dir rev, '
+                 '--cc-extra "preset nrf2mble" (Bluetooth LE 2M PHY), or the SX1281 '
                  '(--cc-extra or CC_INIT "chip sx1281")')
 
     mpm_setup, cc_setup, n = family_setups(a)

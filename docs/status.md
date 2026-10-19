@@ -9,8 +9,8 @@ LaunchPad, now on an MPM v2 prototype board (CC2652RB, SKY66112 PA/LNA, see
 
 Status in October 2026: on the bench, the CC2652 sends and receives the
 on-air format of every MPM protocol of the four chips, against the chips of a
-real 4-in-1 module, from the LaunchPad and from the MPM v2 board. The one
-exception is CFlie at 2 Mbps. No protocol runs on the CC2652 yet: what exists
+real 4-in-1 module, from the LaunchPad and from the MPM v2 board, NRF 2 Mbps
+RX included (on the Bluetooth LE 2M PHY). No protocol runs on the CC2652 yet: what exists
 is the radio driver, the framing layer, the MPM v2 board support and the test
 rig.
 
@@ -77,9 +77,11 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
 - All 18 CC2500 setups, 11 A7105 and 12 CYRF6936 DSSS setups run with their
   own register tables, mostly 97 to 100% each way.
 - E01X, E129, C186, E010R5 and FrSky L run with the real MPM protocol code.
-- 2 Mbps RX (CFlie): not on the CC2652; on the MPM v2 board the SX1281
-  receives NRF 2 Mbps (96 to 98%) and does ESB with acks at 1 and 2 Mbps
-  ([SX1281](interop-results.md#sx1281-mpm-v2)).
+- 2 Mbps RX (CFlie): the CC2652 receives NRF 2 Mbps on its Bluetooth LE 2M
+  PHY (`preset nrf2mble`): 100% on the LaunchPad, 96 to 99% on the MPM v2,
+  ESB with acks and ack payloads 100%
+  ([2 Mbps RX](interop-results.md#2-mbps-rx-the-bluetooth-le-2m-phy)). The MPM
+  v2's SX1281 does it too (96 to 98%, [SX1281](interop-results.md#sx1281-mpm-v2)).
 - The MPM v2 board gives the same results as the LaunchPad: 96 to 100% from
   the MPM chips, 95 to 100% to them. The losses below 100% that were tracked
   down are on the bench side: output stalls and a race in the MPM bench
@@ -169,9 +171,10 @@ packets 102.4 ms apart.
 - **RSSI and LBT.** No test yet of RSSI accuracy for telemetry, of LQI, or of
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
   CC2652).
-- **2 Mbps RX.** The only route on the CC2652 is the BLE 2M PHY, untried (see
-  the assessment). The MPM v2's SX1281 does it (`chip sx1281`), ESB acks
-  included; CFlie itself is not ported to it yet.
+- **2 Mbps RX.** Done on the CC2652's Bluetooth LE 2M PHY. Open: its
+  sensitivity against the proprietary PHY, a register to turn the whitening off
+  (undone in software now), and whether the 500 kHz deviation in TX helps the
+  NRF at ch 30 to 41 (one run: 500/500).
 - **TX power and the front end.** The MPM v2 board has an external PA/LNA
   (SKY66112, about +20 dBm). Output power, harmonics and the LNA's effect on
   sensitivity and blocking are not measured (no RF equipment yet).
@@ -179,12 +182,12 @@ packets 102.4 ms apart.
 ## Next steps toward MPM v2
 
 1. **Choose the chip.** Check the alternatives against the requirements list
-   in the assessment. The CC2652's real gaps are 2 Mbps RX (CFlie) and how
-   little of its RF core is documented. The next candidate is the CC2745R10
-   (LaunchPad LP-EM-CC2745R10-Q1). Its radio does BLE 2M, so its demodulator
-   runs at 2 Mbps, and a P variant has a +20 dBm PA. Its radio core is new
-   (LRF, closed modem images): `radio.c` would be rewritten, while `frame.c`,
-   `bench.c` and the rig carry over. The checklist is in the assessment.
+   in the assessment. The CC2652 has no blocking gap left (2 Mbps RX works on
+   its Bluetooth LE 2M PHY); how little of its RF core is documented remains.
+   The next candidate is a CC27xx (CC2755P10 on order): same modem IP, +20 dBm
+   PA on the P variant, TI's NESB 2 Mbps PHY. Its radio core is new (LRF):
+   `radio.c` would be rewritten, while `frame.c`, `bench.c` and the rig carry
+   over. The checklist is in the assessment.
    Measure sensitivity on the chosen candidate. The rig works with an
    attenuator in the path: `link.py --count 1000` prints the packet rate.
 2. **Emulate the chips, not the protocols.** The MPM protocols drive their
