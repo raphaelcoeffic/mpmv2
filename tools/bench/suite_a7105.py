@@ -37,6 +37,22 @@ P = {
 }
 
 
+def setups(name: str, trim: int = 90) -> tuple[str, str, str, int]:
+    """(MPM TX setup, MPM RX setup, CC2652 setup, payload length) of a protocol."""
+    n, id_, rate, code = P[name]
+    cc_setup = f"trim {trim};preset {'height' if name == 'height8' else name}"
+    mpm_tx = f"preset {name}"
+    if id_:
+        cc_setup += f";a7105 {id_} {int(bool(code & 0x08))} {int(bool(code & 0x10))}"
+        mpm_tx += f";w 0x06 {id_}"
+    if name in ("hubsan", "afhds2a", "wfly2", "joysway"):  # their tables receive
+        mpm_rx = mpm_tx
+    else:
+        mpm_rx = (f"preset afhds2a;w 0x0E {rate:#04x};w 0x1F {code:#04x};w 0x03 {n - 1:#04x}"
+                  + (f";w 0x06 {id_}" if id_ else ""))
+    return mpm_tx, mpm_rx, cc_setup, n
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"protocols (default: all): {' '.join(P)}")
@@ -48,18 +64,8 @@ def main():
     mpm, cc = rig.open_devices()
     with mpm, cc:
         for name in a.names or list(P):
-            n, id_, rate, code = P[name]
+            mpm_tx, mpm_rx, cc_setup, n = setups(name, a.trim)
             payload = rig.pattern(n)
-            cc_setup = f"trim {a.trim};preset {'height' if name == 'height8' else name}"
-            mpm_tx = f"preset {name}"
-            if id_:
-                cc_setup += f";a7105 {id_} {int(bool(code & 0x08))} {int(bool(code & 0x10))}"
-                mpm_tx += f";w 0x06 {id_}"
-            if name in ("hubsan", "afhds2a", "wfly2", "joysway"):  # their tables receive
-                mpm_rx = mpm_tx
-            else:
-                mpm_rx = (f"preset afhds2a;w 0x0E {rate:#04x};w 0x1F {code:#04x};w 0x03 {n - 1:#04x}"
-                          + (f";w 0x06 {id_}" if id_ else ""))
             r = {}
             if a.dir in ("both", "fwd"):
                 r |= rig.link_test(mpm, cc, payload, mpm_setup=mpm_tx, cc_setup=cc_setup, ch=a.ch,

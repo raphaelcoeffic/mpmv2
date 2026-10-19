@@ -220,9 +220,12 @@ depend on the CC2652 power: no second A7105 to compare with.
 The CRC errors at 500 kbps, looked at with the MPM v2 (500 packets per test,
 the MPM reports the bad packets with their data):
 
-- Random in time (no 102.4 ms Wi-Fi beacon pattern), mostly one wrong bit per
-  packet. The rate moves from run to run (WFLY2: 0.2 to 6%), more than with
-  any of the changes below.
+- Random in time (no 102.4 ms Wi-Fi beacon pattern, no 20 ms microwave oven
+  pattern), mostly one wrong bit per packet, plus missing packets. The rate
+  moves from run to run (WFLY2: 0.2 to 6%) and over the day (Joysway 94 to 99%
+  in the morning, 67 to 87% in the afternoon, while Hubsan at 100 kbps stayed
+  at 100%), more than with any of the changes below (`losses.py a7105 <name>
+  --dir rev`).
 - Not changed by: the CC2652 power (about +20, +17 and +1 dBm out),
   the frequency offset (trim 60 to 180 kHz; 0 and 30 kHz are worse), 2-FSK
   instead of GFSK (the A7105 itself sends 2-FSK: `TX_I` FS = 0).
