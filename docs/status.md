@@ -81,8 +81,9 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
   own register tables, mostly 97 to 100% each way.
 - E01X, E129, C186, E010R5 and FrSky L run with the real MPM protocol code.
 - 2 Mbps RX (CFlie): the CC2652 receives NRF 2 Mbps on its Bluetooth LE 2M
-  PHY (`preset nrf2mble`): 100% on the LaunchPad, 96 to 99% on the MPM v2,
-  ESB with acks and ack payloads 100%
+  PHY (`preset nrf2mble`): 100% on the LaunchPad, 96 to 99% on the MPM v2
+  (address `0102030405`: 26 to 35%), ESB with acks and ack payloads 100%;
+  its TX gets 100% from both boards
   ([2 Mbps RX](interop-results.md#2-mbps-rx-the-bluetooth-le-2m-phy)). The MPM
   v2's SX1281 does it too (96 to 98%, [SX1281](interop-results.md#sx1281-mpm-v2)).
 - The MPM v2 board gives the same results as the LaunchPad: 96 to 100% from
@@ -136,12 +137,12 @@ and E010R5) are explained in
 2. **CYRF6936, CC2652 -> CYRF6936:** with the bench output fix all 100%
    but Kyosho3 (99%, single misses at a 10 ms period). MLINK is only received
    with the chips inverted (not understood).
-3. **NRF24L01 2 Mbps, CC2652 -> NRF:** 92 to 97% (LaunchPad); MPM v2 97
-   to 98.2% at ch 30 to 41, 99.2 to 99.8% at ch 2 and 80, while 1 Mbps gets
-   100% at ch 40. Random losses: not Wi-Fi beacons, frequency offset, payload,
-   address or deviation ([details](interop-results.md#2-mbps-cc2652---nrf)).
-   The MPM v2's SX1281 sending the same packets loses as many: not the
-   CC2652's waveform. The CFlie direction.
+3. **NRF24L01 2 Mbps, CC2652 -> NRF, proprietary PHY:** 97 to 98% at ch 30
+   to 41, 99.2 to 99.8% at ch 2 and 80 (`nrf2m`, 320 kHz). Solved by the
+   Bluetooth LE 2M PHY (`nrf2mble`, 500 kHz): 100% on both boards, all six
+   addresses; the proprietary PHY at 500 kHz gets 98.7 to 99.7%
+   ([details](interop-results.md#2-mbps-cc2652---nrf)). Left: the Bluetooth
+   PHY's RX of the unbalanced address `0102030405` (26 to 35%).
 4. **Smaller ones:** Height 5 ch 88 to 100% (the A7105 RX restart between
    short packets?), Bugs 97.6 to 99%, NRF address `0f0f0f0f0f` 97.6 to 99.6%
    at 1 Mbps (a weak sync word). The LaunchPad CC2500 runs that dropped to
@@ -177,9 +178,9 @@ packets 102.4 ms apart.
 - **RSSI and LBT.** No test yet of RSSI accuracy for telemetry, of LQI, or of
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
   CC2652).
-- **2 Mbps RX.** Done on the CC2652's Bluetooth LE 2M PHY. Open: its
-  sensitivity against the proprietary PHY, and whether the 500 kHz deviation
-  in TX helps the NRF at ch 30 to 41 (two runs: 1000/1000).
+- **2 Mbps RX.** Done on the CC2652's Bluetooth LE 2M PHY, which also
+  sends 2 Mbps without the proprietary PHY's losses. Open: its sensitivity
+  against the proprietary PHY, and unbalanced addresses (`0102030405`).
 - **TX power and the front end.** The MPM v2 board has an external PA/LNA
   (SKY66112, about +20 dBm). Output power, harmonics and the LNA's effect on
   sensitivity and blocking are not measured (no RF equipment yet).

@@ -18,7 +18,7 @@ each trim, median and spread of the estimate, its slope against the trim
 (about -1: the estimate's scale) and the trim where it is 0.
 
 Families: a7105, cc2500, cyrf (suite_<family>.py setups), nrf (suite_nrf.py
-plain NRF24L01 setups: nrf1m, nrf250k, nrf2m; --cc-extra "preset nrf2mble").
+plain NRF24L01 setups: nrf1m, nrf250k, nrf2m, nrf2mble).
 """
 
 import argparse

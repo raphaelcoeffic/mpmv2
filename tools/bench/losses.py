@@ -12,10 +12,10 @@ bits are wrong, the RSSI, the receiver counters and the timing of the losses.
   losses.py a7105 wfly2 --dir rev --cc-extra "pwr 0x04c6" -q
   losses.py nrf nrf2m --dir rev --addr 6565656565
   losses.py nrf nrf2m --cc-extra "chip sx1281"   NRF -> MPM v2 SX1281, 2 Mbps
-  losses.py nrf nrf2m --cc-extra "preset nrf2mble"   NRF -> CC2652 Bluetooth LE 2M PHY
+  losses.py nrf nrf2mble                       NRF -> CC2652 Bluetooth LE 2M PHY
 
 Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups), nrf
-(the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m). The
+(the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m, nrf2mble). The
 packet counter is at byte 2, so --count is at most 256.
 
 Losses locked to the 102.4 ms cycle (--timing: most of them in one phase

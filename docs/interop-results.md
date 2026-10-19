@@ -66,25 +66,37 @@ CRC failures without a word. What it is not:
   are half as long as 1 Mbps ones, which get through.
 - **The ESP32's LO:** the same losses with the SDR tuned to 2440 or 2470 MHz,
   idle or capturing.
-- **Frequency offset:** the CC2652 is about 135 kHz above this NRF at
-  `trim -35` (SDR, both senders); `trim` 0, -35, -170 and -300 give the same
-  losses.
+- **Frequency offset:** `trim` 0, -35, -170 and -300 give the same losses.
+  (The SDR put the CC2652 135 kHz above this NRF at `trim -35`, but with the
+  carrier then taken as the burst's median frequency, up to 140 kHz off on
+  these packets; from the eye center the LaunchPad is 15 to 20 kHz above the
+  NRF at `trim 0`.)
 - **Payload:** fixed payloads (no counter) with byte 2 at 0x00, 0x32, 0x51,
   0x64, 0x9b, 0xc0 all lose 1 to 4%.
 - **Address:** `c3c3c3c3c3`, `6565656565`, `a1b2c3d4e5`, `0102030405`,
   `0f0f0f0f0f` alike.
-- **Deviation:** `phy 2000000 <dev> 100` with 320, 400 and 480 kHz alike.
 - **Power:** at ch 40, 10 dB less (`pwr 0x04c6`) only goes from 2% to 3%; at
   ch 80, from 0.5% to 3.7%. So at full power ch 40 has a floor that ch 80
   doesn't.
 
-`sdr_compare.py nrf2m` (ch 40 and 80 alike): the CC2652 deviates 245 to
-260 kHz on runs and 290 to 300 kHz on isolated bits (117%), the NRF 310 kHz
-and 250 kHz (80%). The CC2652's worst bit is at 71 kHz from the carrier, the
-NRF's at 175 kHz: a narrower eye, but the same on both channels and not
-changed by a larger deviation. Open: a source in ch 30 to 41 that this NRF
-sees at 2 Mbps only, or an NRF receiver weakness there. An NRF -> NRF
-reference would tell, the bench has a single NRF24L01.
+`sdr_compare.py nrf2m`, from the eye center (midway between the mean
+levels of ones and zeros, LaunchPad, ch 40):
+
+| Sender | Runs | Isolated bits | Worst bit per packet |
+|---|---|---|---|
+| NRF24L01 | 318 kHz | 250 kHz (79%) | 206 kHz |
+| CC2652 proprietary, 320 kHz | 325 kHz | 293 kHz (90%) | 233 kHz |
+| CC2652 proprietary, 500 kHz | 504 kHz | 451 kHz (89%) | 391 kHz |
+| CC2652 Bluetooth LE 2M | 502 kHz | 392 kHz (78%) | 346 kHz |
+
+All CC2652 packets decode on the SDR (300 of them, CRC right), and its eye is
+no narrower than the NRF's own. Its shape differs: isolated bits at 90% of
+the runs (less Gaussian smoothing than the NRF and the Bluetooth PHY), the
+same at every deviation; the Bluetooth "enhanced TX shape" override
+(`0x000D8C73`) doesn't change it on the proprietary PHY. (Measured from the
+burst's median frequency, as `sdr_compare.py` did before, the CC2652's worst
+bit was 71 to 85 kHz: the median falls 140 kHz off the eye center on its
+packets.)
 
 **The SX1281 as the sender** (`--cc-extra "chip sx1281"`, 2 Mbps, modulation
 index 0.35: 350 kHz, BT 0.5, 0 dBm into the PA), 750 packets per point,
@@ -96,8 +108,41 @@ interleaved with the CC2652:
 | 36 | 740 | 750 |
 | 40 | 730 | 730 |
 
-The SX1281 loses the same packets the CC2652 does, all missing. So it is not
-the CC2652's waveform: the channel or this NRF's receiver.
+The SX1281 loses the same packets the CC2652 does, all missing.
+
+**A larger deviation, the Bluetooth LE 2M PHY:** in interleaved runs
+(`losses.py nrf nrf2m --dir rev --cc-extra ...`, 250 packets per run, ch 40),
+the deviation does matter, and the Bluetooth PHY's TX (`preset nrf2mble`,
+500 kHz) loses nothing:
+
+| CC2652 TX | LaunchPad | MPM v2 |
+|---|---|---|
+| Proprietary, 320 kHz (`nrf2m`) | 728/750 (97.1%) | 731/750 (97.5%) |
+| Proprietary, 400 kHz | 734/750 | |
+| Proprietary, 480 kHz | 744/750 | 741/750 |
+| Proprietary, 500 kHz | 2244/2250 (99.7%) | 740/750 (98.7%) |
+| Bluetooth LE 2M (`nrf2mble`) | 1749/1750 | 750/750 |
+
+(The earlier runs, not interleaved, found 320 to 480 kHz alike.) Above about
+512 kHz the proprietary setup fails (status 0x0400). Other channels,
+LaunchPad, 500 per point:
+
+| Channel | 320 kHz | 500 kHz | Bluetooth LE 2M |
+|---|---|---|---|
+| 2 | 99.2% | 99.4% | 500/500 |
+| 36 | 96.6% | 99.2% | 500/500 |
+| 80 | 99.2% | 99.4% | 500/500 |
+
+So a 500 kHz deviation removes the mid-band excess, and the proprietary PHY
+keeps a floor of about 0.5% on every channel that the Bluetooth PHY doesn't
+have. What else was tried on the proprietary PHY: the preamble (2, 4 and 8
+bytes alike at 500 kHz; 8 doesn't help 320 kHz; 1 byte gets 29%) and 2-FSK
+instead of GFSK (same losses). Lost packets are random (not tied to the
+counter byte), all missing.
+
+`suite_nrf.py nrf2mble` (six addresses, CC2652 -> MPM): 1500/1500 from each
+board, where `nrf2m` gets 94.8 to 98.4% in the same run. The Bluetooth LE 2M
+PHY is the CC2652's 2 Mbps setup both ways.
 
 ### 2 Mbps RX: the Bluetooth LE 2M PHY
 
@@ -152,12 +197,25 @@ Results (`losses.py nrf nrf2m --cc-extra "preset nrf2mble"`, `esb.py --rate
 |---|---|---|
 | NRF -> CC2652, ch 2 / 40 / 80 | 1500/1500 each | 92 to 95.8 / 98.8 to 99.6 / 99 to 99.4% (500 per run; ch 40 flat over `trim` -200 to +200) |
 | CC2652 -> NRF, ch 40 | 1000/1000 | 1000/1000 |
+| CC2652 -> NRF, `suite_nrf.py nrf2mble`, 6 addresses | 1500/1500 | 1500/1500 |
+| NRF -> CC2652, `suite_nrf.py nrf2mble`, 5 addresses (not `0102030405`) | 1250/1250 | 96.4 to 97.2% |
+| NRF -> CC2652, `0102030405` | 26 to 35% | 26% |
 | ESB, CC2652 PTX, acked on the 1st try | 250/250, no retries | 250/250, 7 retries |
 | ESB ack payloads (4, 31 and 32 bytes) | 250/250 | 250/250 |
 
-CC2652 -> NRF at ch 40 got 1000/1000 on this PHY (500 kHz deviation) from
-each board, where the proprietary PHY (320 kHz) loses 2 to 3% there
-([above](#2-mbps-cc2652---nrf)): to be confirmed with interleaved runs. The proprietary setups ran unchanged after
+CC2652 -> NRF on this PHY (500 kHz deviation) loses nothing, where the
+proprietary PHY (320 kHz) loses 2 to 3% at ch 30 to 41: confirmed in
+interleaved runs ([above](#2-mbps-cc2652---nrf)).
+
+Address `0102030405` (`05 04 03 02 01` on air, mostly zeros) is received
+badly: CRC errors (mostly one bit, the same positions: byte 0 bit 1, byte 3)
+and missing packets, from 1% at `trim +150` to 72% at `trim -150`. A sync
+word that unbalanced pulls the frequency tracking (MAFCGAIN 1), it seems;
+other `DEMMISC2` values (MAFCGAIN 1 to 3, other symbol tracking gains)
+changed nothing. Not fixed. The same address gets 100% at 1 Mbps and 250
+kbps on the proprietary PHY, without MAFC.
+
+The proprietary setups ran unchanged after
 this (`suite_cc2500.py`, `suite_a7105.py`, NRF 250 kbps and 1 Mbps, ESB 1
 Mbps). Not measured: the sensitivity of either PHY (no attenuator).
 

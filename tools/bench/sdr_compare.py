@@ -5,16 +5,18 @@
 # ///
 """The same packet sent by the MPM (A7105 or NRF24L01) and by the CC2652,
 received by the esp-sdr board (sdr.py): bit rate, carrier, deviation in runs
-and on isolated bits, worst bit, payload decoded from the SDR bits.
+and on isolated bits, worst bit (from the eye center), payload decoded from
+the SDR bits.
 
   sdr_compare.py flysky
   sdr_compare.py joysway --bits 48 72          per-bit levels, bits 48 to 71
                                                after the ID start - 16 (NRF: - 6)
   sdr_compare.py wfly2 --cc-pwr 0x04c6
   sdr_compare.py nrf2m --ch 40
+  sdr_compare.py nrf2mble
 
 Uses the suite_a7105.py setups, ch 170 (2485 MHz), or the plain NRF24L01
-setups of suite_nrf.py (nrf1m, nrf250k, nrf2m), address e7e7e7e7e7, ch 40
+setups of suite_nrf.py (nrf1m, nrf250k, nrf2m, nrf2mble), address e7e7e7e7e7, ch 40
 (2440 MHz). Both senders send every 1.5 ms so that each 1 ms burst holds a
 whole packet now and then.
 """
@@ -73,6 +75,14 @@ def back(pre: int) -> int:
     return 16 if pre > 1 else 6
 
 
+def center(v) -> float:
+    """Eye center: midway between the mean levels of the ones and the zeros.
+    The carrier from demod() (median frequency of the burst) falls towards
+    whichever level has more samples: 140 kHz off on CC2652 2 Mbps packets."""
+    v = np.asarray(v)
+    return (v[v > 0].mean() + v[v <= 0].mean()) / 2
+
+
 def summary(label: str, gain, pk, sync: bytes, payload: bytes, pre: int):
     if not pk:
         print(f"{label}: gain {gain}, no packet decoded")
@@ -82,11 +92,13 @@ def summary(label: str, gain, pk, sync: bytes, payload: bytes, pre: int):
     for f0, br, v, got in pk:
         exp = bytearray(payload)
         exp[rig.SEQ] = got[rig.SEQ]
-        seg = v[:back(pre) + 8 * (len(sync) + n)]
+        seg = np.asarray(v[:back(pre) + 8 * (len(sync) + n)])
         bits = (seg > 0).astype(int)
-        iso = [abs(seg[j]) for j in range(1, len(seg) - 1) if bits[j - 1] != bits[j] != bits[j + 1]]
-        run = [abs(seg[j]) for j in range(1, len(seg) - 1) if bits[j - 1] == bits[j] == bits[j + 1]]
-        rows.append((f0, br, np.mean(run), np.mean(iso), np.min(np.abs(seg)), got == bytes(exp)))
+        c = center(seg)
+        e = np.where(bits == 1, seg - c, c - seg)  # distance from the eye center
+        iso = [e[j] for j in range(1, len(seg) - 1) if bits[j - 1] != bits[j] != bits[j + 1]]
+        run = [e[j] for j in range(1, len(seg) - 1) if bits[j - 1] == bits[j] == bits[j + 1]]
+        rows.append((f0 + c, br, np.mean(run), np.mean(iso), np.min(e), got == bytes(exp)))
     r = np.array(rows, dtype=float)
     print(f"{label}: gain {gain}, {len(r)} packets, payload right {int(r[:, 5].sum())}/{len(r)}")
     print(f"   carrier {r[:, 0].mean() / 1e3:+.1f} kHz (sd {r[:, 0].std() / 1e3:.1f}), "
@@ -97,8 +109,9 @@ def summary(label: str, gain, pk, sync: bytes, payload: bytes, pre: int):
 
 def bit_table(label: str, pk, sync: bytes, payload: bytes, pre: int, lo: int, hi: int):
     exp = S.to_bits(bytes([0xaa if sync[0] & 0x80 else 0x55]) * 2 + sync + payload)[16 - back(pre):]
-    v = np.array([p[2][:hi] for p in pk if len(p[2]) >= hi]) / 1e3
-    print(f"{label}, frequency per bit (kHz), bit {back(pre)} = first sync bit:")
+    n = back(pre) + 8 * (len(sync) + len(payload))
+    v = np.array([p[2][:hi] - center(p[2][:n]) for p in pk if len(p[2]) >= hi]) / 1e3
+    print(f"{label}, frequency per bit from the eye center (kHz), bit {back(pre)} = first sync bit:")
     for j in range(lo, hi):
         print(f"   bit {j:3d} ({exp[j]})  mean {v[:, j].mean():+6.0f}  worst {np.abs(v[:, j]).min():4.0f}")
 
@@ -108,7 +121,7 @@ def setup(name: str, ch: int | None, trim: int, addr: str):
     preamble bytes, channel, MHz)"""
     if name in suite_nrf.NRF:
         mpm_tx, cc_setup = suite_nrf.nrf_setups(name, addr)
-        rate = {"nrf1m": 1e6, "nrf250k": 250e3, "nrf2m": 2e6}[name]
+        rate = {"nrf1m": 1e6, "nrf250k": 250e3, "nrf2m": 2e6, "nrf2mble": 2e6}[name]
         ch = 40 if ch is None else ch
         return mpm_tx, cc_setup, bytes.fromhex(addr)[::-1], 16, rate, 1, ch, 2400 + ch
     n, id_, rate_code, _ = suite_a7105.P[name]
@@ -126,6 +139,7 @@ def main():
     ap.add_argument("--addr", default="e7e7e7e7e7", help="NRF address, register order (default e7e7e7e7e7)")
     ap.add_argument("--count", type=int, default=8, help="packets per sender")
     ap.add_argument("--cc-pwr", default="default", help="CC2652 TX power word")
+    ap.add_argument("--cc-extra", default="", help="CC2652 commands after its setup")
     ap.add_argument("--bits", nargs=2, type=int, metavar=("LO", "HI"), help="per-bit table")
     a = ap.parse_args()
     if a.name not in suite_a7105.P and a.name not in suite_nrf.NRF:
@@ -137,7 +151,8 @@ def main():
     with S.Sdr() as sdr, mpm, cc:
         sdr.cmd(f"FREQ {int(freq) - 1}")
         senders = ((label, mpm, rig.commands(mpm_tx)),
-                   ("CC2652", cc, rig.commands(cc_setup) + [f"pwr {a.cc_pwr}"] + rig.commands(cc_setup)))
+                   ("CC2652", cc, rig.commands(cc_setup) + [f"pwr {a.cc_pwr}"] + rig.commands(cc_setup)
+                    + rig.commands(a.cc_extra)))
         for label, dev, setup_cmds in senders:
             rig.run(dev, setup_cmds + [f"ch {ch}"])
             dev.cmd(f"txp 1500 60000 {payload.hex()}")

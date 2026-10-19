@@ -9,9 +9,10 @@
   suite_nrf.py nrf1m --addr 6565656565
   suite_nrf.py xn297 xn297enh
 
-nrf1m / nrf250k / nrf2m: plain NRF24L01 (static length, CRC16) for each --addr
-(default: the addresses of docs/interop-results.md). 2 Mbps: CC2652 -> MPM only,
-the CC2652 has no 2 Mbps receiver. The XN297 setups are the same commands on
+nrf1m / nrf250k / nrf2m / nrf2mble: plain NRF24L01 (static length, CRC16) for
+each --addr (default: the addresses of docs/interop-results.md). 2 Mbps:
+nrf2mble on the CC2652 Bluetooth LE 2M PHY, both ways; nrf2m on its
+proprietary PHY, CC2652 -> MPM only (no 2 Mbps receiver, 2-3% lost at ch 40). The XN297 setups are the same commands on
 both sides. The unscrambled enhanced mode needs the MPM XN297 emulation fix
 (branch xn297-enhanced-xorout of the MPM fork) for MPM -> CC2652.
 """
@@ -22,7 +23,8 @@ import sys
 import rig
 
 ADDRS = ["e7e7e7e7e7", "c3c3c3c3c3", "6565656565", "a1b2c3d4e5", "0102030405", "0f0f0f0f0f"]
-NRF = {"nrf1m": ("", "nrf1m"), "nrf250k": ("w 0x06 0x22", "nrf250k"), "nrf2m": ("w 0x06 0x0a", "nrf2m")}
+NRF = {"nrf1m": ("", "nrf1m"), "nrf250k": ("w 0x06 0x22", "nrf250k"), "nrf2m": ("w 0x06 0x0a", "nrf2m"),
+       "nrf2mble": ("w 0x06 0x0a", "nrf2mble")}
 XN = "xaddr 6545a5e7c3;ch 40"
 # name: (MPM setup, CC2652 setup or None = the same)
 P = {

@@ -137,7 +137,7 @@ setup, setups as `;`-separated commands or example files
 | Script | What it does |
 |---|---|
 | `link.py` | Two-way link test with any pair of setups: numbered packets (the counter is at byte 2), all bytes compared, CRC flags checked |
-| `suite_nrf.py` | NRF24L01 at 250 kbps / 1 Mbps / 2 Mbps with 6 addresses, XN297 standard and enhanced modes |
+| `suite_nrf.py` | NRF24L01 at 250 kbps / 1 Mbps / 2 Mbps with 6 addresses (2 Mbps: `nrf2mble` both ways, `nrf2m` CC2652 -> MPM), XN297 standard and enhanced modes |
 | `esb.py` | Enhanced ShockBurst: CC2652 PTX with auto-ack and retransmissions, MPM NRF PRX, ack payloads. `--rate 2mble`: 2 Mbps on the Bluetooth LE 2M PHY |
 | `suite_cc2500.py` | The CC2500 protocols (18 setups), MPM CC2500 registers against the CC2652 presets. `--phy` derives a CC2652 PHY from any CC2500 register table |
 | `suite_a7105.py` | The A7105 protocols (11 setups), with their `A7105_Init()` tables |
@@ -172,7 +172,13 @@ tools/bench/sdr.py info
 CC_PORT=v2 tools/bench/sdr_compare.py flysky
 CC_PORT=v2 tools/bench/sdr_compare.py joysway --bits 48 64
 CC_PORT=v2 tools/bench/sdr_compare.py nrf2m --ch 40
+tools/bench/sdr_compare.py nrf2m --cc-extra "phy 2000000 500000 100"
 ```
+
+`sdr_compare.py` measures the carrier and the deviations from the eye center
+(midway between the mean levels of ones and zeros): `sdr.demod()`'s carrier,
+the burst's median frequency, falls towards the more frequent level, 140 kHz
+off on CC2652 2 Mbps packets.
 
 Each suite takes protocol names (default: all), `--count`, `--period`, `--dir
 fwd|rev` (fwd: MPM -> CC2652) and `-v` (print the setup commands), and exits
@@ -259,7 +265,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | Command | Description |
 |---|---|
 | `chip <cc2652\|sx1281> [dbm]` | Radio for the PHY (applied at once and kept): the RF core, or the MPM v2's SX1281 (GFSK 125 kbps to 2 Mbps, rates within 1%, nearest modulation index, TX power in dBm into the PA: default 0, max 2). `info` shows what the SX1281 got, `stop` its counters (`sx_*`). `ack` works with both |
-| `preset <nrf1m\|nrf2m\|nrf2mble\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation). `nrf2mble`: 2 Mbps on the RF core's Bluetooth LE 2M PHY (500 kHz deviation in TX), which receives 2 Mbps, unlike `nrf2m`; 32 bit sync word (not tried above 255 byte packets) |
+| `preset <nrf1m\|nrf2m\|nrf2mble\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation). `nrf2mble`: 2 Mbps on the RF core's Bluetooth LE 2M PHY (500 kHz deviation in TX), which receives 2 Mbps, unlike `nrf2m`, and sends it without `nrf2m`'s 2 to 3% losses at ch 30 to 41; 32 bit sync word (not tried above 255 byte packets) |
 | `preset <name>` | CC2500 PHYs of the MPM protocols, with their channel plan and `cc2500` framing: same `ch` numbers as `CHANNR`. `frskyd`, `frskyv`, `frskyx`, `frskyx2`, `frskyxeu`, `frskyx2eu`, `hott`, `hitec`, `redpine`, `redpineslow`, `skyartec`, `corona`, `coronav2`, `fdv3`, `ares`, `radiolink`, `ikea`, `sfhss`. Sync words from the ID (Hitec, Skyartec data packets, RadioLink variants): `cc2500` after the preset |
 | `preset <flysky\|afhds2a\|hubsan\|bugs\|height\|pelikan\|kyosho\|kyoshohype\|wfly2\|joysway>` | A7105 PHYs with their `a7105` framing and channel plan (2400 MHz + `ch` x 500 kHz, `ch` = `PLL_I`) |
 | `preset <dsm\|dsmbind\|devo>` | CYRF6936 PHY (1 Mchip/s GFSK, 250 kHz deviation) with the `cyrf` framing and the codes of the MPM presets (`devo`: `examples/devo.txt`), channel plan 2401 MHz + `ch` x 1 MHz |
