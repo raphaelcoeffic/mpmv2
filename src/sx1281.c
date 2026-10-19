@@ -31,10 +31,15 @@
 #define CMD_GET_IRQ_STATUS 0x15
 #define CMD_CLR_IRQ_STATUS 0x97
 
+#define CMD_CALIBRATE 0x89
+#define CALIBRATE_ALL 0x3F  // RC64K, RC13M, PLL, ADC pulse, ADC bulk N and P
+
 #define STDBY_XOSC 0x01
 #define PACKET_TYPE_GFSK 0x00
-#define RAMP_10_US 0x80
+#define RAMP_04_US 0x20
 #define PERIOD_BASE_1MS 0x02
+#define PERIOD_BASE_15US 0x00  // 15.625 us
+#define CMD_SET_AUTO_FS 0x9E
 
 #define IRQ_TX_DONE 0x0001
 #define IRQ_RX_DONE 0x0002
@@ -44,6 +49,7 @@
 
 #define SYNC_SEL_1 0x10  // TX: sync word 1
 #define SYNC_SEL_2 0x20  // RX: sync word 2
+#define SYNC_SEL_3 0x40  // acknowledgments: sync word 3
 #define FIXED_LENGTH 0x00
 #define CRC_OFF 0x00
 #define WHITENING_OFF 0x08
@@ -51,6 +57,7 @@
 #define REG_SYNC_ERRORS 0x9CD  // bits 0-3
 #define REG_SYNC_WORD_1 0x9CE  // 5 bytes each, MSB first
 #define REG_SYNC_WORD_2 0x9D3
+#define REG_SYNC_WORD_3 0x9D8
 
 #define XTAL_HZ 52000000
 #define BUSY_TIMEOUT_US 20000
@@ -176,7 +183,7 @@ static void _spi_init()
   const spi_device_t dev = {
       .frame_format = SPI_POL0_PHA0,
       .data_width = 8,
-      .bit_rate = 8000000,
+      .bit_rate = 12000000,  // 18 MHz max, 48 MHz / 4
       .rx = FLASH_MISO,
       .tx = FLASH_MOSI,
       .clk = FLASH_SCLK,
@@ -269,6 +276,10 @@ radio_status_t sx1281_init(const radio_phy_t* phy, int8_t tx_dbm)
   delay_us(2000);
   if (!_wait_busy()) return RADIO_ERR_BOOT;
 
+  // In STDBY_RC, as recommended at start-up and after large temperature changes
+  CMD(CMD_CALIBRATE, CALIBRATE_ALL);
+  if (!_wait_busy()) return RADIO_ERR_BOOT;
+
   uint8_t bits = phy->preamble_bytes * 8;
   if (bits > 32) bits = 32;
   _preamble = (bits / 4 - 1) << 4;
@@ -279,8 +290,10 @@ radio_status_t sx1281_init(const radio_phy_t* phy, int8_t tx_dbm)
   CMD(CMD_SET_BUFFER_BASE, 0, 0);
   CMD(CMD_SET_MODULATION_PARAMS, _mod.br_bw, _mod.mod_ind, _mod.bt);
   _packet_params(SYNC_SEL_1, 1);
-  CMD(CMD_SET_TX_PARAMS, (uint8_t)(tx_dbm + 18), RAMP_10_US);
-  CMD(CMD_SET_DIO_IRQ_PARAMS, IRQ_ALL >> 8, IRQ_ALL & 0xFF, 0, 0, 0, 0, 0, 0);
+  CMD(CMD_SET_TX_PARAMS, (uint8_t)(tx_dbm + 18), RAMP_04_US);
+  // DIO1: TX or RX done, polled as a GPIO (no SPI traffic while waiting)
+  CMD(CMD_SET_DIO_IRQ_PARAMS, IRQ_ALL >> 8, IRQ_ALL & 0xFF, 0, IRQ_TX_DONE | IRQ_RX_DONE, 0, 0, 0,
+      0);
   sx1281_set_sync_errors(0);
   sx1281_set_sync_word(_tx_sync, _rx_sync);
 
@@ -332,28 +345,95 @@ void sx1281_set_sync_errors(uint8_t errors)
 // TX / RX
 //
 
-radio_status_t sx1281_send(const uint8_t* data, uint16_t len)
+// Waits for one of the IRQ flags (and returns them), 0 on time-out
+static uint16_t _wait_irq(uint16_t mask, uint32_t timeout_us)
 {
-  if (!_active || len == 0 || len > MAX_LEN) return RADIO_ERR_PARAM;
-  if (_rx_on) sx1281_rx_stop();
+  uint32_t start = micros();
+  while (micros() - start < timeout_us) {
+    uint16_t irq = _read16(CMD_GET_IRQ_STATUS);
+    if (irq & mask) return irq;
+  }
+  return 0;
+}
 
+static radio_status_t _send(const uint8_t* data, uint16_t len)
+{
   _packet_params(SYNC_SEL_1, len);
   _write_buffer(data, len);
   CMD(CMD_CLR_IRQ_STATUS, IRQ_ALL >> 8, IRQ_ALL & 0xFF);
   GPIO_setDio(PA_CTX);
   CMD(CMD_SET_TX, PERIOD_BASE_1MS, 0, TX_TIMEOUT_MS);
 
-  radio_status_t st = RADIO_ERR_TIMEOUT;
+  // TX done on DIO1 (the TX time-out of the chip ends it too, without DIO1)
   uint32_t start = micros();
-  while (micros() - start < (TX_TIMEOUT_MS + 10) * 1000) {
-    uint16_t irq = _read16(CMD_GET_IRQ_STATUS);
-    if (irq & IRQ_TX_DONE) {
-      st = RADIO_OK;
-      break;
+  while (!GPIO_readDio(SX1281_DIO1)) {
+    if (micros() - start > TX_TIMEOUT_MS * 1000) {
+      GPIO_clearDio(PA_CTX);
+      _stats.tx_fail++;
+      _stats.last_status = sx1281_last_status();
+      return RADIO_ERR_TIMEOUT;
     }
-    if (irq & IRQ_TIMEOUT) break;
   }
   GPIO_clearDio(PA_CTX);
+  return RADIO_OK;
+}
+
+radio_status_t sx1281_send(const uint8_t* data, uint16_t len)
+{
+  if (!_active || len == 0 || len > MAX_LEN) return RADIO_ERR_PARAM;
+  if (_rx_on) sx1281_rx_stop();
+  return _send(data, len);
+}
+
+static void _read_packet(radio_packet_t* pkt, uint8_t len)
+{
+  pkt->timestamp_us = micros();
+  uint8_t offset = _read16(CMD_GET_RX_BUFFER_STATUS) & 0xFF;
+  _read_buffer(offset, pkt->data, len);
+  pkt->len = len;
+
+  uint8_t tx[7] = {CMD_GET_PACKET_STATUS}, rx[7];
+  _xfer(tx, rx, 7);
+  pkt->rssi = -(int)rx[3] / 2;  // rssiSync
+}
+
+radio_status_t sx1281_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
+                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
+{
+  if (!_active || len == 0 || len > MAX_LEN || rx_len == 0 || rx_len > MAX_LEN)
+    return RADIO_ERR_PARAM;
+  if (_rx_on) sx1281_rx_stop();
+  pkt->len = 0;
+
+  // Synthesizer kept on after TX (AutoFs): RX starts sooner
+  _write_sync(REG_SYNC_WORD_3, rx_sync);
+  CMD(CMD_SET_AUTO_FS, 1);
+  uint16_t steps = (window_us * 64 + 999) / 1000;  // 15.625 us steps
+  radio_status_t st = _send(data, len);
+  uint32_t t0 = micros();
+  if (st == RADIO_OK) {
+    // As few commands as possible before RX: the NRF answers 130 us after
+    // the end of the packet (TX done flag left set, not waited for)
+    _packet_params(SYNC_SEL_3, rx_len);
+    CMD(CMD_SET_RX, PERIOD_BASE_15US, steps >> 8, steps & 0xFF);
+    _wait_busy();  // low once RX is ready
+    uint32_t turn = micros() - t0;
+    if (turn > _stats.turn_max) _stats.turn_max = turn;
+    uint16_t irq = _wait_irq(IRQ_RX_DONE | IRQ_TIMEOUT, window_us + 5000);
+    if (irq & IRQ_RX_DONE) {
+      _stats.ack_rx++;
+      _read_packet(pkt, rx_len);
+    } else if (irq) {
+      _stats.ack_timeout++;
+      st = RADIO_NO_PACKET;
+    } else {
+      _stats.ack_none++;
+      _stats.last_status = _status;
+      st = RADIO_ERR_TIMEOUT;
+    }
+  }
+  CMD(CMD_SET_AUTO_FS, 0);
+  CMD(CMD_SET_STANDBY, STDBY_XOSC);
   return st;
 }
 
@@ -366,7 +446,7 @@ static void _rx_arm()
 radio_status_t sx1281_rx_start(uint16_t len)
 {
   if (!_active || len == 0 || len > MAX_LEN) return RADIO_ERR_PARAM;
-  _stats = (sx1281_stats_t){0};
+  sx1281_clear_stats();
   _rx_check = micros() + RX_CHECK_US;
   _rx_len = len;
   _packet_params(SYNC_SEL_2, len);
@@ -385,7 +465,10 @@ void sx1281_rx_stop()
 bool sx1281_receive(radio_packet_t* pkt)
 {
   if (!_rx_on) return false;
-  uint16_t irq = _read16(CMD_GET_IRQ_STATUS);
+  uint16_t irq = 0;
+  if (GPIO_readDio(SX1281_DIO1)) irq = _read16(CMD_GET_IRQ_STATUS);
+  else if (micros_before(_rx_check)) return false;
+  else irq = _read16(CMD_GET_IRQ_STATUS);  // updates _status for the check below
   if (!(irq & IRQ_RX_DONE)) {
     // Out of RX without a packet (or not answering): arm again
     if (micros_after(_rx_check)) {
@@ -399,22 +482,16 @@ bool sx1281_receive(radio_packet_t* pkt)
     }
     return false;
   }
-  pkt->timestamp_us = micros();
   _stats.ok++;
-
-  uint8_t offset = _read16(CMD_GET_RX_BUFFER_STATUS) & 0xFF;
-  _read_buffer(offset, pkt->data, _rx_len);
-  pkt->len = _rx_len;
-
-  uint8_t tx[7] = {CMD_GET_PACKET_STATUS}, rx[7];
-  _xfer(tx, rx, 7);
-  pkt->rssi = -(int)rx[3] / 2;  // rssiSync
+  _read_packet(pkt, _rx_len);
 
   _rx_arm();
   return true;
 }
 
 void sx1281_rx_stats(sx1281_stats_t* stats) { *stats = _stats; }
+
+void sx1281_clear_stats() { _stats = (sx1281_stats_t){0}; }
 
 uint16_t sx1281_last_status()
 {
@@ -446,10 +523,17 @@ radio_status_t sx1281_send(const uint8_t* data, uint16_t len)
   (void)data, (void)len;
   return RADIO_ERR_PARAM;
 }
+radio_status_t sx1281_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
+                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
+{
+  (void)data, (void)len, (void)rx_sync, (void)rx_len, (void)window_us, (void)pkt;
+  return RADIO_ERR_PARAM;
+}
 radio_status_t sx1281_rx_start(uint16_t len) { (void)len; return RADIO_ERR_PARAM; }
 void sx1281_rx_stop() {}
 bool sx1281_receive(radio_packet_t* pkt) { (void)pkt; return false; }
 void sx1281_rx_stats(sx1281_stats_t* stats) { *stats = (sx1281_stats_t){0}; }
+void sx1281_clear_stats() {}
 uint16_t sx1281_last_status() { return 0; }
 
 #endif

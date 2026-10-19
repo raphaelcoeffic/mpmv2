@@ -23,7 +23,7 @@
 //   chip <cc2652|sx1281> [dbm]   radio for the PHY (applied at once and kept): the
 //                                CC2652 RF core (default) or the SX1281 (MPM v2: GFSK
 //                                125 kbps to 2 Mbps, TX power in dBm into the
-//                                PA, default 0, max 2; no ack)
+//                                PA, default 0, max 2)
 //   preset <name>                load a PHY preset (and its channel plan):
 //                                nrf1m nrf2m nrf250k xn250k, CC2500 ones with
 //                                their framing: frskyd frskyx frskyx2 frskyxeu
@@ -396,8 +396,9 @@ static radio_status_t _send_acked(const uint8_t* air, uint16_t n, ack_t* ack)
   uint8_t max_len = _ack_frame.dpl ? _ack_max_len : 0;
   uint16_t rx_len = frame_rx_len(&_ack_frame, max_len);
   for (ack->tries = 1; ack->tries <= 1 + _ack_retries; ack->tries++) {
-    radio_status_t st = radio_send_rx(air, n, frame_rx_sync(&_ack_frame), rx_len, _ack_window,
-                                      &ack->pkt);
+    uint32_t sync = frame_rx_sync(&_ack_frame);
+    radio_status_t st = _sx ? sx1281_send_rx(air, n, sync, rx_len, _ack_window, &ack->pkt)
+                            : radio_send_rx(air, n, sync, rx_len, _ack_window, &ack->pkt);
     if (st == RADIO_NO_PACKET) continue;
     if (st != RADIO_OK) return st;
     if (frame_decode_pcf(&_ack_frame, ack->pkt.data, ack->pkt.len, max_len, ack->payload,
@@ -506,7 +507,6 @@ static void _cmd_chip(char* args)
   _job_stop();
   _sx = sx;
   _sx_dbm = (int32_t)dbm;
-  if (_sx) _ack_on = false;
   if (_phy_ok && !_apply_phy()) {
     _report_radio_error("radio init");
     return;
@@ -1121,10 +1121,6 @@ static void _cmd_ack(char* args)
   uint32_t retries = _number_or(&args, _ack_retries);
   uint32_t window = _number_or(&args, _ack_window);
   uint32_t max_len = _number_or(&args, _ack_max_len);
-  if (on && _sx) {
-    _print("@err ack: cc2652 only\r\n");
-    return;
-  }
   if (on && (_frame.type != FRAME_NRF || !_frame.esb)) {
     _print("@err ack needs esb framing\r\n");
     return;
@@ -1255,6 +1251,7 @@ static void _cmd_txp(char* args)
   _tx_late_max = 0;
   _seq = 0;
   _stat_tx = _stat_rx = _stat_err = _stat_acked = _stat_retries = 0;
+  sx1281_clear_stats();
   _job = JOB_TXP;
   _print("@ok txp\r\n");
 }
@@ -1304,11 +1301,15 @@ static void _cmd_stop()
   _printf("@ok stop tx=%lu rx=%lu err=%lu", _stat_tx, _stat_rx, _stat_err);
   if (_stat_tx) _printf(" late_max=%lu", _tx_late_max);
   if (_ack_on) _printf(" acked=%lu retries=%lu", _stat_acked, _stat_retries);
-  if (was_rx && _sx) {
+  if (_sx) {
     sx1281_stats_t st;
     sx1281_rx_stats(&st);
     _printf(" sx_ok=%lu sx_rearm=%lu sx_busy=%lu sx_last=0x%02x/0x%04x", st.ok, st.rearm, st.busy,
             st.last_status, st.last_irq);
+    _printf(" sx_txfail=%lu", st.tx_fail);
+    if (_ack_on)
+      _printf(" sx_ack=%lu/%lu/%lu sx_turn=%lu", st.ack_rx, st.ack_timeout, st.ack_none,
+              st.turn_max);
   }
   if (was_rx && !_sx) {
     radio_rx_stats_t st;

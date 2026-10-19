@@ -61,15 +61,20 @@ void timer_init()
 uint32_t millis() { return _ms_ticks; }
 
 uint32_t micros() {
-  uint32_t ms, us, ms2;
+  uint32_t ms, us, ms2, pending;
 
+  // The counter may have reloaded before the interrupt counted the
+  // millisecond (time-out flag still set): count it here, or micros() goes
+  // back by 1 ms and every "micros() - start > timeout" fires at once
   do {
     ms = _ms_ticks;
     us = _read_micros();
+    pending = HWREG(MS_TIMER_BASE + GPT_O_RIS) & GPT_RIS_TATORIS;
+    if (pending) us = _read_micros();
     ms2 = _ms_ticks;
   } while (ms != ms2);
 
-  return (ms + 1) * 1000 - us;
+  return (ms + 1 + (pending ? 1 : 0)) * 1000 - us;
 }
 
 uint32_t get_ticks() {

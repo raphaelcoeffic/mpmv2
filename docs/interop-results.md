@@ -111,13 +111,45 @@ October 2026, the NRF setups (`losses.py nrf`):
   channel that day: the CC2652 had 100% there before): 1 Mbps 92 to 94.8%
   (CC2652 93.2 to 94.8%), 250 kbps 88 to 92% (CC2652 88.4 to 90%).
 - **RX single mode, re-armed after each packet** (continuous mode can lock up,
-  datasheet errata 16.1). The chip still drops out of RX now and then: once
-  it stalled for good after 50 packets (it then stays in STDBY_RC, BUSY
-  time-outs). The driver checks the chip mode every millisecond and arms RX
-  again (`stop` prints `sx_rearm` and `sx_busy`): 2 re-arms in 4 runs of 250.
-- **The SX1281 crystal:** its offset is not measured yet (a `trim` sweep
-  taken before the re-arm check went in mixed in the stalls).
-- No ESB acks from the SX1281 yet (`ack` is CC2652 only).
+  datasheet errata 16.1). The driver also checks the chip mode every
+  millisecond and arms RX again if it left it (`stop` prints `sx_rearm` and
+  `sx_busy`): 0 re-arms since the `micros()` fix below.
+- **ESB acks** (`esb.py` with `CC_INIT="chip sx1281"`, SX1281 PTX, NRF PRX,
+  250 packets): 1 Mbps and 2 Mbps acked 250/250 on the 1st try or after 1 to
+  4 retries, NRF 250/250, ack payloads 250/250 distinct. From TX done to RX
+  ready takes 85 us (`sx_turn`; the ESB PRX answers after 130 us): TX done
+  on DIO1, auto FS on, SPI at 12 MHz, 4 us PA ramp. `sx1281_send_rx()` arms
+  RX with the ack sync word and a time-out of the ack window.
+- **The drop-outs were the firmware, not the chip:** `micros()` (`timer.c`)
+  went back by 1 ms when it ran between the GPT2-A reload and its interrupt,
+  so every `micros() - start > timeout` fired at once. The SX1281 driver
+  waits on BUSY and on the IRQ flags with such time-outs: false BUSY and TX
+  time-outs, RX given up, init failures (status 0x55). `micros()` now counts
+  a pending reload itself; no failure since (thousands of packets each way).
+  It affects every user of `micros()`, the RF core code too.
+- **Frequency** (SDR, carriers relative to each other): the SX1281 is 13 to
+  17 kHz from the MPM's NRF24L01; at 500 kbps it is close to the CC2652, so
+  the A7105 setups take the same `trim`. The CC2652's carrier moves with the
+  bit rate, about -20 kHz at 500 kbps, +47 kHz at 1 Mbps and +164 kHz at
+  2 Mbps relative to the SX1281 (open: the SDR has no absolute reference).
+
+The suites with the SX1281 instead of the CC2652 (`CC_INIT="chip sx1281"`,
+same `trim` as the CC2652), October 2026, % received:
+
+| Suite | Setup | MPM -> SX1281 | SX1281 -> MPM |
+|---|---|---|---|
+| A7105 | flysky, afhds2a, bugs, height, height8, pelikan, kyosho, kyoshohype, wfly2, joysway | 100 (all) | 97.5, 100, 96, 100, 100, 98, 99.5, 100, 88.5, 98 |
+| CC2500 | hott, hitec, ikea | 100 | 100 |
+| CC2500 | redpine | 91 | 100 |
+| CYRF6936 | dsm | 100 | 100 |
+| CYRF6936 | devo, j6pro, wk2x01, scorpio, kyosho3, traxxas, wfly | 95, 97, 96, 98, 96, 98, 93 | 100 (all) |
+| NRF | 1 Mbps, 2 Mbps | about 95 (CC2652 the same that day), 93.6 to 97 | |
+
+Not on the SX1281: bit rates below 125 kbps (hubsan, sfhss, frskyx and the
+other slow CC2500 setups), skyartec (229 kbps: no SX1281 rate within 1%), and
+frames over 255 bytes or without a fixed length (dsmbind, dsmbindresp,
+mlink, losi). The A7105 TX losses are the A7105 receiver's narrow frequency
+window, as with the CC2652 ([Frequency margin](#frequency-margin)).
 
 ### Enhanced ShockBurst
 

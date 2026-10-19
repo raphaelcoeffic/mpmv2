@@ -78,7 +78,8 @@ set of host tools drives both (`tools/bench`, see [bench.md](bench.md)).
   own register tables, mostly 97 to 100% each way.
 - E01X, E129, C186, E010R5 and FrSky L run with the real MPM protocol code.
 - 2 Mbps RX (CFlie): not on the CC2652; on the MPM v2 board the SX1281
-  receives NRF 2 Mbps (96 to 98%, [SX1281](interop-results.md#sx1281-mpm-v2)).
+  receives NRF 2 Mbps (96 to 98%) and does ESB with acks at 1 and 2 Mbps
+  ([SX1281](interop-results.md#sx1281-mpm-v2)).
 - The MPM v2 board gives the same results as the LaunchPad: 96 to 100% from
   the MPM chips, 95 to 100% to them. The losses below 100% that were tracked
   down are on the bench side: output stalls and a race in the MPM bench
@@ -169,8 +170,8 @@ packets 102.4 ms apart.
   the carrier sense that FrSky LBT needs (the CC2500 CCA, `CMD_PROP_CS` on the
   CC2652).
 - **2 Mbps RX.** The only route on the CC2652 is the BLE 2M PHY, untried (see
-  the assessment). The MPM v2's SX1281 does it (`chip sx1281`); ESB acks
-  from it are still to do.
+  the assessment). The MPM v2's SX1281 does it (`chip sx1281`), ESB acks
+  included; CFlie itself is not ported to it yet.
 - **TX power and the front end.** The MPM v2 board has an external PA/LNA
   (SKY66112, about +20 dBm). Output power, harmonics and the LNA's effect on
   sensitivity and blocking are not measured (no RF equipment yet).

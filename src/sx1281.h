@@ -50,6 +50,12 @@ void sx1281_set_sync_errors(uint8_t errors);
 // Send one packet (up to 255 bytes), blocks until sent
 radio_status_t sx1281_send(const uint8_t* data, uint16_t len);
 
+// Send one packet, then receive one packet of rx_len bytes with the rx_sync
+// sync word (an acknowledgment) for window_us from the RX start, as
+// radio_send_rx(). RADIO_NO_PACKET if nothing came
+radio_status_t sx1281_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
+                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt);
+
 // Receive packets of len bytes until sx1281_rx_stop(): RX single mode,
 // restarted after each packet by sx1281_receive() (continuous mode can lock
 // up under heavy traffic, errata 16.1)
@@ -66,9 +72,14 @@ typedef struct {
   uint32_t busy;
   uint8_t last_status;
   uint16_t last_irq;
+  // sx1281_send_rx(): acks received, RX time-outs, no answer at all, TX
+  // failures, longest time from TX done to RX started (us)
+  uint32_t ack_rx, ack_timeout, ack_none, tx_fail;
+  uint32_t turn_max;
 } sx1281_stats_t;
 
 void sx1281_rx_stats(sx1281_stats_t* stats);
+void sx1281_clear_stats();
 
 // Last command status byte, for diagnostics
 uint16_t sx1281_last_status();

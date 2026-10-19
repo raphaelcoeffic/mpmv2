@@ -257,7 +257,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 
 | Command | Description |
 |---|---|
-| `chip <cc2652\|sx1281> [dbm]` | Radio for the PHY (applied at once and kept): the RF core, or the MPM v2's SX1281 (GFSK 125 kbps to 2 Mbps, rates within 1%, nearest modulation index, TX power in dBm into the PA: default 0, max 2). `info` shows what the SX1281 got. No `ack` with the SX1281 |
+| `chip <cc2652\|sx1281> [dbm]` | Radio for the PHY (applied at once and kept): the RF core, or the MPM v2's SX1281 (GFSK 125 kbps to 2 Mbps, rates within 1%, nearest modulation index, TX power in dBm into the PA: default 0, max 2). `info` shows what the SX1281 got, `stop` its counters (`sx_*`). `ack` works with both |
 | `preset <nrf1m\|nrf2m\|nrf250k\|xn250k>` | NRF24L01 compatible PHY. `xn250k`: the MPM CC2500 XN297L emulation (127 kHz deviation) |
 | `preset <name>` | CC2500 PHYs of the MPM protocols, with their channel plan and `cc2500` framing: same `ch` numbers as `CHANNR`. `frskyd`, `frskyv`, `frskyx`, `frskyx2`, `frskyxeu`, `frskyx2eu`, `hott`, `hitec`, `redpine`, `redpineslow`, `skyartec`, `corona`, `coronav2`, `fdv3`, `ares`, `radiolink`, `ikea`, `sfhss`. Sync words from the ID (Hitec, Skyartec data packets, RadioLink variants): `cc2500` after the preset |
 | `preset <flysky\|afhds2a\|hubsan\|bugs\|height\|pelikan\|kyosho\|kyoshohype\|wfly2\|joysway>` | A7105 PHYs with their `a7105` framing and channel plan (2400 MHz + `ch` x 500 kHz, `ch` = `PLL_I`) |
