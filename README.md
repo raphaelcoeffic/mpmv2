@@ -51,6 +51,7 @@ disabled during the build process:
 | `USE_XOSC` | Use external oscillator (or HPOSC on CC2652RB). | ON |
 | `DRIVERLIB_NOROM` | Use compiled driverlib instead of ROM. | OFF |
 | `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see `docs/bench.md`). | OFF |
+| `BOOTLOADER` | Boot loader at 0x0 (update from the radio), application at 0x2000 (see `docs/update.md`). | OFF |
 
 ## Building the Project
 

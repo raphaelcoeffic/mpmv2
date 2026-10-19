@@ -216,10 +216,10 @@ packets 102.4 ms apart.
    needs no per-board calibration (HPOSC correction). The receivers' crystals
    still vary: the 4-in-1 chips of the bench are 35 kHz (CC2500) and 90 kHz
    (A7105) off, which the MPM `option` corrects per model today.
-7. **Update from the radio.** EdgeTX flashes the MULTI-Module over the
-   module bay with an STK500 subset; the CC2652 ROM boot loader isn't on
-   those pins, so the MPM v2 needs its own boot loader in flash. Proposal in
-   [update.md](update.md).
+7. **Update from the radio.** Boot loader in flash sector 0
+   (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
+   MULTI-Module, works over USB; EdgeTX branch `mpm-v2-flash` for the MPM v2
+   files. Next: try it from a radio. See [update.md](update.md).
 
 ## Questions for review
 

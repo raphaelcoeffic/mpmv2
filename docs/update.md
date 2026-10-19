@@ -1,12 +1,13 @@
 # Updating the MPM v2 firmware from the radio
 
-Status: proposal, nothing implemented yet. Today the MPM v2 is flashed over
-USB-C through the CC2652 ROM boot loader (`tools/serial_bl.py`, BOOT on DIO19
-driven by the CH343 DTR/RTS) or with a J-Link on J10.
+The update the STM32 MULTI-Module has: the user picks a `.bin` on the SD
+card ("Flash External Multi" or "Flash Internal Multi" in the SD manager)
+and EdgeTX writes it through the module bay, no USB and no tools.
 
-The goal is the update the STM32 MULTI-Module already has: the user picks a
-`.bin` on the SD card ("Flash External Multi" in the SD manager) and EdgeTX
-writes it through the module bay, no USB and no tools.
+Status: the boot loader (`src/bootloader/`, `-DBOOTLOADER=ON`) works over
+USB with a host tool that does what EdgeTX does; the EdgeTX side is on
+branch `mpm-v2-flash` (not pushed). Not yet tried from a radio: the module
+bay lines (inverted, S.Port polarity through U9) are untested.
 
 ## What EdgeTX does today
 
@@ -22,8 +23,11 @@ modules with `MULTI_TYPE_ELRS`):
    STM) and boot loader support and check and MULTI telemetry (0x800),
    otherwise "needs file ... external multi". Older v1 signatures
    (`multi-stm-bcsid-...`) are read too.
-2. **Reset.** `pulsesStop()`, module bay power off, 3 s, power on, 500 ms.
-   On radios that can't switch the module power the module keeps running.
+2. **Reset.** `pulsesStop()`, module power off, 3 s, power on, 500 ms. All
+   STM32 radios switch the internal and external module power
+   (`_internal_module_set_pwr()`, `_external_module_set_pwr()` in
+   `boards/generic_stm32/module_ports.cpp`), so the module always starts
+   from power up.
 3. **Link.** 57600 8N1. The radio sends on the PPM pin (bay pin 1), inverted
    (soft serial), and receives on S.Port, inverted. Internal modules use the
    duplex internal USART instead.
@@ -64,133 +68,160 @@ CCFG has no valid image. The radio bay lines are elsewhere:
 U8 puts S.Port onto DIO2 when USB is unplugged, but S.Port only carries
 module -> radio during an update and DIO3 goes to the CH343 alone. The ROM
 protocol (0x55 0x55 autobaud, `0x00 0xCC` acks) is not STK500 either. So the
-MPM v2 needs its own boot loader in flash.
+MPM v2 has its own boot loader in flash.
 
-## Proposal
-
-### Flash layout
+## Flash layout
 
 The CC2652R1 / RB flash is 352 KB in 8 KB sectors, CCFG in the last 88
-bytes (0x57FA8, last sector at 0x56000).
+bytes (0x57FA8, last sector at 0x56000). With `-DBOOTLOADER=ON`
+(`src/linker/`, `src/bootloader/layout.h`):
 
 | Range | Content |
 |---|---|
-| 0x00000 - 0x01FFF | Boot loader (sector 0) |
-| 0x02000 - 0x55FFF | Application, vector table at 0x2000 |
-| 0x56000 - 0x57FFF | Last sector: application tail and CCFG, never written by the boot loader |
+| 0x00000 - 0x01FFF | Boot loader (sector 0), 3.9 KB today |
+| 0x02000 - 0x55FFF | Application (336 KB), vector table at 0x2000 |
+| 0x56000 - 0x57FFF | Last sector: CCFG (boot loader image), never written by the boot loader |
 
-The 8 KB sector matches the STM32 layout: with signature `1E 55 AA`, EdgeTX
-already writes from byte 0x2000, so no EdgeTX change is needed for the
-addresses. CCFG keeps `IMAGE_VALID_CONF` at 0 (the boot loader) and the
-backdoor on DIO19, so USB recovery always works.
+The 8 KB sector matches the STM32 layout, where EdgeTX already writes from
+byte 0x2000. CCFG keeps `IMAGE_VALID_CONF` at 0 (the boot loader) and the
+backdoor on DIO19, so USB recovery through the ROM boot loader always works.
 
-**Size.** `STK_LOAD_ADDRESS` carries a 16 bit word address: 128 KB, a
-limit of STK500v1 itself (made for AVRs; avrdude reaches the ATmega2560's
-256 KB with an extra `STK_UNIVERSAL` "load extended address" command,
-`0x4D`, which EdgeTX doesn't send). EdgeTX keeps the full address in a
-`uint32_t` and sends only its low 16 bits, always in order, one page after
-the other from 0x1000. So the boot loader follows the wrap itself: it keeps
-its own write address, checks that the low 16 bits match it, and carries on
-past 0xFFFF. With that the application can use all of 0x2000 - 0x55FFF
-(336 KB, today about 57 KB) with no EdgeTX change. If EdgeTX ever sends
-pages out of order or skips some, the extended address command is the
-clean fix on its side.
+**Image header.** The reserved vector table entries 7 to 10 (0x201C) hold
+magic `MPV2`, length, CRC32 (zlib, header read as zeros) and a `checked`
+word. `tools/fw_image.py` fills them in after `objcopy` (`firmware.bin`, the
+file the J-Link flashes) and writes `mpm-v2.bin`, the file for the radio:
+the image followed by the MULTI signature `multi-x00000983-<version>`
+(board type 3, boot loader support and check, MULTI telemetry).
 
-### Entering the boot loader
+**Size.** `STK_LOAD_ADDRESS` carries a 16 bit word address: 128 KB, a limit
+of STK500v1 itself (made for AVRs; avrdude reaches the ATmega2560's 256 KB
+with an extra `STK_UNIVERSAL` "load extended address" command, `0x4D`,
+which EdgeTX doesn't send). EdgeTX keeps the full address in a `uint32_t`
+and sends only its low 16 bits, always in order, one page after the other
+from 0x1000. The boot loader follows the wrap: it keeps the full address and
+takes the next one forward. So the whole 336 KB can be used with no EdgeTX
+change (tested with a 200 KB image). A host that goes back to the start
+(a read back pass after the writes) must start a new session; reading each
+page back right after writing it works.
 
-As on the STM32 MULTI-Module:
+## Power up
 
-1. **From the application.** After power up the application listens on
-   UART1 at 57600 before the serial / PPM input detection
-   (`detect_input_signal()`). `0x30 0x20` and 5 ms of silence: it writes a
-   magic word to a RAM location kept across a reset (a `.noinit` word, or an
-   AON register) and resets. EdgeTX waits 500 ms after power on, then
-   repeats `GET_SYNC` for 5 s, so the boot loader answers the next one. Any
-   other traffic: normal start, no delay added to the boot.
-2. **In the boot loader.** No magic and a valid application: jump to it at
-   once (VTOR = 0x2000, stack pointer and reset vector from 0x2000). Magic
-   set, or no valid application: stay and serve STK500 on UART1 with no
-   timeout.
+1. **Image check** (`checked` cleared, magic, stack pointer in SRAM, reset
+   vector in the application). The CRC takes about 0.3 ms per KB (110 ms for
+   336 KB), too slow for every start: it is checked once, at the first start
+   after an update, then the boot loader clears `checked` (bits only go from
+   1 to 0: no erase) and resets.
+2. **Sync window.** STK500 on the radio link (UART1, inverted) and on the
+   console (UART0, the CH343 on USB-C), 57600 8N1. The application starts:
+   - after `BL_CONSOLE_MS` (20 ms) when the radio line is at the "no radio"
+     level for 20 ms (`BL_RADIO_ABSENT_LEVEL`: R14 pulls DIO22 up with
+     nothing on the PPM pin);
+   - as soon as the radio line carries anything but `STK_GET_SYNC`: serial
+     frames (100k 8E2) and PPM read as framing errors and other bytes at
+     57600 (more than `BL_NOISE_BYTES`, 8);
+   - at the latest after `BL_WINDOW_MS` (300 ms), when the line stays idle
+     and driven.
 
-Radios that don't switch the module power never reset the module: the
-application would have to spot the sync while running (frames stop after
-`pulsesStop()`, then bytes at 57600 arrive as framing errors at 100k 8E2).
-To be checked on such a radio.
+   A radio that reboots (watchdog) with the model in the air gets the module
+   back with its first frames: the window only runs its full length when the
+   radio drives the line and sends nothing, which only EdgeTX's flashing
+   does. EdgeTX waits 500 ms after power on before its first sync for STM32
+   modules; for MPM v2 files it syncs after 10 ms, then every 100 ms
+   (`mpm-v2-flash` branch), well within the window.
+3. **No valid application** (none yet, interrupted update, failed CRC): the
+   boot loader serves STK500 on both ports until one is written.
 
-### Writing
+Measured on the MPM v2 with the bench application and no radio: 32 ms from
+reset to the application answering on USB.
 
-- `READ_SIGN` answers `1E 55 AA`.
-- Each `PROG_PAGE` is checked, then programmed; a sector is erased when its
-  first page arrives. Erase (about 8 ms for 8 KB) and program fit well within
-  the 100 ms EdgeTX waits for `STK_OK`.
-- **Address:** the boot loader keeps its own write address (byte 0x2000,
-  then +256 per page) and accepts a `LOAD_ADDRESS` only when the low 16 bits
-  of its word address (byte address / 2) match (see Size above).
-- **First page (0x2000) check before any erase:** initial stack pointer in
-  the CC2652 SRAM (0x20000000 - 0x20014000), reset vector inside the
-  application range. An STM32 MULTI image (reset vector at 0x0800xxxx) or
-  anything else gets `STK_FAILED`: EdgeTX reports "wrong request", nothing
-  was erased and the old application still runs.
-- Writes below 0x2000 or into the CCFG sector are refused the same way.
-- **Valid marker last.** The application is valid when a CRC32 over its
-  image matches. The boot loader computes it after `LEAVE_PROGMODE` and
-  writes the marker, or the build places length and CRC in a header right
-  after the vector table and the boot loader checks it at every start (no
-  extra flash write, and an interrupted update fails the check). Either way,
-  an interrupted update leaves the boot loader serving STK500 at the next
-  power up: the user simply flashes again.
+## Writing
 
-### UART polarity
+- `READ_SIGN` answers `1E 55 26` (STM32 boot loader: `1E 55 AA`). EdgeTX
+  (`mpm-v2-flash`) refuses an MPM v2 file for a `1E 55 AA` module and the
+  other way round, before writing anything; with either signature it writes
+  256 byte pages from word address 0x1000.
+- **First page (0x2000) check before any erase:** the image header and
+  vectors as at power up. An STM32 MULTI image (reset vector at 0x0800xxxx)
+  or anything else gets `STK_FAILED`: EdgeTX reports "wrong request",
+  nothing was erased and the old application still runs (tested with
+  `multi-stm-1.3.4.74.bin`). The `checked` word of the first page is forced
+  to 0xFFFFFFFF.
+- Each page is programmed and compared; a sector is erased when its first
+  page arrives. Writes outside 0x2000 - 0x55FFF are refused.
+- `LEAVE_PROGMODE`: the boot loader resets when the image CRC matches, else
+  keeps serving: an interrupted update leaves it in charge at every power
+  up, the user flashes again (tested with half an image).
+- `READ_PAGE` reads back (for host tools), `GET_SIGN_ON`, `GET_PARAMETER`,
+  `SET_DEVICE`, `ENTER_PROGMODE` are answered for other STK500 hosts.
+- 57600 bauds: 56 KB in 11 s (21 s with read back), 336 KB would take about
+  70 s.
 
-The radio sends inverted on the PPM pin and reads S.Port inverted, the same
-as the normal serial input and telemetry. The boot loader sets the same
-inversion as the application: DIO22 inverted in the I/O controller, TX1_INV
-(DIO24) set for U9 so that S.Port idles as the radio expects, DIO21 to U9 as
-in telemetry. The pin levels at boot (`board_init()`) apply to the boot
-loader too: RF switch, SKY66112 and SX1281 NSS left safe.
+## Link polarity
 
-### The `.bin`
+The radio sends inverted on the PPM pin and reads S.Port inverted. The boot
+loader inverts DIO22 in the I/O controller. S.Port is only driven once a
+sync came from the radio: TX1_INV (DIO24) set first, so that U9 holds S.Port
+low (the idle level of inverted serial) before UART1 takes DIO21 over; the
+`board_init()` levels (S.Port released) are back before the application
+starts. Untested on a radio.
 
-The build appends the 24 byte MULTI signature to the application `.bin`
-(linked at 0x2000). Two options:
+## Internal modules
 
-- **No EdgeTX change:** flags with board type STM (1), boot loader support
-  and check, MULTI telemetry. Works on every EdgeTX today; the boot
-  loader's first page check is the only protection against the wrong file.
-- **Board type 3 for the CC2652:** EdgeTX would accept it as an external
-  MULTI file and could compare the file's board type with the device
-  signature (`1E 55 AA` is shared by the STM32 boot loader today, so the
-  MPM v2 would answer a signature of its own, e.g. `1E 55 CC`, with 256 byte
-  pages from 0x1000 too). A wrong file is then refused before the module is
-  touched. Needs an EdgeTX change.
+An internal MPM v2 has no USB, but EdgeTX gives the PC a way to it:
 
-Recommended: start with the first, propose the second to EdgeTX once the
-boot loader works.
+- The STK500 update works the same over the internal module UART (EdgeTX:
+  duplex, 57600 8N1, normal polarity): the board's `BL_RADIO_*` settings
+  name the UART and its polarity. The boot loader code assumes UART1 for the
+  radio and UART0 for the console today; a board with its radio link on
+  UART0 needs that generalised.
+- **Recovery through the ROM boot loader.** EdgeTX's CLI (USB serial) has
+  `set rfmod 0 power on|off`, `set rfmod 0 bootpin 0|1` (the internal
+  module's `INTMODULE_BOOTCMD_GPIO`, wired on a dozen targets) and
+  `serialpassthrough rfmod 0 <baud>` (8N1, normal polarity). If the
+  internal module's UART goes to DIO2 / DIO3 (UART0, the ROM boot loader
+  pins) and its BOOTCMD to DIO19 (backdoor; the CCFG `BL_LEVEL` sets its
+  active level, low today: it must be the level the radio's pin takes only
+  when asked, `INTMODULE_BOOTCMD_DEFAULT` is 0 on some targets), a PC can
+  hold BOOT, power cycle the module and run
+  the ROM boot loader protocol through the passthrough (`cc2538-bsl` style),
+  whatever is in the flash. No new code in EdgeTX.
+- The same passthrough also reaches the flash boot loader:
+  `stk500_flash.py --no-reset` after a module power cycle.
 
-### Not chosen
+So for an internal module: radio UART on DIO2 / DIO3, BOOTCMD on DIO19.
 
+## Tools
+
+```sh
+cmake -S . -B build-bl -G Ninja -DCMAKE_BUILD_TYPE=Release -DBENCH=ON -DBOOTLOADER=ON
+ninja -C build-bl                     # bootloader.elf, firmware.bin (with header), mpm-v2.bin
+ninja -C build-bl flash               # J-Link: boot loader + application
+tools/stk500_flash.py build-bl/mpm-v2.bin --verify   # USB-C: as EdgeTX does it
+```
+
+`stk500_flash.py` resets the CC2652 through the CH343 DTR (BOOT high) and
+syncs every 10 ms, within the 20 ms console window. With `--no-reset` it
+syncs for 5 s like EdgeTX; `--invert` drives the radio bay through a plain
+USB serial adapter (TX to the PPM pin, RX from S.Port).
+
+## Not chosen
+
+- **The check in the application**, as `pollBoot()` on the STM32: no window
+  in the boot loader, but a broken application can't be updated any more,
+  and an internal module has no other way in.
 - **Staging in the external NOR flash** (MX25R8035, 1 MB): write the image
-  there, check it, then copy. It makes the update all-or-nothing, but the
-  boot loader is never overwritten and USB recovery exists, so an
-  interrupted update is not fatal anyway. More code for little gain.
-- **The application writing its own flash:** no boot loader, but a bad
-  image means no update path but USB.
+  there, check it, then copy. All-or-nothing, but the boot loader is never
+  overwritten and an interrupted update is not fatal anyway.
 - **A different update protocol in EdgeTX** (the TI ROM protocol, or an
-  ELRS-like one): needs the ROM boot loader on other pins, which it can't do,
-  or new EdgeTX code with no gain over STK500.
+  ELRS-like one): the ROM boot loader isn't on the module bay pins, and
+  STK500 does the job.
 
-## Steps
+## Next
 
-1. Link the application at 0x2000 (`cc26x2r1f.lds` copy, VTOR set early)
-   and check it still runs and still flashes over USB / J-Link (the J-Link
-   flashes boot loader and application together).
-2. Boot loader: UART1 STK500 subset with the address wrap, flash erase / program (driverlib
-   `FlashSectorErase()` / `FlashProgram()` from ROM), first page and range
-   checks, CRC, jump.
-3. Host test without a radio: a Python STK500 sender doing exactly what
-   EdgeTX does (timings and padding included) through a USB serial adapter
-   on the bay pins, inverted.
-4. Application: the 57600 sync check at power up, magic, reset.
-5. Signature appended by the build (`tools/` script after `objcopy`).
-6. Test from a radio with EdgeTX: external bay, then a radio without module
-   power switching.
+1. Try from a radio: external bay (`mpm-v2-flash` EdgeTX), the S.Port
+   polarity and the window timing with a real power up; then a radio reboot
+   with frames running (module back with the first frames).
+2. Check `BL_RADIO_ABSENT_LEVEL` and the radio line idle level on the
+   module bay with a radio connected but not sending.
+3. Make `-DBOOTLOADER=ON` the default for the MPM v2 once tried from a
+   radio.
