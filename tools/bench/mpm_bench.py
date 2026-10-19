@@ -8,8 +8,9 @@ branch mpm-bench) and of mpm-v2 (src/bench.c), see docs/bench.md.
 
 Any device speaking the same line protocol can be driven by this tool, so the
 same commands work against a 4-in-1 module and a CC2652 based module.
-PORT can be a device or "mpm" / "cc" (the default is "mpm"): $MPM_PORT / $CC_PORT,
-else the first STM32duino USB serial / the first XDS110 port (LaunchPad UART).
+PORT can be a device or "mpm" / "cc" / "v2" (the default is "mpm"): $MPM_PORT /
+$CC_PORT / $V2_PORT, else the first STM32duino USB serial / the first XDS110
+port (LaunchPad UART) / the first CH343 port (MPM v2 USB-C, CC2652 UART0).
 
   mpm_bench.py ports                         list candidate serial ports
   mpm_bench.py [-p PORT] shell               interactive console
@@ -34,6 +35,7 @@ from serial.tools import list_ports
 
 MAPLE_VID = 0x1EAF  # STM32duino bootloader and USB serial
 XDS110 = (0x0451, 0xBEF3)  # LaunchPad debugger, its first port is the UART
+CH343 = (0x1A86, 0x55D3)  # MPM v2 USB serial (CH343P on UART0)
 
 
 class BenchError(Exception):
@@ -151,8 +153,9 @@ class Bench:
 
 
 def find_port(kind: str = "mpm") -> str:
-    """Serial port of "mpm" (4-in-1 module) or "cc" (CC2652 LaunchPad), any other value is a device."""
-    if kind not in ("mpm", "cc"):
+    """Serial port of "mpm" (4-in-1 module), "cc" (CC2652 LaunchPad) or "v2" (MPM v2),
+    any other value is a device."""
+    if kind not in ("mpm", "cc", "v2"):
         return kind
     env = os.environ.get(f"{kind.upper()}_PORT")
     if env:
@@ -160,7 +163,8 @@ def find_port(kind: str = "mpm") -> str:
     if kind == "mpm":
         ports = [p.device for p in list_ports.comports() if p.vid == MAPLE_VID]
     else:
-        ports = sorted(p.device for p in list_ports.comports() if (p.vid, p.pid) == XDS110)
+        ids = XDS110 if kind == "cc" else CH343
+        ports = sorted(p.device for p in list_ports.comports() if (p.vid, p.pid) == ids)
     if not ports:
         raise SystemExit(f"No {kind} serial port found, set ${kind.upper()}_PORT or use -p")
     return ports[0]
@@ -239,9 +243,9 @@ def shell(bench: Bench):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-p", "--port", default="mpm", help="serial port, or mpm / cc (default: mpm)")
+    ap.add_argument("-p", "--port", default="mpm", help="serial port, or mpm / cc / v2 (default: mpm)")
     ap.add_argument("-b", "--baud", type=int, default=921600,
-                    help="baud rate, for UART devices like the mpm-v2 LaunchPad (USB CDC ignores it)")
+                    help="baud rate, for UART devices like the mpm-v2 LaunchPad and MPM v2 (USB CDC ignores it)")
     ap.add_argument("-d", "--debug", action="store_true", help="show the module debug output")
     sub = ap.add_subparsers(dest="action", required=True)
     sub.add_parser("ports")
@@ -253,8 +257,8 @@ def main():
     p.add_argument("commands", nargs="+")
     p.add_argument("--listen", type=float, default=0, help="print events for N seconds after the commands")
     p = sub.add_parser("link")
-    p.add_argument("--tx", required=True, help="port, or mpm / cc")
-    p.add_argument("--rx", required=True, help="port, or mpm / cc")
+    p.add_argument("--tx", required=True, help="port, or mpm / cc / v2")
+    p.add_argument("--rx", required=True, help="port, or mpm / cc / v2")
     p.add_argument("--tx-setup")
     p.add_argument("--rx-setup")
     p.add_argument("--payload", required=True, help="hex payload sent by the TX device")

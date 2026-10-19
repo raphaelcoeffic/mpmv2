@@ -2,7 +2,7 @@
 MULTI-Module with the bench firmware and the mpm-v2 CC2652), their setups and
 the two-way link test. See docs/bench.md.
 
-Ports: $MPM_PORT / $CC_PORT, else detected (mpm_bench.find_port()).
+Ports: $MPM_PORT / $CC_PORT / $V2_PORT, else detected (mpm_bench.find_port()).
 A setup is a list of commands separated by ';'. An item ending in .txt is a
 command file, looked up in examples/ when it isn't a path:
   "preset frskyd;ch 0", "hott.txt", "cc2652_dsm.txt;prefix a5e01b56"

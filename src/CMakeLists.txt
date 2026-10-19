@@ -82,3 +82,10 @@ add_custom_command(
   COMMAND ${CMAKE_OBJCOPY} -O binary ${OBJCOPY_ARGS} firmware.elf firmware.bin
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
+
+# J-Link: ninja -C <build dir> flash
+add_custom_target(flash
+  COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh ${CMAKE_BINARY_DIR}/firmware.elf
+  DEPENDS firmware
+  USES_TERMINAL
+)

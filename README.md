@@ -8,6 +8,7 @@ Radio work so far, see `docs/`:
 - [docs/status.md](docs/status.md): what has been done, where things are, next steps toward MPM v2
 - [docs/cc2652-radio-assessment.md](docs/cc2652-radio-assessment.md): what the CC2652 radio can and cannot do for the MPM protocols, requirements for any other chip
 - [docs/interop-results.md](docs/interop-results.md): over-the-air results against the CC2500, NRF24L01, A7105 and CYRF6936 of a 4-in-1 module
+- [docs/hardware.md](docs/hardware.md): the MPM v2 board: pins, RF chain, radio bay, changes for the next revision
 - [docs/bench.md](docs/bench.md): the test rig (bench firmwares, host tools in `tools/bench`, unit tests in `tests/frame`)
 
 Radio bench build (LaunchPad, `src/bench.c` command shell on UART0 at 921600
