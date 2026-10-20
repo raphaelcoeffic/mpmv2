@@ -19,11 +19,12 @@ inverted, at the host's line settings) and the control port.
       (ms, comma separated), answered or not. drive: the radio line idle;
       float: no radio (CPPM left to the module's pull-up); frames: MULTI
       frames (100k 8E2) from 5 ms, then the sync
-  baysim.py reboot [--proto 127] [--off 1] [--rounds 5]
+  baysim.py reboot [--proto 127] [--sub 0] [--off 1] [--rounds 5]
       a radio rebooting with the model in the air: radio_sim.py's frames
       (100k 8E2, every 7 ms) all along, the module powered off for --off s
       then on: the time to its first telemetry (the status frame of the
-      protocol start), from the baysim trace
+      protocol start) and to the receiver's first (S.Port frames, a bound
+      FrSky X receiver), from the baysim trace
 
 Results: docs/update.md, "Tested over the module bay".
 """
@@ -152,7 +153,7 @@ def cmd_reboot(bay: BaySim, link_port: str, a):
     from radio_sim import Radio
 
     with Radio(link_port) as radio:
-        radio.set(protocol=a.proto, sub=0, option=0)
+        radio.set(protocol=a.proto, sub=a.sub, option=0)
         time.sleep(1)
         for _ in range(a.rounds):
             bay.cmd("pwr 0")
@@ -160,16 +161,19 @@ def cmd_reboot(bay: BaySim, link_port: str, a):
             bay.events.clear()
             bay.cmd("trace 1")
             bay.cmd("pwr 1")
-            time.sleep(1.5)
+            time.sleep(a.wait)
             bay.cmd("trace 0")
             ev = list(bay.events)
             t_on = next(int(e[1]) for e in ev if e[0] == "P" and e[2] == "1")
             # telemetry frames start with "MP" (4d50); the power up breaks are 00
             first = next((e for e in ev if e[0] == "R" and "4d50" in e[2]), None)
             sent = next((e for e in ev if e[0] == "T" and int(e[1]) > t_on), None)
-            print(f"off {a.off:.1f} s: first frame sent {(int(sent[1]) - t_on) / 1000:.1f} ms after power on, "
-                  + (f"first telemetry {(int(first[1]) - t_on) / 1000:.1f} ms" if first else "no telemetry"),
-                  flush=True)
+            rx = next((e for e in ev if e[0] == "R" and "4d5002" in e[2]), None)
+            line = f"off {a.off:.1f} s: first frame sent {(int(sent[1]) - t_on) / 1000:.1f} ms after power on, "
+            line += f"first telemetry {(int(first[1]) - t_on) / 1000:.1f} ms" if first else "no telemetry"
+            if rx:
+                line += f", the receiver's {(int(rx[1]) - t_on) / 1000:.1f} ms"
+            print(line, flush=True)
         radio.set(protocol=0)
 
 
@@ -188,7 +192,9 @@ def main():
     p.add_argument("delays", help="ms after power on, comma separated")
     p = sub.add_parser("reboot")
     p.add_argument("--proto", type=int, default=127)
+    p.add_argument("--sub", type=int, default=0)
     p.add_argument("--off", type=float, default=1.0, help="s without power")
+    p.add_argument("--wait", type=float, default=1.5, help="s of trace after power on")
     p.add_argument("--rounds", type=int, default=5)
     a = ap.parse_args()
 

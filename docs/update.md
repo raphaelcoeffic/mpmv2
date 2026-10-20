@@ -314,14 +314,27 @@ With baysim (2026-10-20), boot loader and bench application from
   along, the module off for 1 s: its first telemetry (the status of the
   protocol start) 31 to 35 ms after power on (5 rounds).
 
+- **A receiver over the bay** (X8R with UNI-RX, about 1 m away, on its own
+  5 V): bound from the MPM v2 through the bay (FrSky X2, sub 0), then
+  telemetry back through S.Port: TX_LQI 100, the receiver's RSSI 94 to 98,
+  the module's 194 to 216, A1 93 to 95. Radio reboot with it (`baysim.py
+  reboot --proto 64`): the module's first status 75 to 82 ms after power on
+  (FrSky X's start, 31 to 35 ms with the test protocol), the receiver's
+  telemetry back after 4.6 to 4.9 s (0.3 s off), 3.8 to 4.0 s (1 s off),
+  0.12 to 0.34 s (6 s off): about 5 s after the cut whatever the time off.
+  UNI-RX keeps the lost link's timing 4 s after its failsafe (manual), and
+  a restarted protocol has a new random channel skip and hop index (the
+  STM32 MULTI-Module's too): it is only found by the search after that. A
+  plain signal loss (the hop sequence going on) is back in 0.2 to 0.4 s
+  ([mpm-core.md](mpm-core.md#real-receivers)).
+
 Not yet: PPM, the 200 KB image over the bay (tested over USB), an internal
-module's polarity (`telem_invert` clear), a protocol with a receiver over
-bay power. A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
+module's polarity (`telem_invert` clear). A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
 and the radios' own line levels.
 
 ## Next
 
-1. A protocol with a real receiver over the bay; PPM.
+1. PPM; a real radio.
 2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
    path works.
 3. Generalise the radio port (UART0 or UART1, polarity) for internal
