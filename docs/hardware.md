@@ -76,6 +76,25 @@ stay plugged in while the radio bay is used.
   loader, which listens on SSI0 (DIO8-11) as well as UART0: a floating FSS
   or SCLK could make it pick SSI0 and ignore the UART until reset. It also
   keeps the SX1281 off the flash's bus before the firmware drives the pin.
+- **The SX1281 on its own SPI bus (SSI1).** Today the flash and the SX1281
+  share SSI0, which works because the MPM core doesn't use the SX1281:
+  flash work runs in the main loop between callbacks, and the flash
+  releases CS during its erase and program waits. With an SX1281 protocol
+  (2.4 GHz LoRa / FLRC, hundreds of packets a second), a flash transfer in
+  progress (a 256 byte read and its command, 0.2 to 0.3 ms) can't be
+  interrupted: it would delay a TX trigger or the FIFO read after DIO1, or
+  force all SX1281 SPI work into the main loop behind a bus lock. With two
+  buses neither driver knows about the other, both can use DMA at once, and
+  a stuck device can't block the other's bus. Three more pins: SSI1 is
+  unused (`src/spi.c` drives both SSIs) and the I/O controller puts it on
+  any DIO, nine of which are free (more without U9). A possible layout, to
+  check against the TRM's ROM boot loader notes: the flash stays on SSI0
+  (DIO8-10) with its CS moved to DIO11 and pulled up (FSS high keeps the
+  ROM boot loader off SSI0, the item above), the SX1281 on SSI1 on free
+  pins with a pull-up on its NSS. Fallback if pins get tight: a shared bus
+  with the SX1281's SPI work only in the main loop (its interrupts set a
+  flag), the flash driver already working in short transfers; tight at
+  high packet rates.
 - **A test pad** on a free DIO, for timing measurements.
 - **Battery voltage:** a divider from the bay VCC to an analog pin (DIO23-30,
   e.g. one freed by U9).
