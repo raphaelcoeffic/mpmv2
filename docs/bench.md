@@ -143,7 +143,7 @@ setup, setups as `;`-separated commands or example files
 | `suite_a7105.py` | The A7105 protocols (11 setups), with their `A7105_Init()` tables |
 | `suite_cyrf.py` | The CYRF6936 DSSS protocols (12 setups), with their own register setups |
 | `losses.py` | Where the losses of a CYRF6936, A7105 or plain NRF24L01 suite setup go: missing or bad, wrong bytes and bits, RSSI, receiver counters, and whether they lock to the 102.4 ms Wi-Fi beacon cycle (`--timing`). `--mpm-extra` / `--cc-extra` change one register or setting at a time |
-| `sdr.py` | Client for an ESP32-S3 running [esp-sdr](https://github.com/ESPARGOS/esp-sdr): I/Q bursts, FM demodulation, bit clock and slicing. `sdr.py info`, `sdr.py cap <MHz>` |
+| `sdr.py` | Client for an ESP32-S3 running [esp-sdr](https://github.com/ESPARGOS/esp-sdr): I/Q bursts, FM demodulation, bit clock and slicing. `sdr.py info`, `sdr.py cap <MHz>`, `sdr.py survey`: an unknown transmitter's channels, bit rate, sync word and first bytes |
 | `sdr_compare.py` | The same A7105 or NRF24L01 packet from the MPM and from the CC2652, seen by the SDR: bit rate, carrier, deviation in runs and on isolated bits, worst bit, payload; `--bits` per-bit table |
 | `proto_capture.py` | The MPM runs one of its protocols (`proto`), the CC2652 receives on one channel: E01X, E129, C186, E010R5, FrSky L |
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
@@ -169,9 +169,30 @@ under test. Found out while setting it up:
   at 1 m (`Sdr.autogain()` picks the highest gain without clipping).
 - The ESP32 crystal is good to 10 to 20 ppm: compare two senders, don't take
   absolute frequencies.
+- 16 MS/s keeps every fifth sample with no digital filter, and the default
+  analog filter is about 69 MHz wide: a signal 12 MHz off shows 16 MHz away
+  from where it is. `BANDWIDTH 13` (what `survey` sets) removes these aliases.
+
+`sdr.py survey` identifies an unknown transmitter: windows every 5 MHz from
+2401 to 2481 MHz, each keeping carriers 0.8 to 6 MHz from its centre. Per
+packet: carrier, bit rate (lowest of 31 kbps to 2 Mbps whose transitions line
+up), deviation, then the sliced bits against known sync words (A7105 IDs,
+CC2500 d391, XN297 preamble, V2x2 nRF24 address, BLE advertising). XN297 addresses are shown
+descrambled, as given to `XN297_SetTXAddr()`. Checked on the 4-in-1 running
+FlySky (sync 5475c52a, then 55 + TX id, 5 MHz hop grid), AFHDS2A (packets
+longer than a capture), Bayang (address = module id) and FrSky D (31 kbps; a
+few captures read as 2 or 3 x the rate, flagged in the summary). The
+carrier is taken midway between the two tones, not at the median: a bind
+packet of mostly zeros sits on one tone. Found this way: a WLtoys 1/28 car
+transmitter is V2x2 (1 Mbps, 285 kHz deviation, about 50 us of carrier
+before the preamble). Its bind packets (ID 7f 08 c8, flags c0, CRC checked)
+hop on the 16 channels of the ID 0 table (row 0, increment 0), where the MPM
+binds on its own ID's table.
 
 ```sh
 tools/bench/sdr.py info
+tools/bench/sdr.py survey                    whole band, 20 captures per window
+tools/bench/sdr.py survey 2411 --n 200 -v    one window, each packet
 CC_PORT=v2 tools/bench/sdr_compare.py flysky
 CC_PORT=v2 tools/bench/sdr_compare.py joysway --bits 48 64
 CC_PORT=v2 tools/bench/sdr_compare.py nrf2m --ch 40
