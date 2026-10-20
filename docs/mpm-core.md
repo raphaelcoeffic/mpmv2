@@ -164,7 +164,7 @@ loses about 1%. Bayang telemetry (XN297 RX) is not tested yet.
 
 `radio_sim.py drive --proto <n> [--sub <s>] --bind --bind-time 60` binds
 (the module must be binding before the receiver is powered up in bind mode),
-then sweeps CH1 to CH4 and prints the status flags and the FrSky link
+then sweeps CH1 to CH4 (`--sweep-ch`) and prints the status flags and the FrSky link
 telemetry (S.Port RSSI and battery, hub link frame) each second.
 
 | Receiver | Protocol | Result |
@@ -172,6 +172,7 @@ telemetry (S.Port RSSI and battery, hub link frame) each second.
 | FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds, servos follow; no telemetry (receive only) |
 | FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
 | FlySky FS-iA6B | AFHDS2A (28) sub 2 (PWM,SBUS), option 128 | binds (until the receiver answers), CH1-4 on SBUS at its serial servo port; telemetry (option bit 7) about 80 frames/s: RX 4.85 V, error rate 1%, RSSI 60, noise 101, SNR 41 |
+| Spektrum AR610C | DSM (6) sub 2 (DSMX 22 ms), option 6 (channels) | binds (receiver first in bind mode), servo on AUX1 follows (`--sweep-ch 6`); no telemetry |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
 frequency estimates of both); option -24 moves it there. The V8R4-II and

@@ -12,7 +12,7 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
   radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10]] [--option 0] [--time 0]
-                                         a real receiver: CH1-4 sweep, status and telemetry each second
+                                         a real receiver: CH1-4 sweep (--sweep-ch), status and telemetry each second
 """
 
 from __future__ import annotations
@@ -290,9 +290,9 @@ def cmd_drive(r: Radio, a):
     """A real receiver: with --bind the bind flag stays set until the
     protocol ends its bind; --bind-time keeps binding that long, restarting
     the bind (the flag cleared for a few frames) every --step seconds or when
-    the protocol ends it, with the next of --options if given. Then CH1 to
-    CH4 sweep (a quarter period apart), the others centred. Status flags and
-    telemetry frame counts and FrSky link statistics each second, until --time (0: Ctrl-C)."""
+    the protocol ends it, with the next of --options if given. Then the first
+    --sweep-ch channels sweep (spread over the period), the others centred.
+    Status flags, telemetry frame counts and link statistics each second, until --time (0: Ctrl-C)."""
     options = [a.option]
     if a.options:
         lo, hi, st = (int(v) for v in a.options.split(":"))
@@ -312,8 +312,9 @@ def cmd_drive(r: Radio, a):
             t = time.monotonic() - t0
             chans = [CH_CENTER] * 16
             if not binding:
-                for i in range(4):
-                    chans[i] = round(CH_CENTER + (CH_MAX - CH_CENTER) * math.sin(2 * math.pi * (t / a.period - i / 4)))
+                for i in range(a.sweep_ch):
+                    chans[i] = round(CH_CENTER + (CH_MAX - CH_CENTER) *
+                                     math.sin(2 * math.pi * (t / a.period - i / a.sweep_ch)))
             r.set(channels=chans)
             while not r.telem.empty():
                 _, ty, d = r.telem.get_nowait()
@@ -338,7 +339,7 @@ def cmd_drive(r: Radio, a):
                 next_print += 1.0
                 telem = " ".join(f"{ty:02x}:{n}" for ty, n in sorted(counts.items()))
                 stats = " ".join(f"{k} {v}" for k, v in link.items())
-                print(f"{t:6.1f} s {','.join(flags):30s} ch1-4 {chans[:4]} telemetry {telem} {stats}", flush=True)
+                print(f"{t:6.1f} s {','.join(flags):30s} ch {chans[:max(4, a.sweep_ch)]} telemetry {telem} {stats}", flush=True)
                 counts.clear()
                 link.clear()
             time.sleep(0.02)
@@ -359,6 +360,7 @@ def main():
     ap.add_argument("--rx-num", type=int, default=0)
     ap.add_argument("--bind", action="store_true", help="drive: bind first")
     ap.add_argument("--period", type=float, default=4.0, help="drive: sweep period, s")
+    ap.add_argument("--sweep-ch", type=int, default=4, help="drive: channels swept (from CH1)")
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
