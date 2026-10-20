@@ -10,15 +10,19 @@ inverted, at the host's line settings) and the control port.
 
   baysim.py pwr 0|1                 module supply
   baysim.py level                   pad levels of both lines
+  baysim.py ppm [CHANNELS|off] [--frame 22500] [--pulse 300] [--pol -]
+      PPM on the PPM pin instead of serial (us, comma separated: EdgeTX's
+      8 channels at 1500 by default); no argument: the state
   baysim.py flash FILE [--delay 0.2] [--no-verify]
       as EdgeTX: power off 3 s, stk500_flash.py syncing (every 100 ms),
       power on after --delay s; the first frames after power on from the
       baysim trace
-  baysim.py window drive|float|frames DELAYS
+  baysim.py window drive|float|frames|ppm DELAYS
       the boot loader's window: power on, one STK_GET_SYNC at each delay
       (ms, comma separated), answered or not. drive: the radio line idle;
       float: no radio (CPPM left to the module's pull-up); frames: MULTI
-      frames (100k 8E2) from 5 ms, then the sync
+      frames (100k 8E2) from 5 ms, then the sync; ppm: PPM (EdgeTX's
+      default, 8 channels) from before power on, then the sync
   baysim.py reboot [--proto 127] [--sub 0] [--off 1] [--rounds 5]
       a radio rebooting with the model in the air: radio_sim.py's frames
       (100k 8E2, every 7 ms) all along, the module powered off for --off s
@@ -45,6 +49,7 @@ ROOT = Path(__file__).resolve().parents[2]
 VID, PID = 0x2E8A, 0x4D32
 SYNC = bytes([0x30, 0x20])  # STK_GET_SYNC, CRC_EOP
 FRAME = bytes([0x55, 0x06, 0x00]) + bytes(23)  # a MULTI frame, protocol 6
+PPM = "ppm - 22500 300 " + " ".join(["1500"] * 8)  # EdgeTX's default
 
 
 def find_ports() -> tuple[str, str]:
@@ -70,7 +75,8 @@ class BaySim:
     def _rx_loop(self):
         buf = b""
         while not self._stop:
-            buf += self.ser.read(4096)
+            # read(n) waits for n bytes or the timeout: the replies at once
+            buf += self.ser.read(max(1, self.ser.in_waiting))
             *lines, buf = buf.split(b"\n")
             for raw in lines:
                 a = raw.decode(errors="replace").split()
@@ -97,6 +103,7 @@ class BaySim:
 
 def cmd_flash(bay: BaySim, link: str, a):
     bay.cmd("trace 0")
+    bay.cmd("ppm off")
     bay.cmd("tx drive")
     bay.cmd("invert 1")
     bay.cmd("pwr 0")
@@ -121,11 +128,16 @@ def cmd_flash(bay: BaySim, link: str, a):
 
 def cmd_window(bay: BaySim, link_port: str, a):
     link = serial.Serial(link_port, 57600, timeout=0.05)
+    bay.cmd("ppm off")
     for d in (int(x) for x in a.delays.split(",")):
         bay.cmd("pwr 0")
         bay.cmd("tx float" if a.mode == "float" else "tx drive")
         link.baudrate = 57600
+        if a.mode == "ppm":
+            bay.cmd(PPM)
         time.sleep(1.0)
+        bay.events.clear()
+        bay.cmd("trace 1")
         t0 = time.monotonic()
         bay.cmd("pwr 1")
         if a.mode == "frames":
@@ -140,10 +152,17 @@ def cmd_window(bay: BaySim, link_port: str, a):
             pass
         if a.mode == "float":
             bay.cmd("tx drive")
+        if a.mode == "ppm":
+            bay.cmd("ppm off")
         link.reset_input_buffer()
         link.write(SYNC)
         r = link.read(16)
-        print(f"{a.mode} {d:4d} ms: {r.hex() or '-'}", flush=True)
+        bay.cmd("trace 0")
+        # when the sync went out, after power on (the baysim trace)
+        t_on = next((int(e[1]) for e in bay.events if e[0] == "P" and e[2] == "1"), None)
+        sent = [int(e[1]) for e in bay.events if e[0] == "T" and e[2].endswith("3020")]
+        at = f" (sent at {(sent[-1] - t_on) / 1000:.1f} ms)" if sent and t_on is not None else ""
+        print(f"{a.mode} {d:4d} ms: {r.hex() or '-'}{at}", flush=True)
     bay.cmd("tx drive")
     link.close()
 
@@ -152,6 +171,7 @@ def cmd_reboot(bay: BaySim, link_port: str, a):
     sys.path.insert(0, str(Path(__file__).parent))
     from radio_sim import Radio
 
+    bay.cmd("ppm off")
     with Radio(link_port) as radio:
         radio.set(protocol=a.proto, sub=a.sub, option=0)
         time.sleep(1)
@@ -183,12 +203,17 @@ def main():
     p = sub.add_parser("pwr")
     p.add_argument("value", choices=["0", "1"])
     sub.add_parser("level")
+    p = sub.add_parser("ppm")
+    p.add_argument("channels", nargs="?", help="us, comma separated, or off")
+    p.add_argument("--frame", type=int, default=22500, help="frame length, us")
+    p.add_argument("--pulse", type=int, default=300, help="pulse length, us")
+    p.add_argument("--pol", choices=["-", "+"], default="-", help="-: pulses low (EdgeTX's default)")
     p = sub.add_parser("flash")
     p.add_argument("file", nargs="?", default=str(ROOT / "build-bl/mpm-v2.bin"))
     p.add_argument("--delay", type=float, default=0.2, help="s from the sync start to power on")
     p.add_argument("--no-verify", action="store_true")
     p = sub.add_parser("window")
-    p.add_argument("mode", choices=["drive", "float", "frames"])
+    p.add_argument("mode", choices=["drive", "float", "frames", "ppm"])
     p.add_argument("delays", help="ms after power on, comma separated")
     p = sub.add_parser("reboot")
     p.add_argument("--proto", type=int, default=127)
@@ -205,6 +230,14 @@ def main():
             print(bay.cmd(f"pwr {a.value}"))
         elif a.command == "level":
             print(bay.cmd("level"))
+        elif a.command == "ppm":
+            if a.channels is None:
+                print(bay.cmd("ppm"))
+            elif a.channels == "off":
+                print(bay.cmd("ppm off"))
+            else:
+                ch = " ".join(a.channels.split(","))
+                print(bay.cmd(f"ppm {a.pol} {a.frame} {a.pulse} {ch}"))
         elif a.command == "flash":
             return cmd_flash(bay, link, a)
         elif a.command == "window":

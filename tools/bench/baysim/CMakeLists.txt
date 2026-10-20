@@ -14,6 +14,7 @@ endif()
 pico_sdk_init()
 
 add_executable(baysim main.c usb_descriptors.c)
+pico_generate_pio_header(baysim ${CMAKE_CURRENT_LIST_DIR}/ppm.pio)
 target_include_directories(baysim PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 # Pins: the bench's RP2040-Zero (GP11 power switch, GP12 / GP13 the bay lines)
@@ -29,7 +30,7 @@ target_compile_definitions(baysim PRIVATE
 )
 
 target_compile_options(baysim PRIVATE -Wall -Wextra)
-target_link_libraries(baysim pico_stdlib pico_unique_id pico_bootrom hardware_uart hardware_irq tinyusb_device)
+target_link_libraries(baysim pico_stdlib pico_unique_id pico_bootrom hardware_uart hardware_irq hardware_pio hardware_clocks tinyusb_device)
 
 pico_enable_stdio_usb(baysim 0)
 pico_enable_stdio_uart(baysim 0)

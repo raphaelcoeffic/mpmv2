@@ -1,0 +1,16 @@
+; PPM pulse train, one FIFO word per pulse: the pulse length in the high
+; half, the space after it in the low half, in cycles (1 us), less the
+; program's own cycles: pulse - 2, space - 5. The pin high for the pulse
+; (the GPIO override inverts it for negative PPM)
+.program ppm
+.wrap_target
+    pull block
+    out x, 16
+    out y, 16
+    set pins, 1
+pulse:
+    jmp y-- pulse
+    set pins, 0
+space:
+    jmp x-- space
+.wrap

@@ -7,7 +7,8 @@
  * LINK_RX_PIN (from the bay's pin 5, S.Port) goes to the host. The host's
  * line settings (baud rate, data bits, parity, stop bits) apply to the
  * UART, so radio_sim.py (100000 8E2) and stk500_flash.py (57600 8N1) run
- * unchanged. Both lines are inverted in the GPIO block, as a radio's
+ * unchanged. Or LINK_TX_PIN sends PPM (command ppm), from a PIO state
+ * machine. Both lines are inverted in the GPIO block, as a radio's
  * external bay (invert 0: an internal module's UART).
  *
  * USB port "baysim ctrl" (CDC 1): text commands, one per line, each
@@ -24,6 +25,14 @@
  *                       received, the time of each group's first byte
  *   stats [0]           byte and error counts (0: and clear them)
  *   time                the microsecond clock of the trace
+ *   ppm -|+ FRAME PULSE CH1 [CH2 ...]
+ *                       PPM on the PPM pin instead of the UART, all times
+ *                       in us: the frame length, the pulse length, the
+ *                       channels (pulse included, 1 to 16 of them); -:
+ *                       pulses low (EdgeTX's default), +: pulses high. A
+ *                       new train starts at the end of the current frame
+ *   ppm off             back to the UART
+ *   ppm                 state, frames sent
  *   bootsel             reboot into the USB boot loader (also: the link
  *                       port opened at 1200 baud)
  *
@@ -36,15 +45,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/irq.h"
+#include "hardware/pio.h"
 #include "hardware/structs/io_bank0.h"
 #include "hardware/uart.h"
 #include "pico/bootrom.h"
 #include "pico/stdlib.h"
+#include "ppm.pio.h"
 #include "tusb.h"
 
-#define VERSION "baysim 1"
+#define VERSION "baysim 2"
 
 #ifndef LINK_UART
 #define LINK_UART 0
@@ -93,6 +105,8 @@ static volatile uint32_t tx_head, tx_tail;
 static bool invert = true;
 static bool trace;
 static bool tx_float;
+static bool ppm_on;              // PPM on LINK_TX_PIN instead of the UART
+static bool ppm_negative = true; // its pulses low
 static uint32_t bits_per_char = 11;  // start + 8 + parity + 2 stop at 100k
 static uint32_t baud = 100000;
 static struct {
@@ -150,7 +164,10 @@ static uint8_t pad_level(uint pin)
 
 static void line_apply(void)
 {
-    gpio_set_outover(LINK_TX_PIN, invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+    if (ppm_on)
+        gpio_set_outover(LINK_TX_PIN, ppm_negative ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+    else
+        gpio_set_outover(LINK_TX_PIN, invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
     gpio_set_inover(LINK_RX_PIN, invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
     gpio_set_oeover(LINK_TX_PIN, tx_float ? GPIO_OVERRIDE_LOW : GPIO_OVERRIDE_NORMAL);
     // S.Port is pulled up on the module (R22): no pull here
@@ -179,6 +196,112 @@ static void line_init(void)
     irq_set_priority(UART_IRQ, PICO_HIGHEST_IRQ_PRIORITY);
     uart_set_irqs_enabled(UART, true, false);
     irq_set_enabled(UART_IRQ, true);
+}
+
+/*
+ * PPM: the state machine takes one word per pulse (ppm.pio), the FIFO
+ * refilled from the interrupt, from one of two trains: the other one is
+ * written by the ppm command and taken at the next frame start
+ */
+#define PPM_PIO pio0
+#define PPM_SM 0
+#define PPM_IRQ PIO0_IRQ_0
+#define PPM_MAX_CH 16
+
+static uint32_t ppm_words[2][PPM_MAX_CH + 1];
+static uint32_t ppm_len[2];
+static volatile int ppm_cur, ppm_next = -1;
+static uint32_t ppm_pos;
+static volatile uint32_t ppm_frames;
+static int ppm_offset = -1;
+
+static void ppm_irq(void)
+{
+    while (!pio_sm_is_tx_fifo_full(PPM_PIO, PPM_SM)) {
+        if (!ppm_pos && ppm_next >= 0) {
+            ppm_cur = ppm_next;
+            ppm_next = -1;
+        }
+        pio_sm_put(PPM_PIO, PPM_SM, ppm_words[ppm_cur][ppm_pos]);
+        if (++ppm_pos == ppm_len[ppm_cur]) {
+            ppm_pos = 0;
+            ppm_frames++;
+        }
+    }
+}
+
+static uint32_t ppm_word(uint32_t pulse, uint32_t space)
+{
+    return (pulse - 2) << 16 | (space - 5);
+}
+
+// The train for the next frame start; false if the times don't fit
+static bool ppm_set(uint32_t frame, uint32_t pulse, const uint32_t *ch, uint32_t n)
+{
+    uint32_t sum = 0;
+    if (!n || n > PPM_MAX_CH || pulse < 50 || pulse > 1000)
+        return false;
+    for (uint32_t i = 0; i < n; i++) {
+        if (ch[i] < pulse + 50 || ch[i] > 60000)
+            return false;
+        sum += ch[i];
+    }
+    if (frame < sum + pulse + 50 || frame - sum > 60000)
+        return false;
+
+    irq_set_enabled(PPM_IRQ, false);
+    int b = ppm_on ? 1 - ppm_cur : 0;
+    for (uint32_t i = 0; i < n; i++)
+        ppm_words[b][i] = ppm_word(pulse, ch[i] - pulse);
+    ppm_words[b][n] = ppm_word(pulse, frame - sum - pulse);
+    ppm_len[b] = n + 1;
+    if (ppm_on) {
+        ppm_next = b;
+    } else {
+        ppm_cur = b;
+        ppm_next = -1;
+        ppm_pos = 0;
+    }
+    irq_set_enabled(PPM_IRQ, ppm_on);
+    return true;
+}
+
+static void ppm_start(void)
+{
+    if (ppm_offset < 0)
+        ppm_offset = pio_add_program(PPM_PIO, &ppm_program);
+    pio_sm_config c = ppm_program_get_default_config(ppm_offset);
+    sm_config_set_set_pins(&c, LINK_TX_PIN, 1);
+    // x (the space) from the low half
+    sm_config_set_out_shift(&c, true, false, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / 1000000.0f);
+    pio_sm_init(PPM_PIO, PPM_SM, ppm_offset, &c);
+    pio_sm_set_pins_with_mask(PPM_PIO, PPM_SM, 0, 1u << LINK_TX_PIN);
+    pio_sm_set_consecutive_pindirs(PPM_PIO, PPM_SM, LINK_TX_PIN, 1, true);
+    ppm_frames = 0;
+    ppm_on = true;
+    // gpio_set_function() clears the overrides: set them afterwards
+    pio_gpio_init(PPM_PIO, LINK_TX_PIN);
+    line_apply();
+
+    ppm_irq();
+    irq_set_exclusive_handler(PPM_IRQ, ppm_irq);
+    pio_set_irq0_source_enabled(PPM_PIO, pis_sm0_tx_fifo_not_full, true);
+    irq_set_enabled(PPM_IRQ, true);
+    pio_sm_set_enabled(PPM_PIO, PPM_SM, true);
+}
+
+static void ppm_stop(void)
+{
+    irq_set_enabled(PPM_IRQ, false);
+    pio_set_irq0_source_enabled(PPM_PIO, pis_sm0_tx_fifo_not_full, false);
+    pio_sm_set_enabled(PPM_PIO, PPM_SM, false);
+    pio_sm_clear_fifos(PPM_PIO, PPM_SM);
+    ppm_on = false;
+    ppm_next = -1;
+    gpio_set_function(LINK_TX_PIN, UART_FUNCSEL_NUM(UART, LINK_TX_PIN));
+    line_apply();
 }
 
 /*
@@ -355,10 +478,11 @@ static void power_set(bool on)
 
 static void command(char *line)
 {
-    char *argv[4];
+    char *argv[4 + PPM_MAX_CH];
     int argc = 0;
 
-    for (char *p = strtok(line, " \t"); p && argc < 4; p = strtok(NULL, " \t"))
+    for (char *p = strtok(line, " \t"); p && argc < (int)(sizeof(argv) / sizeof(argv[0]));
+         p = strtok(NULL, " \t"))
         argv[argc++] = p;
     if (!argc)
         return;
@@ -396,6 +520,29 @@ static void command(char *line)
         }
     } else if (!strcmp(argv[0], "time")) {
         ctrl_printf("ok t=%lu", (unsigned long)time_us_32());
+    } else if (!strcmp(argv[0], "ppm") && argc == 2 && !strcmp(argv[1], "off")) {
+        if (ppm_on)
+            ppm_stop();
+        ctrl_printf("ok ppm=off");
+    } else if (!strcmp(argv[0], "ppm") && argc >= 5 && (!strcmp(argv[1], "-") || !strcmp(argv[1], "+"))) {
+        uint32_t ch[PPM_MAX_CH];
+        uint32_t n = argc - 4;
+        for (uint32_t i = 0; i < n; i++)
+            ch[i] = strtoul(argv[4 + i], NULL, 10);
+        bool negative = !strcmp(argv[1], "-");
+        if (ppm_on && negative != ppm_negative)
+            ppm_stop();
+        if (!ppm_set(strtoul(argv[2], NULL, 10), strtoul(argv[3], NULL, 10), ch, n)) {
+            ctrl_printf("err ppm times");
+        } else {
+            ppm_negative = negative;
+            if (!ppm_on)
+                ppm_start();
+            ctrl_printf("ok ppm=%s n=%lu", argv[1], (unsigned long)n);
+        }
+    } else if (!strcmp(argv[0], "ppm") && argc == 1) {
+        ctrl_printf("ok ppm=%s frames=%lu", ppm_on ? (ppm_negative ? "-" : "+") : "off",
+                    (unsigned long)ppm_frames);
     } else if (!strcmp(argv[0], "bootsel")) {
         ctrl_printf("ok");
         tud_cdc_n_write_flush(CDC_CTRL);
