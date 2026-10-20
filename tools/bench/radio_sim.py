@@ -40,6 +40,12 @@ TEST_LEN = 30
 STATUS_FLAGS = ["input", "serial", "valid", "binding", "wait_bind", "failsafe", "ch_map", "buf_low"]
 
 
+def dsm_auto(mode: int, channels: int) -> tuple[int, int]:
+    """DSM Auto as EdgeTX: the sub protocol and channel count of a receiver's
+    bind response (mode 0xa2 DSMX 22 ms, 0xb2 DSMX 11 ms, 0x01/0x02/0x12 DSM2)"""
+    return {0xA2: 2, 0x01: 0, 0x02: 0, 0x12: 1}.get(mode, 3), min(max(channels, 3), 12)
+
+
 def encode(protocol=0, sub=0, rx_num=0, option=0, channels=None, bind=False, autobind=False,
            range_check=False, low_power=False, failsafe=False, v2=True, disable_telem=False,
            disable_ch_map=False, data=b"") -> bytes:
@@ -340,8 +346,7 @@ def cmd_drive(r: Radio, a):
                 if ty == 0x05 and a.proto == 6 and a.sub == 4 and len(d) >= 7:
                     # As EdgeTX (DSM Auto): the receiver's mode and channel count
                     # once the bind is over (a model change restarts the protocol)
-                    sub = {0xA2: 2, 0x01: 0, 0x02: 0, 0x12: 1}.get(d[6], 3)
-                    ch = min(max(d[5], 3), 12)
+                    sub, ch = dsm_auto(d[6], d[5])
                     a.sub, a.option, a.bind_time = sub, (a.option & 0xF0) | ch, 0
                     print(f"{t:6.1f} s DSM bind response {d[:10].hex()}: sub {sub}, {ch} channels")
             if binding and t - bind_start > 1.0:

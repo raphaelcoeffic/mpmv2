@@ -152,6 +152,8 @@ setup, setups as `;`-separated commands or example files
 | `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
 | `radio_sim.py` | The radio side of the MPM serial link for the firmware without `BENCH` (MPM core): frames every 7 ms at 100000 8E2, status, protocol list scan, bind, test protocol to the 4-in-1, `drive` a real receiver (bind, CH1-4 sweep, FrSky link telemetry) ([mpm-core.md](mpm-core.md)) |
 | `proto_compare.py` | A protocol ported to the MPM core (LaunchPad) against the 4-in-1 running it, same module id and channels: the MPM v2 receives both, bind phase and data, payloads and intervals compared ([mpm-core.md](mpm-core.md#mpm-protocol-files)) |
+| `servo_mon.py` | A real receiver's servo output, measured by an RP2040-Zero (`rp2040/main.py`, MicroPython): its supply switched on GP11, pulses, width and period on GP12 each second, gaps ([mpm-core.md](mpm-core.md#real-receivers)) |
+| `dsm_receiver.py` | A real DSM receiver on `servo_mon.py`, power cycled into bind (bind plug in), bound and driven by the port or the 4-in-1: `bind` (any sub protocol, Auto as EdgeTX) with the bind responses, pulse rate and period; `loss`: signal off and on, the output meanwhile and the time to reconnect ([mpm-core.md](mpm-core.md#real-receivers)) |
 | `raw_capture.py` | The CC2652 captures raw bits after a sync word of its choice: how the on-air formats were worked out |
 
 ### ESP32-S3 as a third receiver

@@ -183,9 +183,13 @@ packets 102.4 ms apart.
 
   The 0.2 to 2% of CRC errors from the CC2652 into the A7105 at 500 kbps have
   no reference to compare with.
-- **Real receivers and models.** Every test was chip to chip, against the
-  MPM's own chips. Bind, telemetry and the timing of the real protocols with
-  real receivers are untested. The E01X CRC question needs a model.
+- **Real receivers and models.** The ported MPM protocols on the LaunchPad
+  bind and drive the owned receivers as the 4-in-1 does: FrSky V8R4-II (V8)
+  and X8R (X2 LBT), FlySky FS-iA6B (AFHDS2A, telemetry), Spektrum AR610C
+  (DSM2 and DSMX, 22 and 11 ms, Auto, signal loss, a 42 minute run) and
+  Lemon-RX DSMP (DSM telemetry), see
+  [mpm-core.md](mpm-core.md#real-receivers). Not yet: FrSky D8, V2x2, a
+  real radio and its module bay. The E01X CRC question needs a model.
 - **Timing.** Measured (bench `timing`, `timing.py`), against what the MPM
   protocols need ([radio-interface.md](radio-interface.md)): TX starts 124 us
   after the call (+-1 us), or at a set time; a hop takes 136 us; TX to RX 79
@@ -242,7 +246,8 @@ packets 102.4 ms apart.
    check that hopping and TX fit in each protocol's period. Telemetry and ESB
    need fast RX/TX turnaround.
 5. **Test with real hardware.** Test each protocol with real receivers and
-   models: bind, control, telemetry, failsafe. The E01X fix too.
+   models: bind, control, telemetry, failsafe (the owned receivers: done,
+   see Not covered yet). The E01X fix too.
 6. **Hardware.** The MPM v2 prototype has the PA/LNA; the changes for the
    next revision are listed in [hardware.md](hardware.md). Its own frequency
    needs no per-board calibration (HPOSC correction). The receivers' crystals

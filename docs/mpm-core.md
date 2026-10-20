@@ -198,14 +198,16 @@ telemetry and bind response) each second. DSM Auto (sub 4): the bind
 response sets the sub protocol and channel count, as EdgeTX does.
 `servo_mon.py` (an RP2040-Zero with MicroPython, `rp2040/main.py`) switches
 the receiver supply (GP11) and measures a servo output (GP12): pulses,
-width and period each second, gaps.
+width and period each second, gaps. `dsm_receiver.py` binds a DSM receiver
+on it from the port or the 4-in-1 (`bind --sub N`) and cuts the signal
+(`loss`).
 
 | Receiver | Protocol | Result |
 |---|---|---|
 | FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds, servos follow; no telemetry (receive only) |
 | FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
 | FlySky FS-iA6B | AFHDS2A (28) sub 2 (PWM,SBUS), option 128 | binds (until the receiver answers), CH1-4 on SBUS at its serial servo port; telemetry (option bit 7) about 80 frames/s: RX 4.85 V, error rate 1%, RSSI 60, noise 101, SNR 41 |
-| Spektrum AR610C | DSM (6) sub 4 (Auto): bind response 0xA2 (DSMX 22 ms), 7 channels; also sub 2 option 6 | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 46 pulses/s at 22 ms as with the 4-in-1 (same bind response to both); once, the first bind after rewiring, a response 0x01 (DSM2 22 ms), not seen again; no telemetry |
+| Spektrum AR610C | DSM (6) sub 4 (Auto): bind response 0xA2 (DSMX 22 ms), 7 channels; subs 0 to 3 (DSM2 binds: response 0x01) | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 46 pulses/s at 22 ms in all four modes as with the 4-in-1 (same bind responses to both). Signal off: AUX1 holds 1.1 s then stops (no failsafe set), as with the 4-in-1; back on, the new position after 0.3 to 1.6 s. 42 minutes (DSMX 22 ms, CH1-7 swept): no gap, 41 to 48 pulses each second; 29 seconds with a pulse 170 µs early or late (the 4-in-1 too), one 19.86 ms period. Once, the first bind after rewiring, an Auto response 0x01. During some of the port's binds (none of the 4-in-1's yet) the MPM v2 also gets other packets with a good CRC on the bind channel, up to 48 alike (`e308b5c2...`), origin unknown: `dsm_receiver.py` only takes responses starting with the inverted module id. No telemetry |
 | Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); telemetry (32 chip codes) 44 to 46 frames/s, one every other 11 ms frame (16 to 20 before the decoding between callbacks): QoS (frame loss A 90 to 96, RX 4.95 V), TM1000 (temperature), sensors 0x03, 0x0A, 0x12, 0x34, 0x40 |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
