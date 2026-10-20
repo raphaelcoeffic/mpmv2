@@ -12,6 +12,8 @@ USB-C, while the MPM core runs: the protocols keep running (src/file_server.h).
   mpm_fs.py put LOCAL [PATH]       PATH (default: the name) replaced at once
                                    once the whole file and its CRC-32 check
   mpm_fs.py rm PATH | mv OLD NEW | mkdir PATH
+  mpm_fs.py eeprom [FILE] [--all]  the EEPROM decoded (mpm_eeprom.py), from the
+                                   module or from FILE (a copy got earlier)
 
 Port: --port, else $V2_PORT, else the first CH343. Requests: "FS", seq, op,
 payload, CRC-32 at 100000 baud 8E2 (the MULTI link); replies in telemetry
@@ -28,6 +30,8 @@ import zlib
 
 import serial
 from serial.tools import list_ports
+
+import mpm_eeprom
 
 CH343 = (0x1A86, 0x55D3)
 TELEM_FILE = 0x40
@@ -163,8 +167,15 @@ def main():
     p.add_argument("new")
     p = sub.add_parser("mkdir")
     p.add_argument("path")
+    p = sub.add_parser("eeprom")
+    p.add_argument("file", nargs="?", help="a local copy instead of the module's")
+    p.add_argument("--all", action="store_true", help="the erased entries too")
     a = ap.parse_args()
 
+    if a.cmd == "eeprom" and a.file:
+        with open(a.file, "rb") as f:
+            print("\n".join(mpm_eeprom.decode(f.read(), a.all)))
+        return
     fs = Fs(a.port or find_port())
     try:
         if a.cmd == "info":
@@ -207,6 +218,8 @@ def main():
             fs.req(RENAME, a.old.encode() + b"\0" + a.new.encode())
         elif a.cmd == "mkdir":
             fs.req(MKDIR, a.path.encode())
+        elif a.cmd == "eeprom":
+            print("\n".join(mpm_eeprom.decode(fs.get("eeprom"), a.all)))
         if fs.resent:
             print(f"({fs.resent} requests sent again)", file=sys.stderr)
     except FsError as e:

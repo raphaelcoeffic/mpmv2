@@ -331,8 +331,11 @@ settings, all optional.
 
 `tools/mpm_fs.py` reads and writes the files over USB-C while the MPM core
 runs (`src/file_server.c`, protocol in `file_server.h`): `info`, `ls [-r]`,
-`get`, `put`, `rm`, `mv`, `mkdir`. For debugging: the `eeprom` file read
-(`mpm_fs.py get eeprom - | xxd`), written back (binds moved to another
+`get`, `put`, `rm`, `mv`, `mkdir`, `eeprom`. For debugging: the `eeprom` file
+decoded (`mpm_fs.py eeprom`, or `tools/mpm_eeprom.py FILE` for a copy or an
+STM32 module's dump: Multiprotocol.h's layout, the entries set: CYRF ID,
+module ID, RX ids per rx_num, FrSky / AFHDS2A / Bayang / DSM RX, clones;
+`--all` lists the erased ones too), written back (binds moved to another
 module; the module reads it at power up, and its RAM copy overwrites the
 file at the next EEPROM write), config files later.
 
