@@ -61,8 +61,10 @@ static bool _rx_held;                 // RX ended for the protocol, the RF core 
 static volatile bool _rx_busy;        // a packet's sync came, not the packet yet
 static volatile uint32_t _rx_end_us;  // its expected end
 static uint16_t _rx_air_max;          // fixed length RX: air bytes
+static bool _rx_var;                  // RX length from the first bytes
 
-static frame_t _frame;
+static frame_t _frame, _frame_alt;    // RX: alt with the other code length
+static bool _alt;
 static radio_phy_t _phy;
 static bool _phy_on;
 static uint32_t _freq_khz;
@@ -106,7 +108,9 @@ static uint16_t _power_word(uint8_t pa) { return pa >= CYRF_POWER_5 ? RF_TX_POWE
 
 // frame_init() takes about 2 ms here (its RX sync word choice), too long at
 // TX GO: the results for the last codes (DSM: 5 rows), CRC seed aside. The
-// key holds the frame_init() inputs (newlib's byte memcmp() on frame_t: 100 us)
+// key holds the frame_init() inputs (newlib's byte memcmp() on frame_t: 100 us).
+// RX (alt not NULL): with a length field, the 8DR chip takes 32 and 64 chip
+// codes (frame_cyrf_rx_alt(), DSM telemetry of a Lemon-RX DSMP: 32 chips)
 #define FRAME_CACHE 8
 typedef struct {
   uint64_t sop, data[2];
@@ -114,35 +118,44 @@ typedef struct {
 } _frame_key_t;
 static struct {
   _frame_key_t key;
-  frame_t f;
+  frame_t f, alt;
+  bool has_alt;
 } _frames[FRAME_CACHE];
 static uint8_t _frames_n, _frames_last;
 
-static bool _frame_init(frame_t* f)
+static bool _frame_init(frame_t* f, frame_t* alt, bool* has_alt)
 {
   _frame_key_t k;
   memcpy(&k.sop, f->sop_code, 8);
   memcpy(k.data, f->data_code, 16);
   k.flags = f->sdr | f->data32 << 1 | f->sop << 2 | f->sop32 << 3 | f->var_len << 4 | (f->crc_len != 0) << 5 |
-            f->invert << 6;
+            f->invert << 6 | (alt != NULL) << 7;
   for (uint8_t j = 0; j < _frames_n; j++) {
     uint8_t i = (_frames_last + FRAME_CACHE - j) % FRAME_CACHE;  // the latest first
     _frame_key_t* c = &_frames[i].key;
     if (c->sop == k.sop && c->data[0] == k.data[0] && c->data[1] == k.data[1] && c->flags == k.flags) {
       *f = _frames[i].f;
+      if (alt) {
+        *alt = _frames[i].alt;
+        *has_alt = _frames[i].has_alt;
+      }
       return true;
     }
   }
   if (!frame_init(f)) return false;
+  bool a = alt && f->var_len && frame_cyrf_rx_alt(f, alt);
+  if (alt) *has_alt = a;
   _frames_last = (_frames_last + 1) % FRAME_CACHE;
   _frames[_frames_last].key = k;
   _frames[_frames_last].f = *f;
+  if (a) _frames[_frames_last].alt = *alt;
+  _frames[_frames_last].has_alt = a;
   if (_frames_n < FRAME_CACHE) _frames_n++;
   return true;
 }
 
-// PHY and framing from the registers (TX or RX overrides): false if not supported
-static bool _setup(radio_phy_t* phy, frame_t* f, bool tx)
+// PHY and framing from the registers (TX or RX overrides, RX: alt): false if not supported
+static bool _setup(radio_phy_t* phy, frame_t* f, bool tx, frame_t* alt, bool* has_alt)
 {
   uint8_t tx_cfg = _reg[CYRF_03_TX_CFG], framing = _reg[CYRF_10_FRAMING_CFG];
   uint8_t mode = (tx_cfg >> 3) & 3;  // GFSK, 8DR, DDR, SDR
@@ -160,8 +173,9 @@ static bool _setup(radio_phy_t* phy, frame_t* f, bool tx)
   bool no_crc = tx ? _reg[CYRF_1F_TX_OVERRIDE] & 0x04 : _reg[CYRF_1E_RX_OVERRIDE] & 0x04;
   f->crc_len = no_crc ? 0 : 2;
   f->invert = tx ? _reg[CYRF_1F_TX_OVERRIDE] & 0x01 : _reg[CYRF_39_ANALOG_CTRL] & 0x02;
-  if (!_frame_init(f)) return false;
+  if (!_frame_init(f, tx ? NULL : alt, has_alt)) return false;
   f->crc_seed = _reg[CYRF_16_CRC_SEED_MSB] << 8 | _reg[CYRF_15_CRC_SEED_LSB];
+  if (!tx && *has_alt) alt->crc_seed = f->crc_seed;
 
   memset(phy, 0, sizeof(*phy));  // _prepare() compares the structs
   phy->symbol_rate = 1000000;
@@ -188,7 +202,8 @@ static bool _prepare(bool tx)
 {
   radio_phy_t phy;
   frame_t f;
-  if (!_setup(&phy, &f, tx)) return false;
+  bool alt = false;
+  if (!_setup(&phy, &f, tx, &_frame_alt, &alt)) return false;
   if (tx && _phy_on) phy.sync_threshold = _phy.sync_threshold;  // RX only: no radio_init() for it
   if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
     _phy = phy;
@@ -200,6 +215,7 @@ static bool _prepare(bool tx)
     _phy_on = true;
   }
   _frame = f;
+  _alt = alt;
   radio_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
   radio_set_rx_sync_alt(frame_rx_sync_alt(&_frame));
   uint32_t khz = _channel_khz();
@@ -270,7 +286,7 @@ static void _tx()
 static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
 {
   (void)ctx;
-  uint16_t len = _frame.var_len ? frame_rx_var_len(&_frame, RX_MAX, data, n) : _rx_air_max;
+  uint16_t len = _rx_var ? frame_rx_var_len(&_frame, RX_MAX, data, n) : _rx_air_max;
   if (len > n) {
     _rx_end_us = micros() + (uint32_t)(len - n) * 8000000 / _phy.symbol_rate;
     _rx_busy = true;
@@ -285,8 +301,9 @@ static void _rx()
   _rx_count = _rx_pos = 0;
   if (_rx_held) {
     radio_phy_t phy;
-    frame_t f;
-    bool ok = _setup(&phy, &f, false);
+    frame_t f, alt;
+    bool has_alt;
+    bool ok = _setup(&phy, &f, false, &alt, &has_alt);
     if (_release(ok ? &phy : NULL, &f)) {
       _state = S_RX;  // the packet being received
       return;
@@ -294,7 +311,9 @@ static void _rx()
   }
   _rx_busy = false;
   if (!_prepare(false)) return;
+  // The CYRF6936 length field is received as part of a fixed length
   uint8_t hdr_len = frame_rx_hdr_len(&_frame);
+  _rx_var = hdr_len != 0;
   _rx_air_max = frame_rx_len(&_frame, RX_MAX);
   radio_status_t st = radio_rx_start_var(hdr_len ? hdr_len : 1, _rx_air_max, _rx_var_len, 0);
   if (st == RADIO_OK) _state = S_RX;
@@ -324,6 +343,14 @@ static void _poll()
       if (len > RX_MAX) len = RX_MAX;
     }
     frame_result_t r = len ? frame_decode(&_frame, _pkt.data, _pkt.len, len, payload, &n) : FRAME_SHORT;
+    if (r != FRAME_OK && _alt) {
+      uint8_t alt_payload[FRAME_PAYLOAD_MAX], alt_n = 0;
+      if (frame_decode(&_frame_alt, _pkt.data, _pkt.len, len, alt_payload, &alt_n) == FRAME_OK) {
+        r = FRAME_OK;
+        n = alt_n;
+        memcpy(payload, alt_payload, n);
+      }
+    }
     if (r == FRAME_SHORT || n == 0) continue;  // false sync: still in RX
     radio_rx_stop();
     _state = S_IDLE;

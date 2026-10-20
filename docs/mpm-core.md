@@ -134,6 +134,11 @@ the protocols read them.
   received a quarter of the packets. Without a length field (the DSM bind
   response) a packet in progress keeps its RX through an abort: the DSM bind
   check restarts RX every 7 ms, shorter than the RF core's fixed length RX.
+  32 and 64 chip codes: the chip receives both in 8DR whatever
+  DATA_CODE_LENGTH, the SOP tells them apart (its second copy inverted with
+  64 chips). A Lemon-RX DSMP answers the 64 chip DSM data with 32 chip
+  telemetry, which the MPM receives. With a length field the RX syncs on the
+  header bytes both share and decodes with either (`frame_cyrf_rx_alt()`).
 
 The EEPROM (`eeprom_read_byte()`: AFHDS2A RX ids, clone ids, the CYRF ID) is
 in RAM for now: lost at power off.
@@ -186,7 +191,7 @@ width and period each second, gaps.
 | FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
 | FlySky FS-iA6B | AFHDS2A (28) sub 2 (PWM,SBUS), option 128 | binds (until the receiver answers), CH1-4 on SBUS at its serial servo port; telemetry (option bit 7) about 80 frames/s: RX 4.85 V, error rate 1%, RSSI 60, noise 101, SNR 41 |
 | Spektrum AR610C | DSM (6) sub 2 (DSMX 22 ms), option 6 (channels) | binds (receiver first in bind mode), servo on AUX1 follows (`--sweep-ch 6`); no telemetry |
-| Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); no telemetry yet |
+| Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); telemetry (32 chip codes) 16 to 20 frames/s of the about 23 it sends: QoS (frame loss A 90 to 96, RX 4.95 V), TM1000 (temperature), sensors 0x03, 0x0A, 0x12, 0x34, 0x40 |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
 frequency estimates of both); option -24 moves it there. The V8R4-II and

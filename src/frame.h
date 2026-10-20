@@ -148,3 +148,11 @@ uint8_t frame_cyrf_rx_count(const frame_t* f, const uint8_t* data, uint16_t rx_l
 frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                                 uint8_t len, uint8_t* payload, uint8_t* payload_len,
                                 uint16_t* pcf);
+
+// CYRF6936 8DR with SOP: the chip receives 32 and 64 chip data codes alike,
+// the SOP tells them apart (its second copy is inverted with 64 chips;
+// measured: a Lemon-RX DSMP answers 64 chip DSM data with 32 chip telemetry).
+// alt: f with the other code length, f and alt both get an RX sync word in
+// the header bytes they share: one RX, decoded with either. false if not 8DR
+// with SOP (f unchanged)
+bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt);

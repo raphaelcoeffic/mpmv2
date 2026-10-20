@@ -46,8 +46,35 @@ static void check(const char* name, uint16_t seed, const char* payload_hex, cons
   CHECK(enc && dec && robust);
 }
 
+// One RX (64 chip codes and the 32 chip alternative, frame_cyrf_rx_alt())
+// for packets sent with either code length: each decodes with its own frame
+static void check_alt(void)
+{
+  frame_t f = {.type = FRAME_CYRF, .crc_len = 2, .var_len = true, .crc_seed = 0x1234, .sop = true}, alt;
+  memcpy(f.sop_code, sop, 8);
+  memcpy(f.data_code, data, 16);
+  CHECK(frame_init(&f) && frame_cyrf_rx_alt(&f, &alt));
+  CHECK(alt.data32 && f.rx_sync == alt.rx_sync && f.rx_start == alt.rx_start);
+  for (int d32 = 0; d32 < 2; d32++) {
+    frame_t t = f;
+    t.data32 = d32;
+    CHECK(frame_init(&t));
+    uint8_t p[16] = {0x7f, 0, 0, 0x64, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, full[300], out[32], out_len;
+    memcpy(full, t.known, t.sync_len);
+    uint16_t n = t.sync_len + frame_tx_data(&t, p, sizeof(p), full + t.sync_len);
+    CHECK(_sync(full + f.rx_start - f.sync_len) == f.rx_sync);
+    frame_result_t r64 = frame_decode(&f, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
+    frame_result_t r32 = frame_decode(&alt, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
+    bool ok = (d32 ? r32 : r64) == FRAME_OK && (d32 ? r64 : r32) != FRAME_OK && out_len == 16 &&
+              !memcmp(out, p, 16);
+    printf("alt %s chips: decode %s\n", d32 ? "32" : "64", ok ? "ok" : "FAIL");
+    CHECK(ok);
+  }
+}
+
 int main()
 {
+  check_alt();
   check("seed0", 0, "000102030405060708090a0b0c0d0e0f", "084280e08b2a4f06e63a7ed17ed10b2a4f06e63a7da216549e0dcc74fb442ca93c1b98e9f6885952783731d3ed10b2a4f06e63a7da216549e0dcc74fb442ca93c1b98e9fe885952783731d3f510b2a4f06e63a7ea216549e0dcc74fdc42ca93c1b98e9fb085952783731d3f690b2a4f06e63a7ed216549e0dcc74fda42ca93c1b98e9fb405952783731d3f68b0f5c29546bd48badcc74fda216549e0e1c76ae7feb7bedf8d");
   check("seed1234", 0x1234, "55aa00ff", "084280e0ed10b2a4f06e63a7d72856e8a9e147ad64671604bbd356c3fed10b2a4f06e63a7ae14aa35ea45d586ad87c8ce2c0977a216549e0dcc74fda61dfbdfcf2b75bbebf7efefffff73f7b979bbfffdffff7efefe6e57fedab7d6f77ffd7f7cfbfb57795fdf7fffcfedfdf4f7cace9cff7a77fff4e7fdffd3eeefadfec65b7853fef78fde27fc75faeb5fc1f7f97dd6b9d53d73febfa377ffdfbdec9fddbecbfff7ff52e");
   printf(fails ? "%d FAILED\n" : "all ok\n", fails);

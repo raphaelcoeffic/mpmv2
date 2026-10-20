@@ -1213,6 +1213,27 @@ bool frame_init(frame_t* f)
   return true;
 }
 
+bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt)
+{
+  if (f->type != FRAME_CYRF || f->sdr || !f->sop || f->prefix_len) return false;
+  *alt = *f;
+  alt->data32 = !f->data32;
+  if (!frame_init(alt)) return false;
+  // The headers differ from the second SOP copy on (inverted with 64 chips)
+  uint8_t common = 0;
+  while (common < f->known_len && common < alt->known_len && f->known[common] == alt->known[common]) common++;
+  if (common < f->sync_len + 1) return false;
+  uint8_t known_len = f->known_len;
+  f->known_len = common;
+  _choose_rx_sync(f);
+  f->known_len = known_len;
+  alt->rx_sync = f->rx_sync;
+  alt->rx_sync_errors = f->rx_sync_errors;
+  alt->rx_start = f->rx_start;
+  alt->rx_first_start = f->rx_first_start;
+  return true;
+}
+
 uint8_t frame_sync_bits(const frame_t* f) { return f->sync_len * 8; }
 
 uint32_t frame_tx_sync(const frame_t* f) { return _sync_word(f->known, f->sync_len); }
