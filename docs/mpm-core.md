@@ -292,6 +292,15 @@ Measured on the MPM v2 (2026-10-20, `build-mpm`, DSM X 11 ms over the bay,
 counters read over J-Link, since removed):
 - the CYRF ID created at the first DSM start, written (72 ms), back after a
   power cycle with no write;
+- FS-iA6B (AFHDS2A sub 2, option 128) bound over the bay: its RX id
+  (`e6eba341`) written at offset 50; module off 3 s and on, no bind: the
+  receiver's telemetry back at once (82 to 88 frames/s, as before the
+  cut); rx_num 1 (no id stored): no telemetry;
+- AR610C (DSM Auto) bound over the bay: its response starts with the
+  inverted module id of the stored CYRF ID (`d40c4171`); module off 3 s and
+  on, no bind: driven again. The port's CYRF ID derives from the module id
+  anyway: this checks the stored copy is read back, the AFHDS2A RX id is
+  what the storage keeps;
 - flushes in steady state (J-Link writes to the copy): 55 to 56 ms, worst
   callback 0.2 to 0.5 ms late (29 µs without a flush), 5 flushes;
 - 50 power cuts at random times (baysim, 0.3 to 1.2 s on) while a test build
