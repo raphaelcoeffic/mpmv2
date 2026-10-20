@@ -85,14 +85,26 @@ FRSKYX_CRC_SHORT = [0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74
                     0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7]
 
 
-def frskyx_capture(addr: bytes, sub: int) -> list[Capture]:
+def frskyx_capture(addr: bytes, sub: int, x2: bool = False) -> list[Capture]:
     """Bind on CHANNR 0, data on hopping_frequency[0] (rx_tx_addr[0] & 7):
     channel skip (random), hop index, failsafe flag, sequence and CRC left
-    out. FCC D16 v1 only"""
-    n = 0x1D
-    return [Capture("bind", "preset frskyx;ch 0", n + 1, bind=True, valid=frskyx_crc_ok),
-            Capture("data", f"preset frskyx;ch {addr[0] & 7}", n + 1,
+    out. Sub 2, 3: LBT (EU). X2: the chip's CRC too"""
+    lbt = sub in (2, 3)
+    n = 0x20 if lbt and not x2 else 0x1D
+    preset = "frskyx" + ("2" if x2 else "") + ("eu" if lbt else "")
+    # hopping_frequency[0]: v1 FCC rx_tx_addr[0] & 7, X2 (FrSkyX2_init_hop)
+    # the offset of its ID; FCC offset 3, 4 -> 5, 6, LBT 0, 1 -> 2, 3
+    ch = addr[0] & 7
+    offset = ((addr[2] << 8) + addr[3]) % 5 if x2 else (ch - 2 if ch >= 5 else ch)
+    if x2 or lbt:
+        ch = offset + 2 if (offset <= 1 if lbt else offset >= 3) else offset
+    return [Capture("bind", f"preset {preset};ch 0", n + 1, bind=True, valid=frskyx_crc_ok),
+            Capture("data", f"preset {preset};ch {ch}", n + 1,
                     mask=(4, 5, 7, 21, 22, n - 1, n), valid=frskyx_crc_ok)]
+
+
+def frskyx2_capture(addr: bytes, sub: int) -> list[Capture]:
+    return frskyx_capture(addr, sub, x2=True)
 
 
 def afhds2a_hop0(module_id: int, addr: bytes) -> int:
@@ -181,6 +193,7 @@ def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> l
 # name: (protocol number, captures(addr, sub))
 CASES = {"bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
+         "frskyx2": (64, frskyx2_capture),
          "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture)}
 
 

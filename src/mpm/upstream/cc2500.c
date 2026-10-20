@@ -5,6 +5,10 @@
 // framing. TX sends the TX FIFO; RX fills a 64 byte RX FIFO as the chip does
 // (length byte, payload, RSSI and LQI | CRC_OK with APPEND_STATUS), address
 // check included. Read as the MPM reads it: RXBYTES, MARCSTATE, RSSI.
+// The RF core gives whole packets and starts sending about 0.2 ms later than
+// the CC2500 after the strobe: RXBYTES waits for a packet that ends within
+// RX_WAIT_US, which the CC2500 would have in its FIFO by then (FrSky X LBT
+// telemetry, received just before the protocol reads it).
 //
 // Not emulated: SYNC_MODE 0 / 4 (no preamble or sync word: CC2500_250K_Init(),
 // the XN297 at 250 kbps runs on xn297.c), infinite packet length, TXOFF_MODE
@@ -16,9 +20,11 @@
 #include "board.h"
 #include "frame.h"
 #include "radio.h"
+#include "timer.h"
 
 #define FXOSC 26000000ULL
 #define FIFO_SIZE 64
+#define RX_WAIT_US 500
 #define RSSI_OFFSET 72  // dBm, CC2500 datasheet table 31 (250 kBaud: 72, 2.4: 71)
 
 // Reset values (datasheet section 33), 0x00 to 0x2E
@@ -56,6 +62,8 @@ static bool _phy_on;
 static uint32_t _freq_khz;
 static uint16_t _power;
 static uint8_t _rx_max;  // RX: largest payload (length byte included)
+static volatile bool _rx_busy;       // a packet's length came, not the packet yet
+static volatile uint32_t _rx_end_us;  // its expected end
 static radio_packet_t _pkt;
 static uint8_t _air[FRAME_AIR_MAX];
 
@@ -140,22 +148,40 @@ static uint32_t _channel_khz()
   return (uint32_t)((int64_t)hz + offset + 500) / 1000;
 }
 
-// Radio set up for the registers: false if not supported (nothing sent)
+// The registers of the last _setup(), the frequency ones left out
+static uint8_t _setup_regs[NREGS];
+
+static bool _regs_changed()
+{
+  for (uint8_t i = 0; i < NREGS; i++) {
+    if (i == CC2500_0A_CHANNR || i == CC2500_0C_FSCTRL0 ||
+        (i >= CC2500_23_FSCAL3 && i <= CC2500_26_FSCAL0))
+      continue;
+    if (_reg[i] != _setup_regs[i]) return true;
+  }
+  return false;
+}
+
+// Radio set up for the registers: false if not supported (nothing sent).
+// _setup() and frame_init() (about 170 us) only after a register change
 static bool _prepare()
 {
-  radio_phy_t phy;
-  frame_t f;
-  if (!_setup(&phy, &f)) return false;
-  if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
-    _phy = phy;
-    _freq_khz = 0;
-    if (radio_init(&_phy) != RADIO_OK) {
-      _phy_on = false;
-      return false;
+  if (!_phy_on || _regs_changed()) {
+    radio_phy_t phy;
+    frame_t f;
+    if (!_setup(&phy, &f)) return false;
+    if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
+      _phy = phy;
+      _freq_khz = 0;
+      if (radio_init(&_phy) != RADIO_OK) {
+        _phy_on = false;
+        return false;
+      }
+      _phy_on = true;
     }
-    _phy_on = true;
+    _frame = f;
+    memcpy(_setup_regs, _reg, NREGS);
   }
-  _frame = f;
   radio_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
   uint32_t khz = _channel_khz();
   if (khz != _freq_khz) {
@@ -168,6 +194,7 @@ static bool _prepare()
 static void _tx()
 {
   if (_state == S_RX) radio_rx_stop();
+  _rx_busy = false;
   _state = S_IDLE;
   if (!_prepare()) return;
   uint8_t len = _tx_len;
@@ -188,12 +215,18 @@ static void _tx()
 static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
 {
   (void)ctx;
-  return frame_rx_var_len(&_frame, _rx_max, data, n);
+  uint16_t len = frame_rx_var_len(&_frame, _rx_max, data, n);
+  if (len > n) {
+    _rx_end_us = micros() + (uint32_t)(len - n) * 8000000 / _phy.symbol_rate;
+    _rx_busy = true;
+  }
+  return len;
 }
 
 static void _rx()
 {
   if (_state == S_RX) radio_rx_stop();
+  _rx_busy = false;
   _state = S_IDLE;
   if (!_prepare()) return;
   _rx_max = _frame.var_len ? _reg[CC2500_06_PKTLEN] + 1 : _reg[CC2500_06_PKTLEN];
@@ -217,6 +250,7 @@ static void _rx_poll()
 {
   if (_state == S_TX && radio_tx_done()) _state = S_IDLE;  // TXOFF_MODE IDLE
   while (_state == S_RX && radio_receive(&_pkt)) {
+    _rx_busy = false;
     uint8_t payload[FRAME_PAYLOAD_MAX];
     uint8_t n = 0;
     frame_result_t r = frame_decode(&_frame, _pkt.data, _pkt.len, _rx_max, payload, &n);
@@ -279,7 +313,11 @@ static uint8_t _status(uint8_t address)
     }
     case CC2500_35_MARCSTATE: return _state == S_RX ? MARC_RX : _state == S_TX ? MARC_TX : MARC_IDLE;
     case CC2500_3A_TXBYTES: return _tx_len;
-    case CC2500_3B_RXBYTES: return _rx_len;
+    case CC2500_3B_RXBYTES:
+      if (!_rx_len && _rx_busy && (int32_t)(_rx_end_us - micros()) < RX_WAIT_US) {
+        while (!_rx_len && _rx_busy && (int32_t)(micros() - _rx_end_us) < 200) _rx_poll();
+      }
+      return _rx_len;
     default: return 0;
   }
 }
@@ -336,6 +374,7 @@ void CC2500_Strobe(uint8_t state)
     case CC2500_SPWD:
     case CC2500_SXOFF:
       if (_state == S_RX) radio_rx_stop();
+      _rx_busy = false;
       _state = S_IDLE;
       break;
     case CC2500_SFRX:
@@ -362,6 +401,7 @@ void CC2500_SetTxRxMode(uint8_t mode) { (void)mode; }
 uint8_t CC2500_Reset()
 {
   if (_state == S_RX) radio_rx_stop();
+  _rx_busy = false;
   _state = S_IDLE;
   memcpy(_reg, _reset_regs, NREGS);
   _patable = 0xC6;

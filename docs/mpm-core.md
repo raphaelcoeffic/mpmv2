@@ -108,7 +108,13 @@ the protocols read them.
   with address check, CRC autoflush, appended RSSI and LQI; MARCSTATE,
   RXBYTES, TXBYTES. Not done: SYNC_MODE 0 (`CC2500_250K_Init()`), infinite
   length. PATABLE -10 dBm and up is the board default power, below
-  `RF_TX_POWER_LOW`.
+  `RF_TX_POWER_LOW`. Timing: the RF core setup and `frame_init()` (about
+  170 µs) run again only after a register change other than the frequency
+  ones; the RF core starts sending about 0.2 ms after the call and gives whole
+  packets where the CC2500 FIFO fills byte by byte, so an RXBYTES read waits
+  for a packet ending within 500 µs (its length known). FrSky X2 LBT: the
+  X8R's reply ends about 0.1 ms after the protocol reads RXBYTES without the
+  wait, 0.3 ms with the setup each time.
 - **A7105**: data rate, ID (2 or 4 bytes), CRC, FEC, preamble length, FIFO
   length; PLL registers to the frequency; MODE (TRER, CRCF), RSSI ADC. Not
   done: whitening. TX_TEST -11 dBm and up: default power.
@@ -136,6 +142,7 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | Bayang (sub 0) | same payload, 2000 µs | same payload, 8001 µs |
 | FrSky D (3) | same payloads, 9005 µs | same (frame and telemetry counters masked) |
 | FrSky X (15, D16 v1) | same payloads, 9001 µs | same (random and counter bytes masked, CRC checked) |
+| FrSky X2 (64, sub 2 LBT) | same payloads, 9002 µs | same (data channel from `FrSkyX2_init_hop()`) |
 | FrSky V (25) | same payloads; timing differs, see below | same (seed and CRC masked) |
 | AFHDS2A (28) | same payloads, 7701 µs | same, 61.6 ms between visits of the channel |
 | DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
@@ -152,6 +159,25 @@ wraps the MPM's 16 bit timer (about 20.7 ms between packets on a real MPM,
 At bind power (about -59 dBm at the receiver) one or the other loses 0 to
 16% of the bind packets from run to run, in bursts; at full power the port
 loses about 1%. Bayang telemetry (XN297 RX) is not tested yet.
+
+### Real receivers
+
+`radio_sim.py drive --proto <n> [--sub <s>] --bind --bind-time 60` binds
+(the module must be binding before the receiver is powered up in bind mode),
+then sweeps CH1 to CH4 and prints the status flags and the FrSky link
+telemetry (S.Port RSSI and battery, hub link frame) each second.
+
+| Receiver | Protocol | Result |
+|---|---|---|
+| FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds, servos follow; no telemetry (receive only) |
+| FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
+
+Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
+frequency estimates of both); option -24 moves it there. The V8R4-II and
+the X8R (its reply about 6 kHz above the 4-in-1) work at option 0 at 1 m. The
+X8R takes neither FrSky X v1 sub protocol: its firmware was found by binding
+the four X / X2 variants in turn from the 4-in-1 (bench `proto`), then
+sending each with different servo positions.
 
 ## Test protocol
 

@@ -11,16 +11,20 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py scan                      protocol list, as EdgeTX reads it
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
+  radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10]] [--option 0] [--time 0]
+                                         a real receiver: CH1-4 sweep, status and telemetry each second
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import queue
 import struct
 import sys
 import threading
 import time
+from collections import Counter
 from typing import Any
 
 import serial
@@ -67,6 +71,22 @@ def status_decode(d: bytes) -> dict:
             "prev": d[7], "name": d[8:15].rstrip(b"\0").decode(errors="replace"),
             "n_sub": d[15] & 0x0F, "option_type": d[15] >> 4,
             "sub": d[16:24].rstrip(b"\0").decode(errors="replace")}
+
+
+def telem_decode(ty: int, d: bytes) -> dict[str, int]:
+    """The link statistics of the MPM's FrSky telemetry frames (telemetry.ino):
+    S.Port (type 2) RSSI 0xF101 and battery 0xF104, hub (type 3) link frame 0xFE.
+    RX_RSSI: the receiver's, TX_RSSI: the module's (raw CC2500 RSSI + 128),
+    TX_LQI: telemetry packets in 900 ms (FrSky X), the CC2500 LQI (FrSky D)."""
+    if ty == 0x02 and len(d) >= 8:
+        appid = d[2] | d[3] << 8
+        if appid == 0xF101:
+            return {"rx_rssi": d[4], "tx_rssi": d[5], "rx_lqi": d[6], "tx_lqi": d[7]}
+        if appid == 0xF104:
+            return {"a1": d[4]}
+    elif ty == 0x03 and len(d) >= 7 and d[0] == 0xFE:
+        return {"a1": d[1], "a2": d[2], "rx_rssi": d[3], "tx_rssi": d[4], "rx_lqi": d[5], "tx_lqi": d[6]}
+    return {}
 
 
 class Radio:
@@ -141,7 +161,7 @@ class Radio:
 
 def cmd_status(r: Radio, a):
     r.set(protocol=a.proto, sub=a.sub, option=a.option)
-    end = time.monotonic() + a.time
+    end = time.monotonic() + (a.time or 2.0)
     last = None
     while time.monotonic() < end:
         s = r.wait(0x01, end - time.monotonic())
@@ -251,18 +271,88 @@ def cmd_link(r: Radio, a):
     return 0 if pkts and not bad and per and max(per) - min(per) < 50 else 1
 
 
+def cmd_drive(r: Radio, a):
+    """A real receiver: with --bind the bind flag stays set until the
+    protocol ends its bind; --bind-time keeps binding that long, restarting
+    the bind (the flag cleared for a few frames) every --step seconds or when
+    the protocol ends it, with the next of --options if given. Then CH1 to
+    CH4 sweep (a quarter period apart), the others centred. Status flags and
+    telemetry frame counts and FrSky link statistics each second, until --time (0: Ctrl-C)."""
+    options = [a.option]
+    if a.options:
+        lo, hi, st = (int(v) for v in a.options.split(":"))
+        options = list(range(lo, hi + 1, st))
+    r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind)
+    t0 = time.monotonic()
+    binding = a.bind
+    bind_start, opt_idx = 0.0, 0
+    if binding:
+        print(f"{0.0:6.1f} s bind, option {options[0]}")
+    next_print = t0 + 1.0
+    counts: Counter = Counter()
+    flags: list[str] = []
+    link: dict[str, int] = {}
+    try:
+        while not a.time or time.monotonic() - t0 < a.time:
+            t = time.monotonic() - t0
+            chans = [CH_CENTER] * 16
+            if not binding:
+                for i in range(4):
+                    chans[i] = round(CH_CENTER + (CH_MAX - CH_CENTER) * math.sin(2 * math.pi * (t / a.period - i / 4)))
+            r.set(channels=chans)
+            while not r.telem.empty():
+                _, ty, d = r.telem.get_nowait()
+                counts[ty] += 1
+                if ty == 0x01:
+                    flags = status_decode(d)["flags"]
+                link.update(telem_decode(ty, d))
+            if binding and t - bind_start > 1.0:
+                ended = "binding" not in flags
+                if t < a.bind_time and (ended or (a.options and t - bind_start >= a.step)):
+                    opt_idx = (opt_idx + 1) % len(options) if a.options else 0
+                    r.set(bind=False)
+                    time.sleep(0.03)
+                    r.set(bind=True, option=options[opt_idx])
+                    bind_start, flags = t, []
+                    print(f"{t:6.1f} s bind, option {options[opt_idx]}")
+                elif ended or t >= a.bind_time > 0:
+                    r.set(bind=False, option=a.option)
+                    binding = False
+                    print(f"{t:6.1f} s bind done, option {a.option}")
+            if time.monotonic() >= next_print:
+                next_print += 1.0
+                telem = " ".join(f"{ty:02x}:{n}" for ty, n in sorted(counts.items()))
+                stats = " ".join(f"{k} {v}" for k, v in link.items())
+                print(f"{t:6.1f} s {','.join(flags):30s} ch1-4 {chans[:4]} telemetry {telem} {stats}", flush=True)
+                counts.clear()
+                link.clear()
+            time.sleep(0.02)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["status", "scan", "bind", "link"])
+    ap.add_argument("command", choices=["status", "scan", "bind", "link", "drive"])
     ap.add_argument("-p", "--port", default="cc", help="serial port (default: the LaunchPad)")
     ap.add_argument("--proto", type=int, default=PROTO_TEST)
     ap.add_argument("--sub", type=int, default=0)
-    ap.add_argument("--option", type=int, default=40)
-    ap.add_argument("--time", type=float, default=2.0)
+    ap.add_argument("--option", type=int, help="default: 40 for the test protocol (its RF channel), else 0")
+    ap.add_argument("--time", type=float, help="seconds (default 2, drive: until Ctrl-C)")
     ap.add_argument("--count", type=int, default=500)
+    ap.add_argument("--rx-num", type=int, default=0)
+    ap.add_argument("--bind", action="store_true", help="drive: bind first")
+    ap.add_argument("--period", type=float, default=4.0, help="drive: sweep period, s")
+    ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
+    ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
+    ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
     a = ap.parse_args()
+    if a.option is None:
+        a.option = 40 if a.proto == PROTO_TEST else 0
     with Radio(find_port(a.port)) as r:
-        rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link}[a.command](r, a)
+        rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link,
+              "drive": cmd_drive}[a.command](r, a)
         print(f"frames sent {r.frames_sent}")
     sys.exit(rc)
 
