@@ -8,6 +8,7 @@
 #include "bench.h"
 #include "board.h"
 #include "eeprom.h"
+#include "file_server.h"
 #include "file_system.h"
 #include "mpm/mpm.h"
 #include "nor_flash.h"
@@ -23,6 +24,21 @@
 #include "debug.h"
 
 static lfs_t _lfs;
+
+// Flash waits and reads: the callbacks and the input go on. The next slice
+// of flash work (a 256 byte read and its processing by littlefs: up to
+// 0.65 ms) only starts if it ends before the next callback; protocols that
+// never leave that much: after 20 ms anyway
+#define FLASH_SLICE_US    1000
+#define FLASH_WAIT_MAX_US 20000
+
+static void _flash_yield()
+{
+  uint32_t start = micros();
+  do {
+    mpm_poll();
+  } while (mpm_time_left() < FLASH_SLICE_US && micros() - start < FLASH_WAIT_MAX_US);
+}
 
 static bool detect_button()
 {
@@ -79,9 +95,12 @@ int main(void)
     debugln("file system mounted");
   }
   eeprom_init(err == 0 ? &_lfs : 0);
+  // Files from the host over USB (tools/mpm_fs.py)
+  file_server_init(err == 0 ? &_lfs : 0);
 
   mpm_init();
-  // Flash writes from mpm_port_idle(): the protocol keeps running
-  nor_flash_set_yield(mpm_poll);
+  // Flash work from mpm_port_idle() (EEPROM, files): the protocol keeps
+  // running
+  nor_flash_set_yield(_flash_yield);
   mpm_run();
 }

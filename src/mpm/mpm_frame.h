@@ -56,6 +56,8 @@ uint8_t mpm_frame_encode(const mpm_frame_t* f, uint8_t* buf);
 #define MPM_TELEM_HDR_LEN 4
 #define MPM_TELEM_STATUS 0x01
 #define MPM_TELEM_PROTO_LIST 0x11
+// MPM v2 only, on the USB link: file_server.h replies (not an MPM type)
+#define MPM_TELEM_FILE 0x40
 
 // Status flags
 #define MPM_STATUS_INPUT 0x01           // input signal detected

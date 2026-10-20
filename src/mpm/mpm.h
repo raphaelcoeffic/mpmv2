@@ -119,6 +119,11 @@ void mpm_init();
 // work (mpm_port_idle()). Also called from the waits of that work
 void mpm_poll();
 
+// Time to the next protocol callback (us): negative when late, INT32_MAX
+// when none is due (no protocol, no input). Board work runs in slices that
+// fit in it
+int32_t mpm_time_left();
+
 // Main loop, never returns
 void mpm_run();
 

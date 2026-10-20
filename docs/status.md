@@ -266,6 +266,22 @@ packets 102.4 ms apart.
    radio, serial frames ending it, the application's frames and telemetry);
    EdgeTX branch `mpm-v2-flash` for the MPM v2 files. Next: a real radio. See
    [update.md](update.md).
+8. **Settings and calibration.** No file is part of the firmware (it runs
+   with a blank flash); files customise and trace
+   ([mpm-core.md](mpm-core.md#storage), `tools/mpm_fs.py` over USB-C).
+   - `ppm.txt`: the PPM mode's protocol (name or number), sub protocol,
+     rx_num, option, autobind, low power, read at power up; missing file or
+     key: the build's `MPM_PPM_*`. One profile (no dial); a selection (a
+     channel at power up) if someone needs it. Binding in PPM mode: autobind
+     for now (the button at power up opens the boot shell).
+   - Factory calibration, after the RF lab: the TX power table (PA output
+     against the power setting, per band, within the regulatory limits), the
+     RSSI offset of the LNA, a frequency offset if HPOSC leaves one. In the
+     MX25R's 512 byte customer OTP (secured OTP 0x000-0x1FF: outside the
+     array, kept through a format or a chip erase), CRC-checked records
+     written one after another (OTP bits only go to 0: the last valid one
+     wins), locked in a separate step. Without it: a conservative built-in
+     table. `mpm_fs.py cal get|put`.
 
 ## Questions for review
 

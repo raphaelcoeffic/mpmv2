@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "eeprom.h"
+#include "file_server.h"
 #include "file_system.h"
 #include "flash_driver.h"
 #include "nor_flash.h"
@@ -330,6 +331,279 @@ static void test_wear()
   CHECK(eeprom_read(50 + (flushes - 1) % 64) == (uint8_t)(flushes - 1));
 }
 
+//
+// File server: requests as the host sends them
+//
+
+// zlib's CRC-32, bit by bit (file_server.c uses littlefs's table)
+static uint32_t _crc32(uint32_t crc, const uint8_t* d, uint32_t n)
+{
+  crc = ~crc;
+  while (n--) {
+    crc ^= *d++;
+    for (int k = 0; k < 8; k++) crc = crc & 1 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
+  }
+  return ~crc;
+}
+
+static uint8_t _seq;
+static uint8_t _reply[FILE_SERVER_REPLY_MAX];
+static uint8_t _reply_len;
+static uint8_t _last_req[FILE_SERVER_REQ_MAX];
+static uint8_t _last_req_len;
+
+static void _put32(uint8_t* p, uint32_t v)
+{
+  for (int i = 0; i < 4; i++) p[i] = v >> (8 * i);
+}
+static uint32_t _get32(const uint8_t* p)
+{
+  return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+// A request (a new seq), its status; the reply payload in _reply + 3
+static int _req(uint8_t op, const void* payload, uint32_t n)
+{
+  uint8_t* r = _last_req;
+  r[0] = ++_seq;
+  r[1] = op;
+  memcpy(r + 2, payload, n);
+  _put32(r + 2 + n, _crc32(0, r, 2 + n));
+  _last_req_len = 6 + n;
+  _reply_len = file_server_request(r, _last_req_len, _reply);
+  if (_reply_len < 7) return 1000;
+  CHECK(_reply[0] == r[0] && _reply[1] == op);
+  CHECK(_get32(_reply + _reply_len - 4) == _crc32(0, _reply, _reply_len - 4));
+  return (int8_t)_reply[2];
+}
+
+static int _req_path(uint8_t op, const char* path)
+{
+  return _req(op, path, strlen(path));
+}
+
+static int _put(const char* path, const uint8_t* data, uint32_t size, uint32_t crc)
+{
+  uint8_t p[8 + FILE_SERVER_PATH_MAX];
+  _put32(p, size);
+  _put32(p + 4, crc);
+  memcpy(p + 8, path, strlen(path));
+  int err = _req(FILE_SERVER_OPEN, p, 8 + strlen(path));
+  if (err) return err;
+  for (uint32_t off = 0; off < size; off += FILE_SERVER_DATA_MAX) {
+    uint32_t n = size - off < FILE_SERVER_DATA_MAX ? size - off : FILE_SERVER_DATA_MAX;
+    uint8_t w[4 + FILE_SERVER_DATA_MAX];
+    _put32(w, off);
+    memcpy(w + 4, data + off, n);
+    err = _req(FILE_SERVER_WRITE, w, 4 + n);
+    if (err) return err;
+  }
+  return _req(FILE_SERVER_CLOSE, 0, 0);
+}
+
+// Whole file into out, its size or an error
+static int _get(const char* path, uint8_t* out, uint32_t max)
+{
+  uint32_t off = 0;
+  for (;;) {
+    uint8_t p[5 + FILE_SERVER_PATH_MAX];
+    _put32(p, off);
+    p[4] = FILE_SERVER_DATA_MAX;
+    memcpy(p + 5, path, strlen(path));
+    int err = _req(FILE_SERVER_READ, p, 5 + strlen(path));
+    if (err) return err;
+    uint32_t n = _reply_len - 7;
+    if (off + n > max) return -1000;
+    memcpy(out + off, _reply + 3, n);
+    off += n;
+    if (n < FILE_SERVER_DATA_MAX) return off;
+  }
+}
+
+static uint8_t _file[5000], _back[5000];
+
+static void _random(uint8_t* d, uint32_t n, int seed)
+{
+  srand(seed);
+  for (uint32_t i = 0; i < n; i++) d[i] = rand();
+}
+
+static void test_file_server()
+{
+  memset(_mem, 0xFF, sizeof(_mem));
+  CHECK(_boot());
+  file_server_init(&_lfs);
+
+  CHECK(_req(FILE_SERVER_INFO, 0, 0) == 0 && _reply_len == 7 + 12);
+  CHECK(_get32(_reply + 3) == 4096 && _get32(_reply + 7) == SECTORS && _get32(_reply + 11) >= 2);
+
+  // upload, read back
+  CHECK(_req_path(FILE_SERVER_MKDIR, "tables") == 0);
+  CHECK(_req_path(FILE_SERVER_MKDIR, "tables") == LFS_ERR_EXIST);
+  _random(_file, 4321, 1);
+  CHECK(_put("tables/t1.bin", _file, 4321, _crc32(0, _file, 4321)) == 0);
+  CHECK(_req_path(FILE_SERVER_STAT, "tables/t1.bin") == 0);
+  CHECK(_reply[3] == 1 && _get32(_reply + 4) == 4321);
+  CHECK(_get("tables/t1.bin", _back, sizeof(_back)) == 4321 && memcmp(_file, _back, 4321) == 0);
+  // an empty file
+  CHECK(_put("empty", _file, 0, 0) == 0);
+  CHECK(_get("empty", _back, sizeof(_back)) == 0);
+
+  // a retried request (lost reply): the same reply, not run again
+  CHECK(_req_path(FILE_SERVER_REMOVE, "empty") == 0);
+  uint8_t again[FILE_SERVER_REPLY_MAX];
+  CHECK(file_server_request(_last_req, _last_req_len, again) == _reply_len);
+  CHECK(again[2] == 0);
+  CHECK(_req_path(FILE_SERVER_STAT, "empty") == LFS_ERR_NOENT);
+  // retried WRITEs during an upload
+  _random(_file, 1000, 2);
+  uint8_t p[8 + 32];
+  _put32(p, 1000);
+  _put32(p + 4, _crc32(0, _file, 1000));
+  memcpy(p + 8, "retry", 5);
+  CHECK(_req(FILE_SERVER_OPEN, p, 13) == 0);
+  for (uint32_t off = 0; off < 1000; off += 100) {
+    uint8_t w[104];
+    _put32(w, off);
+    memcpy(w + 4, _file + off, 100);
+    CHECK(_req(FILE_SERVER_WRITE, w, 104) == 0);
+    CHECK(file_server_request(_last_req, _last_req_len, again) == _reply_len && again[2] == 0);
+  }
+  CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == 0);
+  CHECK(_get("retry", _back, sizeof(_back)) == 1000 && memcmp(_file, _back, 1000) == 0);
+
+  // a bad frame CRC: no reply
+  uint8_t bad[8] = {++_seq, FILE_SERVER_INFO, 1, 2, 3, 4};
+  CHECK(file_server_request(bad, 6, _reply) == 0);
+
+  // wrong content CRC, short upload, out of order WRITE: the old file kept
+  _random(_back, 4321, 3);
+  CHECK(_put("tables/t1.bin", _back, 4321, 1234) == LFS_ERR_CORRUPT);
+  _put32(p, 4321);
+  _put32(p + 4, _crc32(0, _back, 4321));
+  memcpy(p + 8, "tables/t1.bin", 13);
+  CHECK(_req(FILE_SERVER_OPEN, p, 21) == 0);
+  CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == LFS_ERR_CORRUPT);
+  CHECK(_req(FILE_SERVER_OPEN, p, 21) == 0);
+  uint8_t w[4 + 16];
+  _put32(w, 16);
+  CHECK(_req(FILE_SERVER_WRITE, w, sizeof(w)) == LFS_ERR_INVAL);
+  CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == LFS_ERR_CORRUPT);
+  CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == LFS_ERR_BADF);
+  _random(_file, 4321, 1);
+  CHECK(_get("tables/t1.bin", _back, sizeof(_back)) == 4321 && memcmp(_file, _back, 4321) == 0);
+  CHECK(_req_path(FILE_SERVER_STAT, FILE_SERVER_UPLOAD) == LFS_ERR_NOENT);
+
+  // rename, remove, errors
+  char ren[] = "retry\0tables/t2.bin";
+  CHECK(_req(FILE_SERVER_RENAME, ren, sizeof(ren) - 1) == 0);
+  CHECK(_req_path(FILE_SERVER_STAT, "retry") == LFS_ERR_NOENT);
+  CHECK(_req_path(FILE_SERVER_REMOVE, "tables") == LFS_ERR_NOTEMPTY);
+  CHECK(_req_path(FILE_SERVER_READ, "x") == LFS_ERR_INVAL);
+  CHECK(_req(99, 0, 0) == LFS_ERR_INVAL);
+
+  // an EEPROM flush during an upload: both files fine
+  _random(_file, 3000, 4);
+  _put32(p, 3000);
+  _put32(p + 4, _crc32(0, _file, 3000));
+  memcpy(p + 8, "big", 3);
+  CHECK(_req(FILE_SERVER_OPEN, p, 11) == 0);
+  for (uint32_t off = 0; off < 3000; off += 100) {
+    uint8_t w2[104];
+    _put32(w2, off);
+    memcpy(w2 + 4, _file + off, 100);
+    CHECK(_req(FILE_SERVER_WRITE, w2, 104) == 0);
+    if (off == 1500) {
+      _fill(7);
+      CHECK(eeprom_flush() == 0);
+    }
+  }
+  CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == 0);
+  CHECK(_boot() && _is(7));
+  file_server_init(&_lfs);
+  CHECK(_get("big", _back, sizeof(_back)) == 3000 && memcmp(_file, _back, 3000) == 0);
+
+  // the EEPROM file rewritten between two READs of it (READ keeps the file
+  // open: file_server_sync() before the flush, as mpm_port_idle()): the
+  // next READ reads the new content
+  _fill(8);
+  CHECK(eeprom_flush() == 0);
+  uint8_t r[5 + 6] = {0, 0, 0, 0, 128, 'e', 'e', 'p', 'r', 'o', 'm'};
+  CHECK(_req(FILE_SERVER_READ, r, sizeof(r)) == 0 && _reply_len == 7 + 128);
+  CHECK(_reply[3 + 5] == (uint8_t)(5 * 7 + 8));
+  _fill(9);
+  file_server_sync();
+  CHECK(eeprom_flush() == 0);
+  r[0] = 128;
+  CHECK(_req(FILE_SERVER_READ, r, sizeof(r)) == 0 && _reply_len == 7 + 128);
+  CHECK(_reply[3 + 5] == (uint8_t)(133 * 7 + 9));
+  r[0] = 0;
+  CHECK(_req(FILE_SERVER_READ, r, sizeof(r)) == 0 && _reply[3 + 5] == (uint8_t)(5 * 7 + 9));
+
+  // a listing over several replies
+  for (int i = 0; i < 30; i++) {
+    char name[64];
+    snprintf(name, sizeof(name), "tables/a_rather_long_table_name_%02d.bin", i);
+    CHECK(_put(name, (const uint8_t*)name, i, _crc32(0, (const uint8_t*)name, i)) == 0);
+  }
+  int seen = 0, pages = 0, sizes = 0;
+  for (uint16_t index = 0;; pages++) {
+    uint8_t l[2 + 16] = {index, index >> 8};
+    memcpy(l + 2, "tables", 6);
+    CHECK(_req(FILE_SERVER_LIST, l, 8) == 0);
+    uint32_t i = 4, end = _reply_len - 4;
+    int n = 0;
+    while (i < end) {
+      sizes += _get32(_reply + i + 1);
+      i += 6 + _reply[i + 5];
+      n++;
+    }
+    CHECK(i == end);
+    seen += n;
+    index += n;
+    if (!_reply[3]) break;
+    CHECK(n > 0);
+  }
+  printf("file server: list of 32 entries in %d replies\n", pages + 1);
+  CHECK(seen == 32 && pages > 0 && sizes == 4321 + 1000 + 29 * 30 / 2);
+}
+
+static void test_upload_power_cut()
+{
+  // a cut at each program / erase of an upload replacing a file: the old
+  // file after the boot, no upload left
+  memset(_mem, 0xFF, sizeof(_mem));
+  CHECK(_boot());
+  file_server_init(&_lfs);
+  _random(_file, 2000, 5);
+  CHECK(_put("table", _file, 2000, _crc32(0, _file, 2000)) == 0);
+  memcpy(_saved, _mem, sizeof(_mem));
+  _random(_back, 2500, 6);
+  int cuts = 0, old = 0;
+  for (long cut = 0;; cut++) {
+    memcpy(_mem, _saved, sizeof(_mem));
+    CHECK(_boot());
+    file_server_init(&_lfs);
+    _ops_left = cut;
+    if (setjmp(_cut) == 0) {
+      CHECK(_put("table", _back, 2500, _crc32(0, _back, 2500)) == 0);
+      _ops_left = -1;
+      break;
+    }
+    _ops_left = -1;
+    cuts++;
+    CHECK(_boot());
+    file_server_init(&_lfs);
+    static uint8_t got[3000];
+    int n = _get("table", got, sizeof(got));
+    if (n == 2000 && memcmp(got, _file, 2000) == 0) old++;
+    else CHECK(n == 2500 && memcmp(got, _back, 2500) == 0);
+    CHECK(_req_path(FILE_SERVER_STAT, FILE_SERVER_UPLOAD) == LFS_ERR_NOENT);
+  }
+  printf("upload power cut: %d cuts, old file %d, new %d\n", cuts, old, cuts - old);
+  CHECK(cuts > 5);
+}
+
 static void test_ram_only()
 {
   eeprom_init(0);
@@ -348,6 +622,8 @@ int main()
   test_bad_block();
   test_write_during_flush();
   test_wear();
+  test_file_server();
+  test_upload_power_cut();
   test_ram_only();
   printf("%s\n", _fails ? "FAILED" : "ok");
   return _fails != 0;

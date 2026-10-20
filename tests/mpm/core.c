@@ -125,10 +125,12 @@ static void _run(uint32_t us)
 }
 
 //
-// Board work: a long job (a flash write) polling in its waits
+// Board work: a long job (flash work) in slices, each started only when it
+// ends before the next callback (main.c's _flash_yield())
 //
 
-#define IDLE_WAIT_US 200  // an SPI transfer or a flash status read
+#define IDLE_SLICE_US 600   // a flash read and its processing
+#define IDLE_SLICE_MIN 1000  // time left for a slice to start
 
 static uint32_t _idle_job_us;
 static int _idle_depth, _idle_depth_max;
@@ -140,9 +142,12 @@ void mpm_port_idle()
     uint32_t end = _us + _idle_job_us;
     _idle_job_us = 0;
     while ((int32_t)(_us - end) < 0) {
-      _us += IDLE_WAIT_US;
-      _radio_step();
-      mpm_poll();
+      _us += IDLE_SLICE_US;
+      do {
+        _radio_step();
+        mpm_poll();
+        _us += 3;
+      } while (mpm_time_left() < IDLE_SLICE_MIN);
     }
   }
   _idle_depth--;
@@ -329,8 +334,8 @@ static void test_start_and_timing()
 
 static void test_port_idle()
 {
-  // A 150 ms job: callbacks late by one wait at most, the frames processed
-  // (no input loss after 70 ms), mpm_port_idle() not nested
+  // A 150 ms job in slices: callbacks on time, the frames processed (no
+  // input loss after 70 ms), mpm_port_idle() not nested
   _clear();
   _idle_depth_max = 0;
   _idle_job_us = 150000;
@@ -345,7 +350,8 @@ static void test_port_idle()
     if (late > late_max) late_max = late;
   }
   printf("port idle: callbacks %d, late max %d us\n", _cb_n, late_max);
-  CHECK(late_max <= IDLE_WAIT_US + 10);
+  CHECK(late_max < 10);
+  CHECK(mpm_time_left() > 0 && mpm_time_left() <= TEST_PERIOD);
 }
 
 static void test_input_loss()

@@ -279,14 +279,22 @@ value: nothing to do); `mpm_port_idle()`, after each `mpm_poll()`, writes
 the file back as soon as it changed (a CYRF ID created, an AFHDS2A bind).
 Without a file system: RAM only, as before.
 
-**The protocol keeps running during a write.** A flush is about one erase
-and nine programs (55 ms). The flash erases and programs on its own with CS
-released: the driver's waits (and each read) call `mpm_poll()`
-(`nor_flash_set_yield()`), which runs the callbacks and the input;
-`mpm_port_idle()` is not nested. The flush writes a copy taken at its start,
-so a callback writing the EEPROM meanwhile makes it dirty again. The
-protocols' chips are the RF core, not SPI; the SX1281 shares the bus but
-the MPM core doesn't use it.
+**The protocol keeps running during flash work.** A flush is about one
+erase and nine programs (55 ms). The flash erases and programs on its own
+with CS released: the driver's waits and each read call `_flash_yield()`
+(main.c, `nor_flash_set_yield()`), which runs `mpm_poll()` (the callbacks
+and the input; `mpm_port_idle()` is not nested) until the next callback is
+at least 1 ms away (`mpm_time_left()`), at most 20 ms: the next slice of
+flash work (a 256 byte read and littlefs's processing of it, up to 0.65 ms
+measured) ends before the callback. Without that wait, path lookups (each
+file request reads the directory's metadata, about 40 reads) left
+callbacks up to 0.9 ms late, and the FS-iA6B's telemetry fell from 86 to
+40-80 frames/s (its error rate stayed at 1%: AFHDS2A's telemetry RX is the
+sensitive part); with it, 40 to 80 µs, 345 µs at worst over a 64 KB upload
+and read back. The flush writes a copy taken at its start, so a callback
+writing the EEPROM meanwhile makes it dirty again. The protocols' chips are
+the RF core, not SPI; the SX1281 shares the bus but the MPM core doesn't
+use it.
 
 Measured on the MPM v2 (2026-10-20, `build-mpm`, DSM X 11 ms over the bay,
 counters read over J-Link, since removed):
@@ -313,10 +321,40 @@ Wear: with a write per bind, the host test's 100000 writes cost 1.01
 erases each, spread over all the blocks (the most erased 397 times, the mean
 394); at 100000 cycles a sector, about 25 million binds.
 
-The rest of the flash is free for later: lookup tables or other data
-(read into RAM at a protocol's start, or between callbacks; at 12 MHz the
-SPI reads about 1.5 MB/s), loaded over the bay by a file transfer still to
-write.
+No file is part of the firmware: the CC2652's 352 KB of internal flash hold
+every protocol (the whole MPM fits the STM32's 128 KB), tables included,
+and the firmware runs the same with a blank flash or none (the EEPROM in
+RAM only). Files are for tracing and customising: the EEPROM, debug output,
+settings, all optional.
+
+### Files over USB
+
+`tools/mpm_fs.py` reads and writes the files over USB-C while the MPM core
+runs (`src/file_server.c`, protocol in `file_server.h`): `info`, `ls [-r]`,
+`get`, `put`, `rm`, `mv`, `mkdir`. For debugging: the `eeprom` file read
+(`mpm_fs.py get eeprom - | xxd`), written back (binds moved to another
+module; the module reads it at power up, and its RAM copy overwrites the
+file at the next EEPROM write), config files later.
+
+- Requests: frames starting with `FS` on the USB link (100000 8E2, the
+  MULTI link: no MULTI frame starts so), seq, op, payload, CRC-32 (zlib's);
+  replies in telemetry frames of type 0x40 (not an MPM type, USB only).
+  Served by `mpm_port_idle()`, like the EEPROM writes: the callbacks run in
+  the flash waits. A request repeated with the same seq gets the same reply
+  without running again: the tool sends again after 1 s without a reply.
+- Uploads: 128 bytes per WRITE, in order, into `.upload`; at CLOSE the size
+  and CRC-32 given at OPEN are checked, then `.upload` is renamed over the
+  file (at once). A bad CRC, a short or abandoned upload, a power cut: the
+  old file stays (`.upload` removed at power up).
+- READ keeps the file open for the next READ (no path lookup and seek per
+  128 bytes); closed by the requests that change the file system and before
+  an EEPROM flush (`file_server_sync()`: a replaced file's old blocks are
+  freed).
+- MPM v2 over USB (2026-10-20), AFHDS2A to the FS-iA6B over the bay
+  meanwhile: 64 KB random file up in 12.4 s (5.2 KB/s), back in 11.9 s,
+  identical, no request sent again; the receiver's telemetry 84 to 89
+  frames/s throughout (86 without transfers); the EEPROM file read back
+  with the FS-iA6B's RX id at offset 50.
 
 ## Test protocol
 
@@ -338,7 +376,8 @@ make -C tests/storage  # host: littlefs and the EEPROM file on a simulated NOR f
 first frame, then within 1 µs), status contents and period, input loss,
 bind, range check, autobind, rx_num, failsafe frames, invalid protocol and
 sub protocol, the protocol list scan, a 150 ms job in `mpm_port_idle()`
-polling in its waits (callbacks late by one wait at most, frames processed).
+in slices started 1 ms or more before a callback (callbacks on time, frames
+processed).
 
 `tests/storage/storage.c` runs `lfs_driver.c` and `eeprom.c` on a simulated
 NOR flash (programs clear bits, erases set 0xFF): format of a blank or
@@ -346,7 +385,11 @@ garbage flash, the 2025 file system grown with its file kept, a power cut
 after each program and erase of a flush from 300 file system states (3002
 cuts, some in metadata compactions: the old content each time, the next
 flush fine), a failing block, a callback writing during the flush, wear over
-100000 flushes.
+100000 flushes. File server: uploads read back, empty files, retried
+requests answered from the cache, bad frame CRC, bad content CRC, short
+and out of order uploads (the old file kept), rename / remove / errors, an
+EEPROM write during an upload, a listing over 6 replies, a power cut at each
+program and erase of an upload (the old file, no `.upload` left).
 
 On the LaunchPad (firmware built without `BENCH`), `tools/bench/radio_sim.py`
 plays the radio over the XDS110 back channel:

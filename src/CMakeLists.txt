@@ -3,6 +3,7 @@ set(firmware_sources
     board.c
     dma.c
     eeprom.c
+    file_server.c
     flash_driver.c
     ihex.c
     lfs_driver.c

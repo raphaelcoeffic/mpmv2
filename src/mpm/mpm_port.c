@@ -30,6 +30,8 @@
 
 #include "board.h"
 #include "eeprom.h"
+#include "file_server.h"
+#include "mpm.h"
 #include "mpm_frame.h"
 #include "ppm.h"
 #include "radio.h"
@@ -46,7 +48,7 @@
 
 typedef struct {
   uart_t uart;
-  uint8_t rx_buf[64];
+  uint8_t rx_buf[160];  // MULTI frames, file requests (USB)
   uint8_t tx_buf[256];  // power of 2
   volatile bool rx_error;
 } link_t;
@@ -68,6 +70,13 @@ static volatile bool _frame_ready;
 // Link of the last frame read: telemetry goes there
 static uint8_t _link;
 
+// File request from the USB link ("FS" and file_server.h's request), served
+// by mpm_port_idle()
+#define FILE_REQ_MAGIC "FS"
+static uint8_t _file_req[FILE_SERVER_REQ_MAX];
+static uint8_t _file_req_len;
+static volatile bool _file_req_ready;
+
 uint32_t mpm_port_micros() { return micros(); }
 uint32_t mpm_port_millis() { return millis(); }
 
@@ -77,7 +86,14 @@ static void _frame_received(uint8_t i)
 {
   link_t* l = &_links[i];
   uint32_t len = uart_get_rx_len(l->uart);
-  if (!l->rx_error && len <= MPM_FRAME_MAX_LEN) {
+  if (i == LINK_USB && len >= 2 && memcmp(l->rx_buf, FILE_REQ_MAGIC, 2) == 0) {
+    // one at a time: the host waits for the reply
+    if (!l->rx_error && !_file_req_ready && len - 2 <= sizeof(_file_req)) {
+      memcpy(_file_req, l->rx_buf + 2, len - 2);
+      _file_req_len = len - 2;
+      _file_req_ready = true;
+    }
+  } else if (!l->rx_error && len <= MPM_FRAME_MAX_LEN) {
     memcpy(_frame, l->rx_buf, len);
     _frame_len = len;
     _frame_link = i;
@@ -318,9 +334,30 @@ void mpm_port_reset_rf() { radio_off(); }
 // The chip's IEEE 802.15.4 address: its last 32 bits
 uint32_t mpm_port_module_id() { return HWREG(FCFG1_BASE + FCFG1_O_MAC_15_4_0); }
 
+// A file request: the reply as telemetry on the USB link, when there is
+// room for it
+static void _file_request()
+{
+  static uint8_t frame[MPM_TELEM_HDR_LEN + FILE_SERVER_REPLY_MAX];
+  uint8_t n = file_server_request(_file_req, _file_req_len, frame + MPM_TELEM_HDR_LEN);
+  _file_req_ready = false;
+  if (n == 0) return;
+  frame[0] = 'M';
+  frame[1] = 'P';
+  frame[2] = MPM_TELEM_FILE;
+  frame[3] = n;
+  uart_t uart = _links[LINK_USB].uart;
+  while (uart_tx_free(uart) < MPM_TELEM_HDR_LEN + n) mpm_poll();
+  uart_tx_irq(uart, frame, MPM_TELEM_HDR_LEN + n);
+}
+
 // The EEPROM to the flash as soon as a protocol writes it (bind): about
 // 55 ms of erase and program, the callbacks run in the flash waits
 void mpm_port_idle()
 {
-  if (eeprom_dirty()) eeprom_flush();
+  if (eeprom_dirty()) {
+    file_server_sync();
+    eeprom_flush();
+  }
+  if (_file_req_ready) _file_request();
 }

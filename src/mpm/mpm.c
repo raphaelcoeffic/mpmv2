@@ -1,6 +1,7 @@
 #include "mpm.h"
 #include "mpm_port.h"
 
+#include <limits.h>
 #include <string.h>
 
 // LED blink half periods, ms
@@ -397,6 +398,12 @@ void mpm_poll()
   in_port_idle = true;
   mpm_port_idle();
   in_port_idle = false;
+}
+
+int32_t mpm_time_left()
+{
+  if (!_callback || !mpm.input) return INT32_MAX;
+  return _next_us - mpm_port_micros();
 }
 
 void mpm_run()
