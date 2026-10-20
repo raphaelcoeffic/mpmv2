@@ -241,8 +241,9 @@ packets 102.4 ms apart.
    starting with the NRF24L01 / XN297 and CC2500 families (the most
    protocols).
 3. **Port the MPM core.** Done for the serial link ([mpm-core.md](mpm-core.md)):
-   scheduler, protocol table, frames, status and protocol list. Left: the
-   module bay (UART1, inverted), PPM input, channel order, wait-for-bind.
+   scheduler, protocol table, frames, status and protocol list, and the
+   MPM v2 module bay (UART1, tested through the radio simulator). Left: PPM
+   input, channel order, wait-for-bind.
    Then bring protocols over one family at a time, each checked on the bench
    (`proto_capture.py` and the suites work against the CC2652 too).
 4. **Measure and fix the timing.** Measure RF core command latencies, then
@@ -262,8 +263,8 @@ packets 102.4 ms apart.
    (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
    MULTI-Module, works over USB and over the module bay (radio simulator
    on an RP2040-Zero: EdgeTX's sequence, the window with and without a
-   radio, serial frames ending it); EdgeTX branch `mpm-v2-flash` for the
-   MPM v2 files. Next: the module bay in the application, a real radio. See
+   radio, serial frames ending it, the application's frames and telemetry);
+   EdgeTX branch `mpm-v2-flash` for the MPM v2 files. Next: a real radio. See
    [update.md](update.md).
 
 ## Questions for review

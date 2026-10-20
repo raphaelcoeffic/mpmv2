@@ -46,8 +46,15 @@ As the MPM:
   rx_num; `rx_tx_addr` as `set_rx_tx_addr()`.
 - **LED**: the MPM blink patterns (no input, invalid protocol, bind).
 
-Not there yet: PPM input, the module bay (UART1, inverted, `telem_invert`),
-channel order remapping (`disable_ch_map` is decoded only), the telemetry
+**Links.** UART0 (LaunchPad: XDS110 back channel; MPM v2: USB console) and,
+on the MPM v2, the module bay: UART1 in on the PPM pin (inverted), telemetry
+out on S.Port through U9, inverted unless the frame's `telem_invert` bit is
+clear (EdgeTX sets it for the external bay), as the STM32 MULTI-Module's
+TX_INV. S.Port stays released until the first frame from the bay.
+Telemetry goes back on the link of the last frame. Tested through the radio
+simulator ([update.md](update.md#tested-over-the-module-bay)).
+
+Not there yet: PPM input, channel order remapping (`disable_ch_map` is decoded only), the telemetry
 buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
 frames), the telemetry formats other than `MULTI_TELEMETRY` (`Telemetry.ino`:
 FrSky hub, S.Port, AFHDS2A and DSM frames only).

@@ -48,8 +48,10 @@ def dsm_auto(mode: int, channels: int) -> tuple[int, int]:
 
 def encode(protocol=0, sub=0, rx_num=0, option=0, channels=None, bind=False, autobind=False,
            range_check=False, low_power=False, failsafe=False, v2=True, disable_telem=False,
-           disable_ch_map=False, data=b"") -> bytes:
-    """A frame of the radio (EdgeTX pulses/multi.cpp, Multiprotocol.h)."""
+           disable_ch_map=False, telem_invert=True, data=b"") -> bytes:
+    """A frame of the radio (EdgeTX pulses/multi.cpp, Multiprotocol.h).
+    telem_invert: set by EdgeTX for the external bay (S.Port inverted), clear
+    for an internal module; the LaunchPad's UART0 ignores it."""
     channels = channels or [CH_CENTER] * 16
     b = bytearray(26)
     b[0] = 0x54 | (0x02 if failsafe else 0) | (0 if protocol & 0x20 else 0x01)
@@ -61,7 +63,8 @@ def encode(protocol=0, sub=0, rx_num=0, option=0, channels=None, bind=False, aut
         bits |= (c & 0x7FF) << (11 * i)
     b[4:26] = bits.to_bytes(22, "little")
     if v2:
-        b.append((protocol & 0xC0) | (rx_num & 0x30) | (0x02 if disable_telem else 0) | (0x01 if disable_ch_map else 0))
+        b.append((protocol & 0xC0) | (rx_num & 0x30) | (0x08 if telem_invert else 0) | (0x02 if disable_telem else 0)
+                 | (0x01 if disable_ch_map else 0))
         b += data
     return bytes(b)
 

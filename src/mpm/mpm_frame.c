@@ -16,7 +16,7 @@
 // Byte 2: rx_num bits 0-3, sub_protocol bits 4-6, then
 #define B2_LOW_POWER 0x80
 // Byte 26 (V2): protocol bits 6-7, rx_num bits 4-5, then
-#define B26_TELEM_INVERT 0x08
+#define B26_TELEM_INVERT MPM_FRAME_TELEM_INVERT
 #define B26_DISABLE_TELEM 0x02
 #define B26_DISABLE_CH_MAP 0x01
 

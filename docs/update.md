@@ -306,15 +306,22 @@ With baysim (2026-10-20), boot loader and bench application from
 - **Serial frames** (point 5): MULTI frames (100k 8E2) from 5 ms after
   power on, then a sync at 60 to 290 ms: never answered, the frames end the
   window. PPM not tried yet (baysim sends no PPM).
+- **The application on the bay** (`build-mpm`: MPM core, boot loader
+  layout, flashed over the bay: 80476 bytes in 29.9 s): `radio_sim.py -p
+  <baysim link> status` gets the status telemetry every 500 ms through
+  S.Port.
+- **Radio reboot** (point 4): `baysim.py reboot`, frames every 7 ms all
+  along, the module off for 1 s: its first telemetry (the status of the
+  protocol start) 31 to 35 ms after power on (5 rounds).
 
-Not yet: point 4 (the application doesn't read the module bay yet), PPM,
-the 200 KB image over the bay (tested over USB), an internal module's
-polarity. A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
+Not yet: PPM, the 200 KB image over the bay (tested over USB), an internal
+module's polarity (`telem_invert` clear), a protocol with a receiver over
+bay power. A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
 and the radios' own line levels.
 
 ## Next
 
-1. The module bay in the application (UART1, inverted), then point 4.
+1. A protocol with a real receiver over the bay; PPM.
 2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
    path works.
 3. Generalise the radio port (UART0 or UART1, polarity) for internal

@@ -9,6 +9,9 @@
 
 #define MPM_FRAME_V1_LEN 26  // channels only
 #define MPM_FRAME_MAX_LEN 36  // V2: + flags byte + up to 9 bytes of protocol data
+// The V2 flags byte (MPM_FRAME_V1_LEN): telemetry inverted, set by EdgeTX
+// for the external bay, clear for an internal module
+#define MPM_FRAME_TELEM_INVERT 0x08
 #define MPM_FRAME_DATA_MAX 9
 #define MPM_CHANNELS 16
 

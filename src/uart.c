@@ -61,6 +61,12 @@ static const uint32_t _uart_base[MAX_UART] = {
     UART1_BASE,
 };
 
+// IOC ports: RX, TX, CTS, RTS (IOCPinTypeUart() only knows UART0)
+static const uint32_t _uart_ioc_port[MAX_UART][4] = {
+    {IOC_PORT_MCU_UART0_RX, IOC_PORT_MCU_UART0_TX, IOC_PORT_MCU_UART0_CTS, IOC_PORT_MCU_UART0_RTS},
+    {IOC_PORT_MCU_UART1_RX, IOC_PORT_MCU_UART1_TX, IOC_PORT_MCU_UART1_CTS, IOC_PORT_MCU_UART1_RTS},
+};
+
 static const uint8_t _uart_tx_dma_channel[MAX_UART] = {
   UDMA_CHAN_UART0_TX,
   UDMA_CHAN_UART1_TX,
@@ -91,7 +97,11 @@ void uart_init(uart_t uart, const uart_device_t* dev)
   dma_init();
 
   uint32_t base = _uart_base[uart];
-  IOCPinTypeUart(base, dev->rx, dev->tx, dev->cts, dev->rts);
+  const uint32_t pins[4] = {dev->rx, dev->tx, dev->cts, dev->rts};
+  for (int i = 0; i < 4; i++) {
+    if (pins[i] != IOID_UNUSED)
+      IOCPortConfigureSet(pins[i], _uart_ioc_port[uart][i], i & 1 ? IOC_STD_OUTPUT : IOC_STD_INPUT);
+  }
 
   UARTDisable(base);
 

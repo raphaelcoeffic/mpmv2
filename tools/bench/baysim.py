@@ -19,6 +19,11 @@ inverted, at the host's line settings) and the control port.
       (ms, comma separated), answered or not. drive: the radio line idle;
       float: no radio (CPPM left to the module's pull-up); frames: MULTI
       frames (100k 8E2) from 5 ms, then the sync
+  baysim.py reboot [--proto 127] [--off 1] [--rounds 5]
+      a radio rebooting with the model in the air: radio_sim.py's frames
+      (100k 8E2, every 7 ms) all along, the module powered off for --off s
+      then on: the time to its first telemetry (the status frame of the
+      protocol start), from the baysim trace
 
 Results: docs/update.md, "Tested over the module bay".
 """
@@ -142,6 +147,32 @@ def cmd_window(bay: BaySim, link_port: str, a):
     link.close()
 
 
+def cmd_reboot(bay: BaySim, link_port: str, a):
+    sys.path.insert(0, str(Path(__file__).parent))
+    from radio_sim import Radio
+
+    with Radio(link_port) as radio:
+        radio.set(protocol=a.proto, sub=0, option=0)
+        time.sleep(1)
+        for _ in range(a.rounds):
+            bay.cmd("pwr 0")
+            time.sleep(a.off)
+            bay.events.clear()
+            bay.cmd("trace 1")
+            bay.cmd("pwr 1")
+            time.sleep(1.5)
+            bay.cmd("trace 0")
+            ev = list(bay.events)
+            t_on = next(int(e[1]) for e in ev if e[0] == "P" and e[2] == "1")
+            # telemetry frames start with "MP" (4d50); the power up breaks are 00
+            first = next((e for e in ev if e[0] == "R" and "4d50" in e[2]), None)
+            sent = next((e for e in ev if e[0] == "T" and int(e[1]) > t_on), None)
+            print(f"off {a.off:.1f} s: first frame sent {(int(sent[1]) - t_on) / 1000:.1f} ms after power on, "
+                  + (f"first telemetry {(int(first[1]) - t_on) / 1000:.1f} ms" if first else "no telemetry"),
+                  flush=True)
+        radio.set(protocol=0)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
@@ -155,6 +186,10 @@ def main():
     p = sub.add_parser("window")
     p.add_argument("mode", choices=["drive", "float", "frames"])
     p.add_argument("delays", help="ms after power on, comma separated")
+    p = sub.add_parser("reboot")
+    p.add_argument("--proto", type=int, default=127)
+    p.add_argument("--off", type=float, default=1.0, help="s without power")
+    p.add_argument("--rounds", type=int, default=5)
     a = ap.parse_args()
 
     link, ctrl = find_ports()
@@ -166,8 +201,10 @@ def main():
             print(bay.cmd("level"))
         elif a.command == "flash":
             return cmd_flash(bay, link, a)
-        else:
+        elif a.command == "window":
             cmd_window(bay, link, a)
+        else:
+            cmd_reboot(bay, link, a)
     finally:
         bay.close()
     return 0
