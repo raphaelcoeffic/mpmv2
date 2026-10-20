@@ -204,15 +204,21 @@ on it from the port or the 4-in-1 (`bind --sub N`) and cuts the signal
 
 | Receiver | Protocol | Result |
 |---|---|---|
-| FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds, servos follow; no telemetry (receive only) |
+| FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds (F/S button held at power up), CH3 56 pulses/s, period 17.6 to 18.4 ms, as with the 4-in-1. Signal off: holds the last position (no failsafe set); back on, the new position after 0.14 to 0.56 s. Powered up with the port sending: the first pulse after 0.05 to 0.87 s (9 times); with the 4-in-1 (bench firmware) 0.05 to 39 s, whatever its option. 10 minutes (CH1-4 swept): no gap, 50 to 58 pulses each second. Right after the bind, no output for the first 90 s of tries (port and 4-in-1), not explained. No telemetry (receive only) |
+| FrSky V8R4-II (D8 mode) | FrSky D (3), option 0 | binds (CH1-CH2 jumper at power up), CH3 55.5 pulses/s with the port and the 4-in-1; periods 18.0 ms or 17.3 / 18.7 ms in turn, from run to run and with the frequency, with either (the receiver's framing). Signal off: holds; back on, one 1500 µs pulse then the new position after 0.5 to 1.0 s (the 4-in-1 too). 10 minutes (CH1-4 swept): no gap, 50 to 57 pulses each second. Receive only, no telemetry |
 | FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
 | FlySky FS-iA6B | AFHDS2A (28) sub 2 (PWM,SBUS), option 128 | binds (until the receiver answers), CH1-4 on SBUS at its serial servo port; telemetry (option bit 7) about 80 frames/s: RX 4.85 V, error rate 1%, RSSI 60, noise 101, SNR 41 |
 | Spektrum AR610C | DSM (6) sub 4 (Auto): bind response 0xA2 (DSMX 22 ms), 7 channels; subs 0 to 3 (DSM2 binds: response 0x01) | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 46 pulses/s at 22 ms in all four modes as with the 4-in-1 (same bind responses to both). Signal off: AUX1 holds 1.1 s then stops (no failsafe set), as with the 4-in-1; back on, the new position after 0.3 to 1.6 s. 42 minutes (DSMX 22 ms, CH1-7 swept): no gap, 41 to 48 pulses each second; 29 seconds with a pulse 170 µs early or late (the 4-in-1 too), one 19.86 ms period. Once, the first bind after rewiring, an Auto response 0x01. During some of the port's binds (none of the 4-in-1's yet) the MPM v2 also gets other packets with a good CRC on the bind channel, up to 48 alike (`e308b5c2...`), origin unknown: `dsm_receiver.py` only takes responses starting with the inverted module id. No telemetry |
 | Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); telemetry (32 chip codes) 44 to 46 frames/s, one every other 11 ms frame (16 to 20 before the decoding between callbacks): QoS (frame loss A 90 to 96, RX 4.95 V), TM1000 (temperature), sensors 0x03, 0x0A, 0x12, 0x34, 0x40 |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
-frequency estimates of both); option -24 moves it there. The V8R4-II and
-the X8R (its reply about 6 kHz above the 4-in-1) work at option 0 at 1 m. The
+frequency estimates of both); option -24 moves it there. The option moves
+both the same way, about 1.5 kHz a step (MPM v2: the port at -12 / 0 / +12
+/ +24: -22 / -2 / +17 / +34 kHz; the 4-in-1 at 0 / +24: -36 / 0 kHz). The
+V8R4-II and the X8R (its reply about 6 kHz above the 4-in-1) work at option
+0 at 1 m. Bound to the port, the V8R4-II takes 16 to 20 s to take a 4-in-1
+at option 0 (36 kHz lower). At 10 cm from the 4-in-1 it is overloaded:
+nothing at the bind frequency, but works 70 kHz away; fine at 50 cm. The
 X8R takes neither FrSky X v1 sub protocol: its firmware was found by binding
 the four X / X2 variants in turn from the 4-in-1 (bench `proto`), then
 sending each with different servo positions.
