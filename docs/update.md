@@ -267,28 +267,54 @@ and what may go wrong:
    normal polarity, and the recovery through `serialpassthrough` and
    `bootpin` (see Internal modules).
 
-## Radio simulator (planned)
+## Radio simulator
 
-Until then the bench rig is the test bed. A radio simulator on an
-RP2040-zero will stand in for the radio:
+`tools/bench/baysim/` (C, pico-sdk) turns an RP2040-Zero into the radio's
+external bay: GP12 to the PPM pin (bay pin 1), GP13 from S.Port (pin 5),
+GP11 a high-side switch on the module supply (pin 3, as the radios'
+`modulePortSetPower()`), USB-C of the MPM v2 unplugged (it would power the
+module through D2). Two USB serial ports: a bridge to the bay lines, both
+inverted in the GPIO block, at the host's line settings (so
+`stk500_flash.py` and `radio_sim.py` run through it unchanged), and a
+control port: power, polarity, the PPM line driven or left floating (no
+radio), pad levels, and a trace of the bytes both ways with microsecond
+times. `tools/bench/baysim.py` runs the tests below.
 
-- the module bay lines: inverted serial out on the PPM pin, inverted serial
-  in from S.Port, normal polarity for an internal module's UART;
-- a high-side switch on the module power, as the radios have
-  (`modulePortSetPower()`), to time power ups;
-- EdgeTX's flashing sequence (power off 3 s, on, sync, pages, as
-  `stk500_flash.py`), and normal traffic: MULTI serial frames (100k 8E2)
-  and PPM, to check the window ends on them;
-- a radio reboot: frames, power off for a radio's boot time, power on,
-  frames again, with the time until the module answers.
+Both lines are safe for the RP2040's 3.3 V: the radio only pulls the PPM
+pin low (D3, R14 to 3.3 V on the module side) and the module only pulls
+S.Port low (D4, R22 to 3.3 V).
 
-Points 1 to 6 above can then be run on the bench; a real radio is still
-needed for the EdgeTX side (`mpm-v2-flash`) and the radios' own line
-levels.
+## Tested over the module bay
+
+With baysim (2026-10-20), boot loader and bench application from
+`build-bl`; times from the module's power on:
+
+- **Update** (points 1 and 6): `baysim.py flash`, EdgeTX's sequence
+  (power off 3 s, sync every 100 ms): the sync at 88 ms is answered 0.5 ms
+  later, then 118912 bytes in 44.3 s, 465 pages read back and verified;
+  the new application runs (J-Link: PC in `bench_loop`). So the S.Port
+  polarity through U9 and D4 is right: idle low with TX1_INV set, and
+  EdgeTX's inverted reading at 57600 gets the replies.
+- **Power up** (point 2): S.Port shows two breaks, 1.8 and 5.5 ms after
+  power on (the line rising with R22 before the boot loader holds it low);
+  EdgeTX only listens after its sync. The first sync answered: 7 ms after
+  power on (none at 5 ms); EdgeTX's first, at 10 ms, is in.
+- **Window** (point 3; host timed, 1 to 2 ms): PPM line driven at idle (a
+  radio): syncs answered from 7 to 290 ms, none from 310 ms; PPM line
+  floating (no radio, R14 high): answered from 10 to 25 ms, none from
+  30 ms (20 ms after the boot loader starts).
+- **Serial frames** (point 5): MULTI frames (100k 8E2) from 5 ms after
+  power on, then a sync at 60 to 290 ms: never answered, the frames end the
+  window. PPM not tried yet (baysim sends no PPM).
+
+Not yet: point 4 (the application doesn't read the module bay yet), PPM,
+the 200 KB image over the bay (tested over USB), an internal module's
+polarity. A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
+and the radios' own line levels.
 
 ## Next
 
-1. Radio simulator, then the tests above.
+1. The module bay in the application (UART1, inverted), then point 4.
 2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
    path works.
 3. Generalise the radio port (UART0 or UART1, polarity) for internal

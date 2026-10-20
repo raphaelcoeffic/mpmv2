@@ -190,7 +190,9 @@ packets 102.4 ms apart.
   Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto) and Lemon-RX DSMP
   (DSM telemetry); signal loss and 10 to 42 minute runs on the V8R4-II and
   the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). Not yet: V2x2,
-  a real radio and its module bay. The E01X CRC question needs a model.
+  a real radio (the module bay so far through a radio simulator, see
+  [update.md](update.md#tested-over-the-module-bay)). The E01X CRC question
+  needs a model.
 - **Timing.** Measured (bench `timing`, `timing.py`), against what the MPM
   protocols need ([radio-interface.md](radio-interface.md)): TX starts 124 us
   after the call (+-1 us), or at a set time; a hop takes 136 us; TX to RX 79
@@ -258,9 +260,10 @@ packets 102.4 ms apart.
    or a bind reply could tune themselves.
 7. **Update from the radio.** Boot loader in flash sector 0
    (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
-   MULTI-Module, works over USB; EdgeTX branch `mpm-v2-flash` for the MPM v2
-   files. Next: the module bay path, with a radio simulator on an
-   RP2040-zero (radio lines, switched module power) on the bench first. See
+   MULTI-Module, works over USB and over the module bay (radio simulator
+   on an RP2040-Zero: EdgeTX's sequence, the window with and without a
+   radio, serial frames ending it); EdgeTX branch `mpm-v2-flash` for the
+   MPM v2 files. Next: the module bay in the application, a real radio. See
    [update.md](update.md).
 
 ## Questions for review
