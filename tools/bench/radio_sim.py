@@ -75,7 +75,8 @@ def status_decode(d: bytes) -> dict:
 
 def telem_decode(ty: int, d: bytes) -> dict[str, int]:
     """The link statistics of the MPM's FrSky telemetry frames (telemetry.ino):
-    S.Port (type 2) RSSI 0xF101 and battery 0xF104, hub (type 3) link frame 0xFE.
+    S.Port (type 2) RSSI 0xF101 and battery 0xF104, hub (type 3) link frame 0xFE,
+    AFHDS2A (type 6) sensors.
     RX_RSSI: the receiver's, TX_RSSI: the module's (raw CC2500 RSSI + 128),
     TX_LQI: telemetry packets in 900 ms (FrSky X), the CC2500 LQI (FrSky D)."""
     if ty == 0x02 and len(d) >= 8:
@@ -86,7 +87,21 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
             return {"a1": d[4]}
     elif ty == 0x03 and len(d) >= 7 and d[0] == 0xFE:
         return {"a1": d[1], "a2": d[2], "rx_rssi": d[3], "tx_rssi": d[4], "rx_lqi": d[5], "tx_lqi": d[6]}
+    elif ty == 0x06 and len(d) >= 29:
+        # AFHDS2A (option bit 7): TX_RSSI, 7 sensors: id, instance, value (16 bit LE)
+        out = {"tx_rssi": d[0]}
+        for i in range(1, 29, 4):
+            sid, val = d[i], int.from_bytes(d[i + 2:i + 4], "little", signed=True)
+            if sid in AFHDS2A_SENSORS:
+                out[AFHDS2A_SENSORS[sid]] = val
+            elif sid == 0xFF:
+                break
+        return out
     return {}
+
+
+# AFHDS2A sensor ids (AFHDS2A_a7105.c): RX voltage in 1/100 V, error rate in %
+AFHDS2A_SENSORS = {0x00: "rx_v", 0x03: "a3_v", 0xFE: "err", 0xFC: "rx_rssi", 0xFB: "noise", 0xFA: "snr"}
 
 
 class Radio:
