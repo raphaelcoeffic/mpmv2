@@ -344,7 +344,7 @@ void mpm_init()
   _set_led(false);
 }
 
-void mpm_poll()
+static void _poll()
 {
   uint8_t len;
   if (mpm_port_read_frame(_rx, &len)) {
@@ -387,6 +387,16 @@ void mpm_poll()
     _count = 0;
     _update_all();
   }
+}
+
+void mpm_poll()
+{
+  static bool in_port_idle;
+  _poll();
+  if (in_port_idle) return;
+  in_port_idle = true;
+  mpm_port_idle();
+  in_port_idle = false;
 }
 
 void mpm_run()

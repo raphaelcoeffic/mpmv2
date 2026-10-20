@@ -1,4 +1,3 @@
-#include "file_system.h"
 #include "ihex.h"
 #include "nor_flash.h"
 
@@ -24,8 +23,9 @@ void ihex_dump_flash(ihex_flush_cb_t cb)
 
   _flush_cb = cb;
 
-  uint32_t addr = FS_OFFSET;
-  while (addr < FS_SIZE) {
+  // the whole flash: the file system
+  uint32_t addr = 0;
+  while (addr < nor_flash_size()) {
     // read a block
     nor_flash_read(addr, buffer, sizeof(buffer));
 

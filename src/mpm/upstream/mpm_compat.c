@@ -1,6 +1,7 @@
 // Globals and helpers of Multiprotocol.ino and Convert.ino
 // (DIY-Multiprotocol-TX-Module v1.3.4.74, GPL v3)
 #include "mpm_compat.h"
+#include "eeprom.h"
 #ifdef CC2500_INSTALLED
 #include "iface_cc2500.h"
 #endif
@@ -61,23 +62,9 @@ uint8_t telemetry_link;
 uint8_t telemetry_counter;
 uint8_t telemetry_lost;
 
-static uint8_t _eeprom[EEPROM_SIZE];
-static bool _eeprom_init;
+uint8_t eeprom_read_byte(EE_ADDR address) { return eeprom_read(address); }
 
-uint8_t eeprom_read_byte(EE_ADDR address)
-{
-  if (!_eeprom_init || address >= EEPROM_SIZE) return 0xFF;
-  return _eeprom[address];
-}
-
-void eeprom_write_byte(EE_ADDR address, uint8_t value)
-{
-  if (!_eeprom_init) {
-    memset(_eeprom, 0xFF, sizeof(_eeprom));
-    _eeprom_init = true;
-  }
-  if (address < EEPROM_SIZE) _eeprom[address] = value;
-}
+void eeprom_write_byte(EE_ADDR address, uint8_t value) { eeprom_write(address, value); }
 
 // Called by the core before each protocol start: what protocol_init() resets
 void mpm_protocol_prepare()

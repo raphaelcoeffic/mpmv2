@@ -115,7 +115,8 @@ extern mpm_state_t mpm;
 void mpm_init();
 
 // One step of the main loop: call it continuously. Runs the protocol
-// callback when due, processes the radio frames in between
+// callback when due, processes the radio frames in between, then the board's
+// work (mpm_port_idle()). Also called from the waits of that work
 void mpm_poll();
 
 // Main loop, never returns

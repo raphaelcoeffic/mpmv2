@@ -183,7 +183,7 @@ the protocols read them.
   instead (4.6 to 9 ms then), the next DSM packets went out late.
 
 The EEPROM (`eeprom_read_byte()`: AFHDS2A RX ids, clone ids, the CYRF ID) is
-in RAM for now: lost at power off.
+a file in the external flash: see [Storage](#storage).
 
 ### Checks against the MPM
 
@@ -254,6 +254,61 @@ X8R takes neither FrSky X v1 sub protocol: its firmware was found by binding
 the four X / X2 variants in turn from the 4-in-1 (bench `proto`), then
 sending each with different servo positions.
 
+## Storage
+
+littlefs (`lib/littlefs`, v2.10) on the whole external NOR flash
+(MX25R8035F, 1 MB, 256 blocks of 4 KB), mounted at power up
+(`file_system_init()`, `src/lfs_driver.c`). Formatted only when there is no
+file system (`LFS_ERR_CORRUPT`: blank or foreign data), not on a bus or
+version error; a smaller one (the 256 KB of the 2025 tests) is grown to the
+flash size. Caches of a flash page (256 bytes), no malloc
+(`LFS_NO_MALLOC`, files opened with `lfs_file_opencfg()`). littlefs gives
+power loss safety (a file is replaced at close: the old content or the new
+one) and dynamic wear levelling (copy on write into free blocks, the
+metadata moved after 500 erases); static data is not moved.
+
+The NOR driver (`src/nor_flash.c`) splits writes at the 256 byte pages,
+switches an MX25R to its high performance mode (JEDEC ID `C2 28`: 4 KB erase
+40 ms typical instead of 58, page program 0.85 ms instead of 3.2), and reports
+the program and erase failures of the security register (littlefs then
+moves the data to another block).
+
+The EEPROM (`src/eeprom.c`): a 2 KB RAM copy of the file `eeprom`, read at
+power up. `eeprom_write()` changes the copy only (a byte written with its
+value: nothing to do); `mpm_port_idle()`, after each `mpm_poll()`, writes
+the file back as soon as it changed (a CYRF ID created, an AFHDS2A bind).
+Without a file system: RAM only, as before.
+
+**The protocol keeps running during a write.** A flush is about one erase
+and nine programs (55 ms). The flash erases and programs on its own with CS
+released: the driver's waits (and each read) call `mpm_poll()`
+(`nor_flash_set_yield()`), which runs the callbacks and the input;
+`mpm_port_idle()` is not nested. The flush writes a copy taken at its start,
+so a callback writing the EEPROM meanwhile makes it dirty again. The
+protocols' chips are the RF core, not SPI; the SX1281 shares the bus but
+the MPM core doesn't use it.
+
+Measured on the MPM v2 (2026-10-20, `build-mpm`, DSM X 11 ms over the bay,
+counters read over J-Link, since removed):
+- the CYRF ID created at the first DSM start, written (72 ms), back after a
+  power cycle with no write;
+- flushes in steady state (J-Link writes to the copy): 55 to 56 ms, worst
+  callback 0.2 to 0.5 ms late (29 µs without a flush), 5 flushes;
+- 50 power cuts at random times (baysim, 0.3 to 1.2 s on) while a test build
+  rewrote the file back to back (867 writes, counter + its complement +
+  1.7 KB derived from it, checked at each boot): every boot read a
+  consistent file, the file system always mounted. The boot loader's window
+  (about 0.3 s) left 10 boots too short to count themselves.
+
+Wear: with a write per bind, the host test's 100000 writes cost 1.01
+erases each, spread over all the blocks (the most erased 397 times, the mean
+394); at 100000 cycles a sector, about 25 million binds.
+
+The rest of the flash is free for later: lookup tables or other data
+(read into RAM at a protocol's start, or between callbacks; at 12 MHz the
+SPI reads about 1.5 MB/s), loaded over the bay by a file transfer still to
+write.
+
 ## Test protocol
 
 Protocol 127, "Test": NRF24L01 ShockBurst every 4 ms, CRC16, TX_ADDR
@@ -265,14 +320,24 @@ in the radio frames, and `micros()` at the callback. Sub protocols: 1 Mbps,
 ## Tests
 
 ```sh
-make -C tests/mpm    # host: frame format against the MPM decoder, core with a fake port
+make -C tests/mpm      # host: frame format against the MPM decoder, core with a fake port
+make -C tests/storage  # host: littlefs and the EEPROM file on a simulated NOR flash
 ```
 
 `tests/mpm/core.c` runs the core against a simulated radio (frames every
 7 ms, fake clock): protocol start, callback timing (first one 5 ms after the
 first frame, then within 1 µs), status contents and period, input loss,
 bind, range check, autobind, rx_num, failsafe frames, invalid protocol and
-sub protocol, the protocol list scan.
+sub protocol, the protocol list scan, a 150 ms job in `mpm_port_idle()`
+polling in its waits (callbacks late by one wait at most, frames processed).
+
+`tests/storage/storage.c` runs `lfs_driver.c` and `eeprom.c` on a simulated
+NOR flash (programs clear bits, erases set 0xFF): format of a blank or
+garbage flash, the 2025 file system grown with its file kept, a power cut
+after each program and erase of a flush from 300 file system states (3002
+cuts, some in metadata compactions: the old content each time, the next
+flush fine), a failing block, a callback writing during the flush, wear over
+100000 flushes.
 
 On the LaunchPad (firmware built without `BENCH`), `tools/bench/radio_sim.py`
 plays the radio over the XDS110 back channel:

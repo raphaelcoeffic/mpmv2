@@ -310,8 +310,7 @@ uint16_t frskyx_crc(uint8_t* data, uint8_t len, uint16_t init);
 #define FrSkyX_crc(...) _FRSKYX_CRC(__VA_ARGS__, 0, 0)
 #define _FRSKYX_CRC(d, l, i, ...) frskyx_crc(d, l, i)
 
-// EEPROM (Multiprotocol.h layout): RAM for now, erased at power up
-#define EEPROM_SIZE 2048
+// EEPROM (Multiprotocol.h layout): eeprom.c, in the file system
 typedef uint16_t EE_ADDR;
 uint8_t eeprom_read_byte(EE_ADDR address);
 void eeprom_write_byte(EE_ADDR address, uint8_t value);

@@ -23,6 +23,12 @@ target_sources(littlefs
   ${LFS_DIR}/lfs_util.c  
 )
 
+# Buffers given in the configurations (lfs_file_opencfg())
+target_compile_definitions(littlefs
+  INTERFACE
+  LFS_NO_MALLOC
+)
+
 # ihex
 add_library(ihex INTERFACE)
 

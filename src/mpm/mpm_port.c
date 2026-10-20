@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "eeprom.h"
 #include "mpm_frame.h"
 #include "ppm.h"
 #include "radio.h"
@@ -316,3 +317,10 @@ void mpm_port_reset_rf() { radio_off(); }
 
 // The chip's IEEE 802.15.4 address: its last 32 bits
 uint32_t mpm_port_module_id() { return HWREG(FCFG1_BASE + FCFG1_O_MAC_15_4_0); }
+
+// The EEPROM to the flash as soon as a protocol writes it (bind): about
+// 55 ms of erase and program, the callbacks run in the flash waits
+void mpm_port_idle()
+{
+  if (eeprom_dirty()) eeprom_flush();
+}

@@ -105,18 +105,47 @@ static mpm_frame_t _radio;
 static uint32_t _next_frame;
 static bool _radio_on = true;
 
+static void _radio_step()
+{
+  if (_radio_on && (int32_t)(_us - _next_frame) >= 0) {
+    _frame_len = mpm_frame_encode(&_radio, _frame);
+    _frame_ready = true;
+    _next_frame += FRAME_PERIOD;
+  }
+}
+
 static void _run(uint32_t us)
 {
   uint32_t end = _us + us;
   while ((int32_t)(_us - end) < 0) {
-    if (_radio_on && (int32_t)(_us - _next_frame) >= 0) {
-      _frame_len = mpm_frame_encode(&_radio, _frame);
-      _frame_ready = true;
-      _next_frame += FRAME_PERIOD;
-    }
+    _radio_step();
     mpm_poll();
     _us += 3;
   }
+}
+
+//
+// Board work: a long job (a flash write) polling in its waits
+//
+
+#define IDLE_WAIT_US 200  // an SPI transfer or a flash status read
+
+static uint32_t _idle_job_us;
+static int _idle_depth, _idle_depth_max;
+
+void mpm_port_idle()
+{
+  if (++_idle_depth > _idle_depth_max) _idle_depth_max = _idle_depth;
+  if (_idle_job_us) {
+    uint32_t end = _us + _idle_job_us;
+    _idle_job_us = 0;
+    while ((int32_t)(_us - end) < 0) {
+      _us += IDLE_WAIT_US;
+      _radio_step();
+      mpm_poll();
+    }
+  }
+  _idle_depth--;
 }
 
 // Telemetry frames received since the last call
@@ -298,6 +327,27 @@ static void test_start_and_timing()
   CHECK(memcmp(d + 16, "Two \0\0\0\0", 8) == 0);
 }
 
+static void test_port_idle()
+{
+  // A 150 ms job: callbacks late by one wait at most, the frames processed
+  // (no input loss after 70 ms), mpm_port_idle() not nested
+  _clear();
+  _idle_depth_max = 0;
+  _idle_job_us = 150000;
+  _run(200000);
+  CHECK(_idle_depth_max == 1);
+  CHECK(mpm.input);
+  CHECK(_cb_n >= 49 && _cb_n <= 51);
+  int32_t late_max = 0;
+  for (int i = 1; i < _cb_n && i < 4096; i++) {
+    int32_t late = _cb_times[i] - (_cb_times[0] + i * TEST_PERIOD);
+    if (late < 0) late = -late;
+    if (late > late_max) late_max = late;
+  }
+  printf("port idle: callbacks %d, late max %d us\n", _cb_n, late_max);
+  CHECK(late_max <= IDLE_WAIT_US + 10);
+}
+
 static void test_input_loss()
 {
   // Callbacks stop 70 ms after the last frame, start again with the frames
@@ -468,6 +518,7 @@ int main()
 {
   test_frame();
   test_start_and_timing();
+  test_port_idle();
   test_input_loss();
   test_bind();
   test_invalid();

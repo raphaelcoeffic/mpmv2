@@ -2,7 +2,6 @@
 #include "debug.h"
 #include "spi.h"
 
-#define FLASH_CMD_READ_ID       0x90
 #define FLASH_CMD_READ_JEDEC_ID 0x9f
 #define FLASH_CMD_READ_SFDP     0x5a
 
@@ -11,25 +10,40 @@
 
 #define FLASH_CMD_STATUS        0x05
 #define FLASH_CMD_WRITE_ENABLE  0x06
+#define FLASH_CMD_WRITE_STATUS  0x01
+#define FLASH_CMD_READ_CONFIG   0x15
+#define FLASH_CMD_READ_SECURITY 0x2b
 
 #define FLASH_CMD_ERASE_4KB     0x20
 #define FLASH_CMD_ERASE_32KB    0x52
 #define FLASH_CMD_CHIP_ERASE    0xc7
 
-#define FLASH_SECTOR_SIZE 4096
+#define FLASH_SECTOR_SIZE NOR_FLASH_SECTOR_SIZE
 #define FLASH_SECTOR_MASK (FLASH_SECTOR_SIZE - 1)
 
 #define FLASH_BLOCK_SIZE 32768
 #define FLASH_BLOCK_MASK (FLASH_BLOCK_SIZE - 1)
 
-#define FLASH_PAGE_SIZE 256
+#define FLASH_PAGE_SIZE NOR_FLASH_PAGE_SIZE
 #define FLASH_PAGE_MASK (FLASH_PAGE_SIZE - 1)
+
+// Security register: last program / erase failed
+#define FLASH_SECURITY_P_FAIL (1 << 5)
+#define FLASH_SECURITY_E_FAIL (1 << 6)
+
+// Macronix MX25R (MPM v2, LaunchPad): JEDEC manufacturer and memory type.
+// Configuration register 2 bit 1: high performance mode (erase 40 ms instead
+// of 58, page program 0.85 ms instead of 3.2), volatile
+#define MX25R_MANUFACTURER 0xc2
+#define MX25R_MEMORY_TYPE  0x28
+#define MX25R_CR2_HIGH_PERF (1 << 1)
 
 #define FLASH_DMA_THRESHOLD 8
 
 typedef struct {
-  uint8_t vendor_id;
-  uint8_t device_id;
+  uint8_t manufacturer;
+  uint8_t memory_type;
+  uint8_t density;
 } nor_flash_id_t;
 
 typedef struct {
@@ -40,6 +54,7 @@ typedef struct {
 typedef struct {
   spi_t spi;
   nor_flash_descriptor_t desc;
+  void (*yield)();
 } nor_flash_state_t;
 
 static nor_flash_state_t _flash_state;
@@ -91,12 +106,26 @@ static inline void do_cmd(uint8_t cmd, const uint8_t* tx, uint8_t* rx, uint16_t 
   flash_unselect();
 }
 
+static inline void yield()
+{
+  if (_flash_state.yield) _flash_state.yield();
+}
+
 static void wait_for_not_busy()
 {
   uint8_t status;
-  do {
+  for (;;) {
     do_cmd(FLASH_CMD_STATUS, 0, &status, 1);
-  } while (status & 0x01);
+    if (!(status & 0x01)) break;
+    yield();
+  }
+}
+
+static uint8_t read_security()
+{
+  uint8_t security;
+  do_cmd(FLASH_CMD_READ_SECURITY, 0, &security, 1);
+  return security;
 }
 
 static void write_enable()
@@ -106,15 +135,25 @@ static void write_enable()
 
 static void read_id(nor_flash_id_t* id)
 {
-  uint8_t buf[4] = {FLASH_CMD_READ_ID, 0, 0, 0};
+  uint8_t buf[3];
+  do_cmd(FLASH_CMD_READ_JEDEC_ID, 0, buf, 3);
 
-  flash_select();
-  flash_write(buf, 4);
-  flash_read(buf, 2);
-  flash_unselect();
+  id->manufacturer = buf[0];
+  id->memory_type = buf[1];
+  id->density = buf[2];
+}
 
-  id->vendor_id = buf[0];
-  id->device_id = buf[1];
+static void mx25r_high_performance()
+{
+  uint8_t regs[3];
+  do_cmd(FLASH_CMD_STATUS, 0, regs, 1);
+  do_cmd(FLASH_CMD_READ_CONFIG, 0, regs + 1, 2);
+  if (regs[2] & MX25R_CR2_HIGH_PERF) return;
+
+  regs[2] |= MX25R_CR2_HIGH_PERF;
+  write_enable();
+  do_cmd(FLASH_CMD_WRITE_STATUS, regs, 0, 3);
+  wait_for_not_busy();
 }
 
 static void read_sfdp_block(uint32_t addr, uint8_t *rx, uint16_t count)
@@ -194,7 +233,20 @@ int nor_flash_init(spi_t spi, const spi_device_t* dev)
   _flash_state.spi = spi;
 
   read_id(&_flash_state.desc.id);
-  return read_sfdp();
+  int err = read_sfdp();
+  if (err) return err;
+
+  const nor_flash_id_t* id = &_flash_state.desc.id;
+  debugln("[NOR flash]: JEDEC ID %02x %02x %02x", id->manufacturer, id->memory_type, id->density);
+  if (id->manufacturer == MX25R_MANUFACTURER && id->memory_type == MX25R_MEMORY_TYPE) {
+    mx25r_high_performance();
+  }
+  return 0;
+}
+
+void nor_flash_set_yield(void (*yield)())
+{
+  _flash_state.yield = yield;
 }
 
 uint32_t nor_flash_size()
@@ -211,21 +263,33 @@ uint32_t nor_flash_read(uint32_t addr, uint8_t* data, uint32_t len)
   flash_read(data, len);
   flash_unselect();
 
+  yield();
   return len;
 }
 
-uint32_t nor_flash_write(uint32_t address, const uint8_t* data, uint32_t len)
+int nor_flash_write(uint32_t address, const uint8_t* data, uint32_t len)
 {
   wait_for_not_busy();
-  write_enable();
 
-  flash_select();
-  put_cmd_addr(FLASH_CMD_WRITE, address);
-  flash_write((uint8_t*)data, len);
-  flash_unselect();
-  
-  wait_for_not_busy();
-  return len;
+  while (len > 0) {
+    // a page program wraps within the page
+    uint32_t n = FLASH_PAGE_SIZE - (address & FLASH_PAGE_MASK);
+    if (n > len) n = len;
+
+    write_enable();
+    flash_select();
+    put_cmd_addr(FLASH_CMD_WRITE, address);
+    flash_write(data, n);
+    flash_unselect();
+
+    wait_for_not_busy();
+    if (read_security() & FLASH_SECURITY_P_FAIL) return -1;
+
+    address += n;
+    data += n;
+    len -= n;
+  }
+  return 0;
 }
 
 void nor_flash_sync()
@@ -249,7 +313,7 @@ int nor_flash_erase(uint32_t address)
   flash_unselect();
 
   wait_for_not_busy();
-  return 0;
+  return read_security() & FLASH_SECURITY_E_FAIL ? -1 : 0;
 }
 
 int nor_flash_erase_block(uint32_t address)

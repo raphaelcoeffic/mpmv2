@@ -28,3 +28,8 @@ void mpm_port_reset_rf();
 
 // Module id: protocol addresses derive from it (+ rx_num)
 uint32_t mpm_port_module_id();
+
+// Board work after each poll (the EEPROM written to the flash). A long job
+// calls mpm_poll() while it waits: the callbacks and the input go on, this
+// is not called again until it returns
+void mpm_port_idle();

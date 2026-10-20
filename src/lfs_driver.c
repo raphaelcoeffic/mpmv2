@@ -3,12 +3,9 @@
 #include "nor_flash.h"
 #include "debug.h"
 
-#define BLOCK_SIZE  (4 * KILOBYTE)
-#define BLOCK_COUNT (FS_SIZE / BLOCK_SIZE)
+#define BLOCK_SIZE NOR_FLASH_SECTOR_SIZE
 
-#define FLASH_BLOCK (32 * KILOBYTE)
-
-#define ADDR(block, off) (FS_OFFSET + block * BLOCK_SIZE + off)
+#define ADDR(block, off) ((block) * BLOCK_SIZE + (off))
 
 static int _flash_read(const struct lfs_config *c, lfs_block_t block,
                        lfs_off_t off, void *buffer, lfs_size_t size)
@@ -17,16 +14,21 @@ static int _flash_read(const struct lfs_config *c, lfs_block_t block,
   return LFS_ERR_OK;
 }
 
+// A failed program or erase: littlefs moves the data to another block
 static int _flash_prog(const struct lfs_config *c, lfs_block_t block,
                        lfs_off_t off, const void *buffer, lfs_size_t size)
 {
-  nor_flash_write(ADDR(block, off), (const uint8_t*)buffer, size);
+  if (nor_flash_write(ADDR(block, off), (const uint8_t*)buffer, size) != 0) {
+    return LFS_ERR_CORRUPT;
+  }
   return LFS_ERR_OK;
 }
 
 static int _flash_erase(const struct lfs_config *c, lfs_block_t block)
 {
-  nor_flash_erase(ADDR(block, 0));
+  if (nor_flash_erase(ADDR(block, 0)) != 0) {
+    return LFS_ERR_CORRUPT;
+  }
   return LFS_ERR_OK;
 }
 
@@ -36,26 +38,17 @@ static int _flash_sync(const struct lfs_config *c)
   return LFS_ERR_OK;
 }
 
-static void erase_file_system()
-{
-  debug("erasing file system");
-  for (unsigned i = 0; i < BLOCK_COUNT; i++) {
-    nor_flash_erase(ADDR(i, 0));
-    debug(".");
-  }
-  debugln(" [done]");
-}
-
+// Lookahead: 256 blocks (bits), a window over larger flashes
 #define READ_SIZE      16
 #define PROG_SIZE      16
-#define CACHE_SIZE     16
-#define LOOKAHEAD_SIZE 16
+#define CACHE_SIZE     FILE_SYSTEM_CACHE_SIZE
+#define LOOKAHEAD_SIZE 32
 
 static uint8_t _read_buffer[CACHE_SIZE];
 static uint8_t _prog_buffer[CACHE_SIZE];
-static uint8_t _lookahead_buffer[CACHE_SIZE];
+static uint8_t _lookahead_buffer[LOOKAHEAD_SIZE];
 
-static const struct lfs_config _flash_cfg = {
+static struct lfs_config _flash_cfg = {
     // block device operations
     .read = _flash_read,
     .prog = _flash_prog,
@@ -66,7 +59,7 @@ static const struct lfs_config _flash_cfg = {
     .read_size = READ_SIZE,
     .prog_size = PROG_SIZE,
     .block_size = BLOCK_SIZE,
-    .block_count = BLOCK_COUNT,
+    .block_count = 0,  // mount: the file system's
     .cache_size = CACHE_SIZE,
     .lookahead_size = LOOKAHEAD_SIZE,
     .block_cycles = 500,
@@ -83,11 +76,7 @@ int file_system_init(lfs_t* lfs)
   }
 
   uint32_t flash_size = nor_flash_size();
-  uint32_t fs_size = FS_OFFSET + FS_SIZE;
-  if (flash_size < fs_size) {
-    debugln("error: file system too big (%d > %d)", fs_size, flash_size);
-    return LFS_ERR_IO;
-  }
+  lfs_size_t block_count = flash_size / BLOCK_SIZE;
 
 #if defined(DEBUG)
   char* unit = "B";
@@ -101,16 +90,33 @@ int file_system_init(lfs_t* lfs)
   debugln("flash size = %d %s", flash_size, unit);
 #endif
 
+  _flash_cfg.block_count = 0;
   int err = lfs_mount(lfs, &_flash_cfg);
-  if (err != LFS_ERR_OK) {
-    erase_file_system();
-
+  if (err == LFS_ERR_CORRUPT) {
+    // no file system (blank or foreign data): only then format, a bus or
+    // version error keeps what is there
+    debugln("formatting the file system");
+    _flash_cfg.block_count = block_count;
     err = lfs_format(lfs, &_flash_cfg);
     if (err == LFS_ERR_OK) {
       err = lfs_mount(lfs, &_flash_cfg);
     } else {
-      debugln("error: formatting failed");
+      debugln("error: formatting failed (%d)", err);
     }
+  }
+  if (err != LFS_ERR_OK) {
+    debugln("error: mount failed (%d)", err);
+    return err;
+  }
+
+  struct lfs_fsinfo info;
+  err = lfs_fs_stat(lfs, &info);
+  if (err == LFS_ERR_OK && info.block_count < block_count) {
+    debugln("growing the file system to %d blocks", block_count);
+    err = lfs_fs_grow(lfs, block_count);
+  }
+  if (err != LFS_ERR_OK) {
+    lfs_unmount(lfs);
   }
   return err;
 }
