@@ -76,7 +76,7 @@ def status_decode(d: bytes) -> dict:
 def telem_decode(ty: int, d: bytes) -> dict[str, int]:
     """The link statistics of the MPM's FrSky telemetry frames (telemetry.ino):
     S.Port (type 2) RSSI 0xF101 and battery 0xF104, hub (type 3) link frame 0xFE,
-    AFHDS2A (type 6) sensors.
+    DSM (type 4) QoS / TM1000 and bind response (type 5), AFHDS2A (type 6) sensors.
     RX_RSSI: the receiver's, TX_RSSI: the module's (raw CC2500 RSSI + 128),
     TX_LQI: telemetry packets in 900 ms (FrSky X), the CC2500 LQI (FrSky D)."""
     if ty == 0x02 and len(d) >= 8:
@@ -87,6 +87,21 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
             return {"a1": d[4]}
     elif ty == 0x03 and len(d) >= 7 and d[0] == 0xFE:
         return {"a1": d[1], "a2": d[2], "rx_rssi": d[3], "tx_rssi": d[4], "rx_lqi": d[5], "tx_lqi": d[6]}
+    elif ty == 0x04 and len(d) >= 17:
+        # DSM: CYRF RSSI of the telemetry, then the Spektrum packet (I2C address first)
+        out = {"tx_rssi": d[0]}
+        if d[1] == 0x7F:  # QoS: fades A, B, L, R, frame losses, holds (big endian), RX voltage 0.01 V
+            for k, v in zip(("fades_a", "fades_b", "fades_l", "fades_r", "losses", "holds", "rx_v"),
+                            struct.unpack(">7H", d[3:17])):
+                out[k] = v
+        elif d[1] == 0x7E:  # TM1000: RPM period, voltage 0.01 V, temperature F
+            out.update(zip(("rpm", "volt", "temp_f"), struct.unpack(">3H", d[3:9])))
+        else:
+            out[f"sensor_{d[1]:02x}"] = 1
+        return out
+    elif ty == 0x05 and len(d) >= 10:
+        # DSM bind response: channels, mode (0xa2 DSMX 22 ms, 0xb2 DSMX 11 ms, 0x01/0x02/0x12 DSM2)
+        return {"bind_ch": d[5], "bind_mode": d[6]}
     elif ty == 0x06 and len(d) >= 29:
         # AFHDS2A (option bit 7): TX_RSSI, 7 sensors: id, instance, value (16 bit LE)
         out = {"tx_rssi": d[0]}
@@ -322,6 +337,13 @@ def cmd_drive(r: Radio, a):
                 if ty == 0x01:
                     flags = status_decode(d)["flags"]
                 link.update(telem_decode(ty, d))
+                if ty == 0x05 and a.proto == 6 and a.sub == 4 and len(d) >= 7:
+                    # As EdgeTX (DSM Auto): the receiver's mode and channel count
+                    # once the bind is over (a model change restarts the protocol)
+                    sub = {0xA2: 2, 0x01: 0, 0x02: 0, 0x12: 1}.get(d[6], 3)
+                    ch = min(max(d[5], 3), 12)
+                    a.sub, a.option, a.bind_time = sub, (a.option & 0xF0) | ch, 0
+                    print(f"{t:6.1f} s DSM bind response {d[:10].hex()}: sub {sub}, {ch} channels")
             if binding and t - bind_start > 1.0:
                 ended = "binding" not in flags
                 if t < a.bind_time and (ended or (a.options and t - bind_start >= a.step)):
@@ -332,7 +354,7 @@ def cmd_drive(r: Radio, a):
                     bind_start, flags = t, []
                     print(f"{t:6.1f} s bind, option {options[opt_idx]}")
                 elif ended or t >= a.bind_time > 0:
-                    r.set(bind=False, option=a.option)
+                    r.set(bind=False, option=a.option, sub=a.sub)
                     binding = False
                     print(f"{t:6.1f} s bind done, option {a.option}")
             if time.monotonic() >= next_print:

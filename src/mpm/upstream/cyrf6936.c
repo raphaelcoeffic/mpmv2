@@ -14,6 +14,18 @@
 // framings, not done yet), ACK, sleep and wake up, interrupts and GPIOs, the
 // preamble count and pattern (frame.c's), TX buffer streaming beyond the
 // packet length, RX buffer overflow. RX listens on the TX frequency.
+//
+// Without a length field the RF core receives RX_MAX bytes, longer than the
+// chip, which ends at the EOP (SDR: 8.2 ms instead of 5.1 ms for the 10
+// byte DSM bind response): a force end or abort while a packet comes keeps
+// that RX running, an RX GO with the same setup goes on with it (the DSM
+// bind check restarts RX every 7 ms).
+//
+// The CYRF6936 sends at TX GO: here the RF core starts about 430 us later,
+// the same for every packet (DSM sends CH2 4 ms after CH1, a receiver such
+// as the Lemon-RX DSMP misses packets 0.5 ms off). So nothing slow at TX GO:
+// the frame_init() results are cached, the synthesizer tuned at the CHANNEL
+// write, the RX only sync threshold does not set up the PHY again.
 #include "iface_cyrf6936.h"
 
 #ifdef CYRF6936_INSTALLED
@@ -21,6 +33,7 @@
 #include "board.h"
 #include "frame.h"
 #include "radio.h"
+#include "timer.h"
 
 #define NREGS 0x40
 #define BUF_SIZE 64
@@ -44,6 +57,10 @@ static uint8_t _tx_irq, _rx_irq;
 static uint8_t _rssi;        // RSSI register: the packet's, then live readings
 static bool _rssi_pkt;       // the packet's RSSI not read yet
 static enum { S_IDLE, S_TX, S_RX } _state;
+static bool _rx_held;                 // RX ended for the protocol, the RF core still in it
+static volatile bool _rx_busy;        // a packet's sync came, not the packet yet
+static volatile uint32_t _rx_end_us;  // its expected end
+static uint16_t _rx_air_max;          // fixed length RX: air bytes
 
 static frame_t _frame;
 static radio_phy_t _phy;
@@ -87,6 +104,43 @@ static void _reset()
 // CYRF6936) at the board default, low (-18 dBm), bind and range low
 static uint16_t _power_word(uint8_t pa) { return pa >= CYRF_POWER_5 ? RF_TX_POWER_DEFAULT : RF_TX_POWER_LOW; }
 
+// frame_init() takes about 2 ms here (its RX sync word choice), too long at
+// TX GO: the results for the last codes (DSM: 5 rows), CRC seed aside. The
+// key holds the frame_init() inputs (newlib's byte memcmp() on frame_t: 100 us)
+#define FRAME_CACHE 8
+typedef struct {
+  uint64_t sop, data[2];
+  uint8_t flags;
+} _frame_key_t;
+static struct {
+  _frame_key_t key;
+  frame_t f;
+} _frames[FRAME_CACHE];
+static uint8_t _frames_n, _frames_last;
+
+static bool _frame_init(frame_t* f)
+{
+  _frame_key_t k;
+  memcpy(&k.sop, f->sop_code, 8);
+  memcpy(k.data, f->data_code, 16);
+  k.flags = f->sdr | f->data32 << 1 | f->sop << 2 | f->sop32 << 3 | f->var_len << 4 | (f->crc_len != 0) << 5 |
+            f->invert << 6;
+  for (uint8_t j = 0; j < _frames_n; j++) {
+    uint8_t i = (_frames_last + FRAME_CACHE - j) % FRAME_CACHE;  // the latest first
+    _frame_key_t* c = &_frames[i].key;
+    if (c->sop == k.sop && c->data[0] == k.data[0] && c->data[1] == k.data[1] && c->flags == k.flags) {
+      *f = _frames[i].f;
+      return true;
+    }
+  }
+  if (!frame_init(f)) return false;
+  _frames_last = (_frames_last + 1) % FRAME_CACHE;
+  _frames[_frames_last].key = k;
+  _frames[_frames_last].f = *f;
+  if (_frames_n < FRAME_CACHE) _frames_n++;
+  return true;
+}
+
 // PHY and framing from the registers (TX or RX overrides): false if not supported
 static bool _setup(radio_phy_t* phy, frame_t* f, bool tx)
 {
@@ -103,11 +157,11 @@ static bool _setup(radio_phy_t* phy, frame_t* f, bool tx)
   f->var_len = framing & 0x20;
   memcpy(f->sop_code, _sop_code, sizeof(f->sop_code));
   memcpy(f->data_code, _data_code, sizeof(f->data_code));
-  f->crc_seed = _reg[CYRF_16_CRC_SEED_MSB] << 8 | _reg[CYRF_15_CRC_SEED_LSB];
   bool no_crc = tx ? _reg[CYRF_1F_TX_OVERRIDE] & 0x04 : _reg[CYRF_1E_RX_OVERRIDE] & 0x04;
   f->crc_len = no_crc ? 0 : 2;
   f->invert = tx ? _reg[CYRF_1F_TX_OVERRIDE] & 0x01 : _reg[CYRF_39_ANALOG_CTRL] & 0x02;
-  if (!frame_init(f)) return false;
+  if (!_frame_init(f)) return false;
+  f->crc_seed = _reg[CYRF_16_CRC_SEED_MSB] << 8 | _reg[CYRF_15_CRC_SEED_LSB];
 
   memset(phy, 0, sizeof(*phy));  // _prepare() compares the structs
   phy->symbol_rate = 1000000;
@@ -135,6 +189,7 @@ static bool _prepare(bool tx)
   radio_phy_t phy;
   frame_t f;
   if (!_setup(&phy, &f, tx)) return false;
+  if (tx && _phy_on) phy.sync_threshold = _phy.sync_threshold;  // RX only: no radio_init() for it
   if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
     _phy = phy;
     _freq_khz = 0;
@@ -155,16 +210,45 @@ static bool _prepare(bool tx)
   return true;
 }
 
+// Idle: the synthesizer to the new channel now, not at TX GO (DSM writes
+// CH1's channel 600 us ahead, CH2's 2 ms)
+static void _tune()
+{
+  uint32_t khz = _channel_khz();
+  if (_phy_on && khz != _freq_khz) {
+    _freq_khz = khz;
+    radio_set_frequency(khz);
+  }
+}
+
 // End of the transaction (force end, abort): a packet being sent goes out
 static void _stop()
 {
-  if (_state == S_RX) radio_rx_stop();
+  if (_state == S_RX) {
+    if (_rx_busy && (int32_t)(_rx_end_us - micros()) > 0) _rx_held = true;
+    else radio_rx_stop();
+  }
   _state = S_IDLE;
+}
+
+// Ends the held RX, unless its setup is the same as the next RX's
+static bool _release(const radio_phy_t* phy, const frame_t* f)
+{
+  if (!_rx_held) return false;
+  _rx_held = false;
+  bool same = phy && !memcmp(phy, &_phy, sizeof(*phy)) && !memcmp(f, &_frame, sizeof(*f)) &&
+              _channel_khz() == _freq_khz;
+  if (!same) {
+    radio_rx_stop();
+    _rx_busy = false;
+  }
+  return same;
 }
 
 static void _tx()
 {
   _stop();
+  _release(NULL, NULL);
   uint16_t power = _power_word(_reg[CYRF_03_TX_CFG] & 7);
   if (power != _power) {
     _power = _phy.tx_power = power;
@@ -182,10 +266,16 @@ static void _tx()
   _state = S_TX;
 }
 
+// Packet length after its first bytes (fixed length: RX_MAX), its expected end
 static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
 {
   (void)ctx;
-  return frame_rx_var_len(&_frame, RX_MAX, data, n);
+  uint16_t len = _frame.var_len ? frame_rx_var_len(&_frame, RX_MAX, data, n) : _rx_air_max;
+  if (len > n) {
+    _rx_end_us = micros() + (uint32_t)(len - n) * 8000000 / _phy.symbol_rate;
+    _rx_busy = true;
+  }
+  return len;
 }
 
 static void _rx()
@@ -193,11 +283,20 @@ static void _rx()
   _stop();
   _rx_irq = 0;
   _rx_count = _rx_pos = 0;
+  if (_rx_held) {
+    radio_phy_t phy;
+    frame_t f;
+    bool ok = _setup(&phy, &f, false);
+    if (_release(ok ? &phy : NULL, &f)) {
+      _state = S_RX;  // the packet being received
+      return;
+    }
+  }
+  _rx_busy = false;
   if (!_prepare(false)) return;
   uint8_t hdr_len = frame_rx_hdr_len(&_frame);
-  uint16_t max_len = frame_rx_len(&_frame, RX_MAX);
-  radio_status_t st = hdr_len ? radio_rx_start_var(hdr_len, max_len, _rx_var_len, 0)
-                              : radio_rx_start(max_len);
+  _rx_air_max = frame_rx_len(&_frame, RX_MAX);
+  radio_status_t st = radio_rx_start_var(hdr_len ? hdr_len : 1, _rx_air_max, _rx_var_len, 0);
   if (st == RADIO_OK) _state = S_RX;
 }
 
@@ -215,6 +314,7 @@ static void _poll()
     _tx_irq |= TXC;
   }
   while (_state == S_RX && radio_receive(&_pkt)) {
+    _rx_busy = false;
     uint8_t payload[FRAME_PAYLOAD_MAX];
     uint8_t n = 0, len = RX_MAX;
     if (!_frame.var_len) {
@@ -245,6 +345,7 @@ void CYRF_WriteRegister(uint8_t address, uint8_t data)
     case CYRF_00_CHANNEL:
       _reg[address] = data & 0x7F;
       if (_state == S_RX) _rx();  // RSSI scans: RX on the new channel
+      else if (_state == S_IDLE) _tune();
       return;
     case CYRF_02_TX_CTRL:
       _reg[address] = data & 0x3F;
@@ -262,6 +363,7 @@ void CYRF_WriteRegister(uint8_t address, uint8_t data)
     case CYRF_1D_MODE_OVERRIDE:
       if (data & 0x01) {  // RST
         _stop();
+        _release(NULL, NULL);
         _reset();
       }
       return;

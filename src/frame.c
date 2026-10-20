@@ -172,13 +172,16 @@ static uint8_t _crc8_buf(uint8_t crc, const uint8_t* data, uint8_t len)
 }
 
 // Bit fields, MSB first
+// The low 'bits' bits of v (up to 32), MSB first, a byte at a time
 static void _put_bits(uint8_t* buf, uint16_t* pos, uint32_t v, uint8_t bits)
 {
-  while (bits--) {
-    uint8_t mask = 0x80 >> (*pos & 7);
-    if ((v >> bits) & 1) buf[*pos >> 3] |= mask;
-    else buf[*pos >> 3] &= ~mask;
-    (*pos)++;
+  while (bits) {
+    uint8_t off = *pos & 7, take = 8 - off < bits ? 8 - off : bits;
+    uint8_t shift = 8 - off - take, mask = ((1u << take) - 1) << shift;
+    uint8_t* b = &buf[*pos >> 3];
+    *b = (*b & ~mask) | (((v >> (bits - take)) << shift) & mask);
+    *pos += take;
+    bits -= take;
   }
 }
 
@@ -258,9 +261,34 @@ static uint64_t _cyrf_symbol(const frame_t* f, uint8_t v)
 }
 
 // TX_OVERRIDE.TX_INV: all chips inverted, preamble included (measured)
+static uint64_t _reverse64(uint64_t x)
+{
+  x = (x >> 1 & 0x5555555555555555ULL) | (x & 0x5555555555555555ULL) << 1;
+  x = (x >> 2 & 0x3333333333333333ULL) | (x & 0x3333333333333333ULL) << 2;
+  x = (x >> 4 & 0x0F0F0F0F0F0F0F0FULL) | (x & 0x0F0F0F0F0F0F0F0FULL) << 4;
+  x = (x >> 8 & 0x00FF00FF00FF00FFULL) | (x & 0x00FF00FF00FF00FFULL) << 8;
+  x = (x >> 16 & 0x0000FFFF0000FFFFULL) | (x & 0x0000FFFF0000FFFFULL) << 16;
+  return x >> 32 | x << 32;
+}
+
+// n chips in air order (chip 0 the MSB): a 1 chip as a 0 bit (as the
+// CYRF6936 modulates), as is with TX_INV
+static void _put_air(const frame_t* f, uint8_t* buf, uint16_t* pos, uint64_t v, uint8_t n)
+{
+  if (!f->invert) v = ~v;
+  if (n > 32) {
+    _put_bits(buf, pos, (uint32_t)(v >> 32), n - 32);
+    n = 32;
+  }
+  _put_bits(buf, pos, (uint32_t)v, n);
+}
+
+static uint64_t _air_order(uint64_t chips, uint8_t n) { return _reverse64(chips) >> (64 - n); }
+
+// Chip k sent k-th
 static void _put_chips(const frame_t* f, uint8_t* buf, uint16_t* pos, uint64_t chips, uint8_t n)
 {
-  for (uint8_t k = 0; k < n; k++) _put_bits(buf, pos, !((chips >> k) & 1) ^ f->invert, 1);
+  if (n) _put_air(f, buf, pos, _air_order(chips, n), n);
 }
 
 static uint64_t _get_chips(const frame_t* f, const uint8_t* buf, uint16_t pos, uint8_t n)
@@ -655,9 +683,17 @@ static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t l
   uint16_t pos = 8 * f->hdr_len;
   uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
   _put_bits(buf, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
+  // 8DR (_cyrf_symbol()) in air order, where the rotation is to the left:
+  // the codes reversed once, not per symbol (the TX latency on the CC2652)
+  uint8_t cn = _cyrf_n(f);
+  uint64_t air[4];
+  for (uint8_t c = 0; c < 128 / cn; c++) air[c] = _air_order(_cyrf_code(f->data_code + c * cn / 8, cn), cn);
   for (uint8_t i = 0; i < n; i++) {
     if (!f->sdr) {
-      _put_chips(f, buf, &pos, _cyrf_symbol(f, body[i]), _cyrf_n(f));
+      uint8_t v = body[i], r = v & (cn - 1);
+      uint64_t a = air[(v & 0x7F) / cn];
+      if (r) a = ((a << r) | (a >> (cn - r))) & _chip_mask(cn);
+      _put_air(f, buf, &pos, v & 0x80 ? ~a & _chip_mask(cn) : a, cn);
       continue;
     }
     for (uint8_t b = 0; b < 8; b++)
