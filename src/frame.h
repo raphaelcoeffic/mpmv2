@@ -156,3 +156,9 @@ frame_result_t frame_decode_pcf(const frame_t* f, const uint8_t* data, uint16_t 
 // the header bytes they share: one RX, decoded with either. false if not 8DR
 // with SOP (f unchanged)
 bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt);
+
+// f and alt from frame_cyrf_rx_alt(): true if the received header (from the
+// second SOP copy on) is closer to alt's than to f's, the code length to
+// decode with
+bool frame_cyrf_rx_is_alt(const frame_t* f, const frame_t* alt, const uint8_t* data,
+                          uint16_t rx_len);

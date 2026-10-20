@@ -155,6 +155,10 @@ static void _update_telem(uint32_t ms)
 // resets before a protocol starts
 __attribute__((weak)) void mpm_protocol_prepare() {}
 
+// Protocol layer hook (upstream/mpm_compat.c): the RF chips' work between
+// callbacks, what the chips do by themselves (a packet received)
+__attribute__((weak)) void mpm_protocol_idle() {}
+
 static void _protocol_init()
 {
   _callback = 0;
@@ -325,6 +329,10 @@ void mpm_poll()
   // Input between callbacks, if there is time for it
   int32_t left = _next_us - now;
   if (left > 0) {
+    if (left > MPM_IDLE_MIN_US) {
+      mpm_protocol_idle();
+      left = _next_us - mpm_port_micros();
+    }
     if (left > MPM_UPDATE_MIN_US) {
       _count = 0;
       _update_all();

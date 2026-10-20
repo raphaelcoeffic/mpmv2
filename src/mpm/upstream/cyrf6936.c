@@ -107,11 +107,12 @@ static void _reset()
 static uint16_t _power_word(uint8_t pa) { return pa >= CYRF_POWER_5 ? RF_TX_POWER_DEFAULT : RF_TX_POWER_LOW; }
 
 // frame_init() takes about 2 ms here (its RX sync word choice), too long at
-// TX GO: the results for the last codes (DSM: 5 rows), CRC seed aside. The
-// key holds the frame_init() inputs (newlib's byte memcmp() on frame_t: 100 us).
+// TX GO: the results for the last codes (DSM: 5 rows, for TX and RX), CRC
+// seed aside. The key holds the frame_init() inputs (newlib's byte memcmp()
+// on frame_t: 100 us).
 // RX (alt not NULL): with a length field, the 8DR chip takes 32 and 64 chip
 // codes (frame_cyrf_rx_alt(), DSM telemetry of a Lemon-RX DSMP: 32 chips)
-#define FRAME_CACHE 8
+#define FRAME_CACHE 16
 typedef struct {
   uint64_t sop, data[2];
   uint8_t flags;
@@ -334,36 +335,34 @@ static void _poll()
   }
   while (_state == S_RX && radio_receive(&_pkt)) {
     _rx_busy = false;
+    // The code length from the SOP
+    const frame_t* f =
+        _alt && frame_cyrf_rx_is_alt(&_frame, &_frame_alt, _pkt.data, _pkt.len) ? &_frame_alt : &_frame;
     uint8_t payload[FRAME_PAYLOAD_MAX];
     uint8_t n = 0, len = RX_MAX;
-    if (!_frame.var_len) {
+    if (!f->var_len) {
       // EOP: successive symbols with no data code
-      uint8_t th = _frame.data32 ? _reg[CYRF_11_DATA32_THOLD] & 0x0F : _reg[CYRF_12_DATA64_THOLD] & 0x1F;
-      len = frame_cyrf_rx_count(&_frame, _pkt.data, _pkt.len, th, _reg[CYRF_14_EOP_CTRL] & 0x0F);
+      uint8_t th = f->data32 ? _reg[CYRF_11_DATA32_THOLD] & 0x0F : _reg[CYRF_12_DATA64_THOLD] & 0x1F;
+      len = frame_cyrf_rx_count(f, _pkt.data, _pkt.len, th, _reg[CYRF_14_EOP_CTRL] & 0x0F);
       if (len > RX_MAX) len = RX_MAX;
     }
-    frame_result_t r = len ? frame_decode(&_frame, _pkt.data, _pkt.len, len, payload, &n) : FRAME_SHORT;
-    if (r != FRAME_OK && _alt) {
-      uint8_t alt_payload[FRAME_PAYLOAD_MAX], alt_n = 0;
-      if (frame_decode(&_frame_alt, _pkt.data, _pkt.len, len, alt_payload, &alt_n) == FRAME_OK) {
-        r = FRAME_OK;
-        n = alt_n;
-        memcpy(payload, alt_payload, n);
-      }
-    }
+    frame_result_t r = len ? frame_decode(f, _pkt.data, _pkt.len, len, payload, &n) : FRAME_SHORT;
     if (r == FRAME_SHORT || n == 0) continue;  // false sync: still in RX
     radio_rx_stop();
     _state = S_IDLE;
     memcpy(_rx_buf, payload, n);
     _rx_count = n;
     _rx_pos = 0;
-    _reg[CYRF_0A_RX_LENGTH] = _frame.var_len ? n : 0;
+    _reg[CYRF_0A_RX_LENGTH] = f->var_len ? n : 0;
     _reg[CYRF_08_RX_STATUS] = r == FRAME_OK ? 0 : 0x08;  // Bad CRC
     _rx_irq = RXC | (r == FRAME_OK ? 0 : RXE);
     _rssi = _rssi_count(_pkt.rssi);
     _rssi_pkt = true;
   }
 }
+
+// Between protocol callbacks: the transaction goes on as on the chip
+void CYRF_Idle() { _poll(); }
 
 void CYRF_WriteRegister(uint8_t address, uint8_t data)
 {

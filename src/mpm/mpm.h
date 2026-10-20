@@ -27,6 +27,9 @@
 #define MPM_UPDATE_MIN_US 900
 // Or after this many callbacks without time for it
 #define MPM_UPDATE_FORCE 10
+// The RF chips' work between callbacks (mpm_protocol_idle()) if this much
+// time is left: the longest of it, a received packet's decoding
+#define MPM_IDLE_MIN_US 1500
 
 // Channels 5 to 12 above this: Channel_AUX bits
 #define MPM_CHANNEL_SWITCH 1106

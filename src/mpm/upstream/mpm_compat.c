@@ -103,6 +103,14 @@ void mpm_protocol_prepare()
   pps_counter = 0;
 }
 
+// The core's idle hook: the chips' transactions go on between callbacks
+void mpm_protocol_idle()
+{
+#ifdef CYRF6936_INSTALLED
+  CYRF_Idle();
+#endif
+}
+
 // The core's telemetry hook: Telemetry.ino's TelemetryUpdate() (Update_Telem())
 void mpm_protocol_telemetry() { TelemetryUpdate(); }
 

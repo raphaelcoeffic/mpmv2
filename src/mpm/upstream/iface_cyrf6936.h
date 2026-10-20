@@ -106,6 +106,7 @@ void CYRF_FindBestChannels(u8 *channels, u8 len, u8 minspace, u8 minchan, u8 max
 void CYRF_WriteRegister(uint8_t address, uint8_t data);
 uint8_t CYRF_ReadRegister(uint8_t address);
 uint8_t CYRF_Reset();
+void CYRF_Idle();  // between protocol callbacks
 void CYRF_GetMfgData(uint8_t data[]);
 void CYRF_SetTxRxMode(uint8_t mode);
 void CYRF_ConfigRFChannel(uint8_t ch);

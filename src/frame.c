@@ -187,10 +187,25 @@ static void _put_bits(uint8_t* buf, uint16_t* pos, uint32_t v, uint8_t bits)
 
 static uint32_t _get_bits(const uint8_t* buf, uint16_t pos, uint8_t bits)
 {
-  uint32_t v = 0;
-  for (; bits; bits--, pos++) v = (v << 1) | ((buf[pos >> 3] >> (7 - (pos & 7))) & 1);
-  return v;
+  if (!bits) return 0;
+  // The bytes holding the field only (up to 5)
+  const uint8_t* b = buf + (pos >> 3);
+  uint8_t bytes = ((pos & 7) + bits + 7) >> 3;
+  uint64_t v = 0;
+  for (uint8_t i = 0; i < bytes; i++) v = v << 8 | b[i];
+  return (uint32_t)(v >> (8 * bytes - (pos & 7) - bits)) & (0xFFFFFFFFu >> (32 - bits));
 }
+
+// The Cortex-M4 has no popcount instruction, libgcc's goes a byte at a time
+static uint8_t _popcount32(uint32_t x)
+{
+  x -= x >> 1 & 0x55555555;
+  x = (x & 0x33333333) + (x >> 2 & 0x33333333);
+  x = (x + (x >> 4)) & 0x0F0F0F0F;
+  return (x * 0x01010101) >> 24;
+}
+
+static uint8_t _popcount64(uint64_t x) { return _popcount32((uint32_t)x) + _popcount32(x >> 32); }
 
 // NRF CRC on the first 'bits' bits of buf
 static uint16_t _nrf_crc_bits(const frame_t* f, const uint8_t* buf, uint16_t bits)
@@ -250,16 +265,6 @@ static uint64_t _rotate(uint64_t c, uint8_t r, uint8_t n)
   return r ? ((c >> r) | (c << (n - r))) & _chip_mask(n) : c;
 }
 
-// 8DR symbol: data code (64 chips: 2 codes, bit 6; 32 chips: 4 codes, bits 5-6)
-// rotated by the low bits, inverted if bit 7
-static uint64_t _cyrf_symbol(const frame_t* f, uint8_t v)
-{
-  uint8_t n = _cyrf_n(f);
-  uint8_t code = (v & 0x7F) / n;
-  uint64_t c = _rotate(_cyrf_code(f->data_code + code * n / 8, n), v & (n - 1), n);
-  return v & 0x80 ? ~c & _chip_mask(n) : c;
-}
-
 // TX_OVERRIDE.TX_INV: all chips inverted, preamble included (measured)
 static uint64_t _reverse64(uint64_t x)
 {
@@ -293,32 +298,60 @@ static void _put_chips(const frame_t* f, uint8_t* buf, uint16_t* pos, uint64_t c
 
 static uint64_t _get_chips(const frame_t* f, const uint8_t* buf, uint16_t pos, uint8_t n)
 {
-  uint64_t chips = 0;
-  for (uint8_t k = 0; k < n; k++)
-    if (!_get_bits(buf, pos + k, 1) ^ f->invert) chips |= 1ULL << k;
-  return chips;
+  uint64_t v = n > 32 ? (uint64_t)_get_bits(buf, pos, n - 32) << 32 | _get_bits(buf, pos + n - 32, 32)
+                      : _get_bits(buf, pos, n);
+  return _air_order(f->invert ? v : ~v, n);
 }
 
-// Nearest symbol value
-static uint8_t _cyrf_decode_symbol(const frame_t* f, uint64_t chips)
+// The 8DR symbols 0-127 of the last data codes, for each code length (DSM:
+// new codes at each channel). Symbol v: data code (64 chips: 2 codes, bit 6;
+// 32 chips: 4 codes, bits 5-6) rotated by the low bits; inverted if bit 7
+static struct {
+  bool valid;
+  uint8_t data_code[16];
+  uint64_t symbols[128];
+} _cyrf_symbols[2];
+
+static const uint64_t* _cyrf_symbol_table(const frame_t* f)
 {
-  uint8_t n = _cyrf_n(f);
+  __typeof__(_cyrf_symbols[0])* t = &_cyrf_symbols[f->data32];
+  if (!t->valid || memcmp(t->data_code, f->data_code, sizeof(t->data_code))) {
+    // One chip rotations
+    t->valid = false;
+    memcpy(t->data_code, f->data_code, sizeof(t->data_code));
+    uint8_t n = _cyrf_n(f);
+    for (uint8_t code = 0; code < 128 / n; code++) {
+      uint64_t c = _cyrf_code(f->data_code + code * n / 8, n);
+      for (uint8_t r = 0; r < n; r++, c = _rotate(c, 1, n)) t->symbols[code * n + r] = c;
+    }
+    t->valid = true;
+  }
+  return t->symbols;
+}
+
+// Nearest symbol value, its chip errors in *errors
+static uint8_t _cyrf_decode_symbol(const frame_t* f, uint64_t chips, uint8_t* errors)
+{
+  const uint64_t* symbols = _cyrf_symbol_table(f);
   uint8_t best = 0, best_d = 0xFF;
-  for (uint8_t code = 0; code < 128 / n; code++) {
-    uint64_t c = _cyrf_code(f->data_code + code * n / 8, n);
-    for (uint8_t r = 0; r < n; r++) {
-      uint8_t d = __builtin_popcountll(chips ^ _rotate(c, r, n));
-      uint8_t v = code * n + r;
-      if (d > n / 2) {
-        d = n - d;
-        v |= 0x80;
+  if (f->data32) {
+    for (uint8_t v = 0; v < 128 && best_d; v++) {
+      uint8_t d = _popcount32((uint32_t)chips ^ (uint32_t)symbols[v]);
+      if (d < best_d || 32 - d < best_d) {
+        best = d <= 16 ? v : v | 0x80;
+        best_d = d <= 16 ? d : 32 - d;
       }
-      if (d < best_d) {
-        best_d = d;
-        best = v;
+    }
+  } else {
+    for (uint8_t v = 0; v < 128 && best_d; v++) {
+      uint8_t d = _popcount64(chips ^ symbols[v]);
+      if (d < best_d || 64 - d < best_d) {
+        best = d <= 32 ? v : v | 0x80;
+        best_d = d <= 32 ? d : 64 - d;
       }
     }
   }
+  *errors = best_d;
   return best;
 }
 
@@ -683,7 +716,7 @@ static uint16_t _encode_cyrf(const frame_t* f, const uint8_t* payload, uint8_t l
   uint16_t pos = 8 * f->hdr_len;
   uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
   _put_bits(buf, &pos, _cyrf_gap(f), CYRF_GAP_CHIPS);
-  // 8DR (_cyrf_symbol()) in air order, where the rotation is to the left:
+  // 8DR (as _cyrf_symbols) in air order, where the rotation is to the left:
   // the codes reversed once, not per symbol (the TX latency on the CC2652)
   uint8_t cn = _cyrf_n(f);
   uint64_t air[4];
@@ -942,14 +975,15 @@ static frame_result_t _decode_frskyl(const frame_t* f, const uint8_t* buf, uint8
 static uint8_t _cyrf_decode_byte(const frame_t* f, const uint8_t* buf, uint16_t* pos)
 {
   if (!f->sdr) {
-    uint8_t v = _cyrf_decode_symbol(f, _get_chips(f, buf, *pos, _cyrf_n(f)));
+    uint8_t errors;
+    uint8_t v = _cyrf_decode_symbol(f, _get_chips(f, buf, *pos, _cyrf_n(f)), &errors);
     *pos += _cyrf_n(f);
     return v;
   }
   uint64_t code = _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
   uint8_t v = 0;
   for (uint8_t b = 0; b < 8; b++, *pos += CYRF_SDR_CHIPS)
-    if (__builtin_popcountll(_get_chips(f, buf, *pos, CYRF_SDR_CHIPS) ^ code) > 32) v |= 1 << b;
+    if (_popcount64(_get_chips(f, buf, *pos, CYRF_SDR_CHIPS) ^ code) > 32) v |= 1 << b;
   return v;
 }
 
@@ -1234,6 +1268,18 @@ bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt)
   return true;
 }
 
+bool frame_cyrf_rx_is_alt(const frame_t* f, const frame_t* alt, const uint8_t* data,
+                          uint16_t rx_len)
+{
+  uint16_t f_errors = 0, alt_errors = 0;
+  for (uint16_t i = f->rx_start; i < f->known_len && i < alt->known_len && i - f->rx_start < rx_len;
+       i++) {
+    f_errors += _popcount32(data[i - f->rx_start] ^ f->known[i]);
+    alt_errors += _popcount32(data[i - f->rx_start] ^ alt->known[i]);
+  }
+  return alt_errors < f_errors;
+}
+
 uint8_t frame_sync_bits(const frame_t* f) { return f->sync_len * 8; }
 
 uint32_t frame_tx_sync(const frame_t* f) { return _sync_word(f->known, f->sync_len); }
@@ -1336,13 +1382,9 @@ uint8_t frame_cyrf_rx_count(const frame_t* f, const uint8_t* data, uint16_t rx_l
   uint16_t symbols = 0, misses = 0;
   for (; pos + n <= 8 * avail && misses < (eop ? eop : 1); pos += n) {
     uint64_t chips = _get_chips(f, buf, pos, n);
-    uint8_t d = n;
-    if (f->sdr) {
-      d = __builtin_popcountll(chips ^ _cyrf_code(f->data_code, n));
-    } else {
-      uint8_t v = _cyrf_decode_symbol(f, chips);
-      d = __builtin_popcountll(chips ^ _cyrf_symbol(f, v));
-    }
+    uint8_t d;
+    if (f->sdr) d = _popcount64(chips ^ _cyrf_code(f->data_code, n));
+    else _cyrf_decode_symbol(f, chips, &d);
     if (d > n / 2) d = n - d;
     if (symbols + misses == 0 || d <= threshold) {
       symbols += misses + 1;
@@ -1381,7 +1423,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     if (f->rx_sync_alt && 8 * avail >= sym + CYRF_SDR_CHIPS) {
       uint64_t diff =
           _get_chips(f, buf, sym, CYRF_SDR_CHIPS) ^ _cyrf_code(f->data_code, CYRF_SDR_CHIPS);
-      if (__builtin_popcountll(diff >> CYRF_SYNC_CHIPS) > (CYRF_SDR_CHIPS - CYRF_SYNC_CHIPS) / 2)
+      if (_popcount64(diff >> CYRF_SYNC_CHIPS) > (CYRF_SDR_CHIPS - CYRF_SYNC_CHIPS) / 2)
         for (uint16_t p = sym; p < sym + CYRF_SYNC_CHIPS; p++) buf[p >> 3] ^= 0x80 >> (p & 7);
     }
     res = _decode_cyrf(f, buf, avail, len, payload, payload_len);

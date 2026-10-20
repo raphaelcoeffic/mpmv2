@@ -63,6 +63,7 @@ static void check_alt(void)
     memcpy(full, t.known, t.sync_len);
     uint16_t n = t.sync_len + frame_tx_data(&t, p, sizeof(p), full + t.sync_len);
     CHECK(_sync(full + f.rx_start - f.sync_len) == f.rx_sync);
+    CHECK(frame_cyrf_rx_is_alt(&f, &alt, full + f.rx_start, n - f.rx_start) == d32);
     frame_result_t r64 = frame_decode(&f, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
     frame_result_t r32 = frame_decode(&alt, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
     bool ok = (d32 ? r32 : r64) == FRAME_OK && (d32 ? r64 : r32) != FRAME_OK && out_len == 16 &&
