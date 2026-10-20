@@ -274,8 +274,11 @@ def main():
         elif a.cmd == "mkdir":
             fs.req(MKDIR, a.path.encode())
         elif a.cmd == "log":
-            out = sys.stdout.buffer
-            fs.log(out, a.t)
+            try:
+                fs.log(sys.stdout.buffer, a.t)
+            except BrokenPipeError:
+                # stdout closed (| head): no more output, not even at exit
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         elif a.cmd == "eeprom":
             print("\n".join(mpm_eeprom.decode(fs.get("eeprom"), a.all)))
         if fs.resent:
