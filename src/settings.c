@@ -2,6 +2,7 @@
 #include "file_system.h"
 #include "mpm/mpm_settings.h"
 #include "debug.h"
+#include "log.h"
 
 #include <string.h>
 
@@ -36,43 +37,80 @@ static void _write(const char* path, const char* text, uint32_t len)
   lfs_file_close(_lfs, &file);
 }
 
-static void _load_ppm()
+// Applies a settings text (empty: the defaults), its number of errors
+typedef int (*apply_t)(const char* text, uint32_t len, char* err, uint32_t err_size);
+
+static int _apply_ppm(const char* text, uint32_t len, char* err, uint32_t err_size)
 {
   mpm_ppm_settings_t s;
   mpm_ppm_defaults(&s);
-  _err[0] = 0;
-  int errors = 0;
-  lfs_ssize_t n = _read(SETTINGS_PPM);
-  if (n >= 0) {
-    errors = mpm_ppm_parse(_text, n, &s, _err, sizeof(_err));
-    if (n == sizeof(_text)) {
-      const char* msg = "read up to " _STR(SETTINGS_MAX) " bytes only\n";
-      uint32_t len = strlen(_err);
-      if (len + strlen(msg) < sizeof(_err)) strcpy(_err + len, msg);
-      errors++;
-    }
-  }
+  int errors = mpm_ppm_parse(text, len, &s, err, err_size);
   mpm_ppm = s;
-  debugln("ppm: protocol %d sub %d rx_num %d, %d errors", s.protocol, s.sub_protocol, s.rx_num,
-          errors);
+  debugln("ppm.txt: protocol %d sub %d rx_num %d option %d, %d errors", s.protocol,
+          s.sub_protocol, s.rx_num, s.option, errors);
+  return errors;
+}
+
+static const char* _debug_setting(void* ctx, mpm_tok_t key, mpm_tok_t val, uint32_t line)
+{
+  bool* usb = ctx;
+  if (!mpm_tok_equal(key, "usb")) return MPM_SETTINGS_UNKNOWN_KEY;
+  if (!mpm_tok_bool(val, usb)) return "usb: on or off";
+  return 0;
+}
+
+static int _apply_debug(const char* text, uint32_t len, char* err, uint32_t err_size)
+{
+  mpm_settings_err_t e = {err, err_size, 0, 0};
+  if (err_size) err[0] = 0;
+  bool usb = false;
+  mpm_settings_lines(text, len, _debug_setting, &usb, &e);
+  log_enable(LOG_FILE, usb);
+  debugln("debug.txt: usb %s, %d errors", usb ? "on" : "off", e.count);
+  return e.count;
+}
+
+static const struct {
+  const char* path;
+  const char* err_path;
+  apply_t apply;
+} _files[] = {
+    {SETTINGS_PPM, SETTINGS_PPM_ERR, _apply_ppm},
+    {SETTINGS_DEBUG, SETTINGS_DEBUG_ERR, _apply_debug},
+};
+
+static void _load(uint32_t i)
+{
+  _err[0] = 0;
+  lfs_ssize_t n = _read(_files[i].path);
+  if (n < 0) n = 0;
+  int errors = _files[i].apply(_text, n, _err, sizeof(_err));
+  if (n == sizeof(_text)) {
+    const char* msg = "read up to " _STR(SETTINGS_MAX) " bytes only\n";
+    uint32_t len = strlen(_err);
+    if (len + strlen(msg) < sizeof(_err)) strcpy(_err + len, msg);
+    errors++;
+  }
 
   struct lfs_info info;
   if (errors) {
-    _write(SETTINGS_PPM_ERR, _err, strlen(_err));
-  } else if (lfs_stat(_lfs, SETTINGS_PPM_ERR, &info) == 0) {
-    lfs_remove(_lfs, SETTINGS_PPM_ERR);
+    _write(_files[i].err_path, _err, strlen(_err));
+  } else if (lfs_stat(_lfs, _files[i].err_path, &info) == 0) {
+    lfs_remove(_lfs, _files[i].err_path);
   }
 }
 
 void settings_init(lfs_t* lfs)
 {
   _lfs = lfs;
-  if (_lfs) _load_ppm();
+  if (!_lfs) return;
+  for (uint32_t i = 0; i < sizeof(_files) / sizeof(_files[0]); i++) _load(i);
 }
 
 void settings_file_changed(const char* path)
 {
   if (!_lfs) return;
   while (*path == '/') path++;
-  if (strcmp(path, SETTINGS_PPM) == 0) _load_ppm();
+  for (uint32_t i = 0; i < sizeof(_files) / sizeof(_files[0]); i++)
+    if (strcmp(path, _files[i].path) == 0) _load(i);
 }

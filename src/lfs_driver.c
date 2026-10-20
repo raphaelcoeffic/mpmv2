@@ -87,7 +87,7 @@ int file_system_init(lfs_t* lfs)
     flash_size /= KILOBYTE;
     unit = "KB";
   }
-  debugln("flash size = %d %s", flash_size, unit);
+  debugln("flash size = %d %s", (int)flash_size, unit);
 #endif
 
   _flash_cfg.block_count = 0;
@@ -112,7 +112,7 @@ int file_system_init(lfs_t* lfs)
   struct lfs_fsinfo info;
   err = lfs_fs_stat(lfs, &info);
   if (err == LFS_ERR_OK && info.block_count < block_count) {
-    debugln("growing the file system to %d blocks", block_count);
+    debugln("growing the file system to %d blocks", (int)block_count);
     err = lfs_fs_grow(lfs, block_count);
   }
   if (err != LFS_ERR_OK) {

@@ -15,6 +15,7 @@
 #include "mpm/mpm_settings.h"
 #include "nor_flash.h"
 #include "settings.h"
+#include "log.h"
 
 static int _fails;
 #define CHECK(c)                                                       \
@@ -618,16 +619,18 @@ const mpm_protocol_t mpm_protocols[] = {
 };
 const uint8_t mpm_protocol_count = 2;
 
-static bool _ppm_err(char* out, uint32_t size)
+static bool _err_file(const char* path, char* out, uint32_t size)
 {
   static uint8_t buf[600];
-  int n = _get(SETTINGS_PPM_ERR, buf, sizeof(buf));
+  int n = _get(path, buf, sizeof(buf));
   if (n < 0) return false;
   if ((uint32_t)n >= size) n = size - 1;
   memcpy(out, buf, n);
   out[n] = 0;
   return true;
 }
+
+static bool _ppm_err(char* out, uint32_t size) { return _err_file(SETTINGS_PPM_ERR, out, size); }
 
 static int _put_text(const char* path, const char* text)
 {
@@ -681,6 +684,20 @@ static void test_settings()
   CHECK(_put_text("ppm.txt", longtext) == 0);
   CHECK(mpm_ppm.rx_num == 9);
   CHECK(_ppm_err(err, sizeof(err)) && strstr(err, "read up to 1024 bytes only\n"));
+
+  // debug.txt: the log sent from power up
+  CHECK(!(log_on & LOG_FILE));
+  CHECK(_put_text("debug.txt", "# log on USB\nusb = on\n") == 0);
+  CHECK((log_on & LOG_FILE) && !_err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
+  CHECK(_boot());
+  log_enable(LOG_FILE, false);
+  settings_init(&_lfs);
+  CHECK(log_on & LOG_FILE);
+  CHECK(_put_text("debug.txt", "usb = maybe\nlevel = 3\n") == 0);
+  CHECK(!(log_on & LOG_FILE) && _err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
+  CHECK(strcmp(err, "line 1: usb: on or off: maybe\nline 2: unknown key: level\n") == 0);
+  CHECK(_req_path(FILE_SERVER_REMOVE, "debug.txt") == 0);
+  CHECK(!(log_on & LOG_FILE) && !_err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
 
   // no file system: the defaults
   settings_init(0);

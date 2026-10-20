@@ -8,6 +8,7 @@
 #include "mpm/mpm.h"
 #include "mpm/mpm_port.h"
 #include "mpm/mpm_settings.h"
+#include "log.h"
 
 static int _fails;
 #define CHECK(c)                                                       \
@@ -615,8 +616,77 @@ static void test_ppm_parse()
   CHECK(mpm_ppm_parse("", 0, &s, 0, 0) == 0);
 }
 
+//
+// Debug log (log.c)
+//
+
+static uint32_t _log_ms;
+static uint32_t _log_millis() { return _log_ms; }
+
+// All the log not read yet, terminated
+static const char* _log_text()
+{
+  static char text[2 * LOG_SIZE];
+  uint32_t n = 0, r;
+  while ((r = log_read(text + n, 64)) > 0) n += r;
+  text[n] = 0;
+  return text;
+}
+
+static void test_log()
+{
+  log_init(_log_millis);
+  log_enable(LOG_HOST, true);
+  _log_text();
+  CHECK(log_pending() == 0);
+
+  // the time at each line start, lines in pieces
+  _log_ms = 12345;
+  log_printf("a %d\n", 5);
+  log_printf("b");
+  _log_ms = 123456789;
+  log_printf("c\nd");
+  log_printf("\n");
+  CHECK(strcmp(_log_text(), "  12.345 a 5\n  12.345 bc\n123456.789 d\n") == 0);
+
+  // formats
+  _log_ms = 1;
+  log_printf("[%5d] [%-5d] [%05d] [%x] [%08X] [%02X] [%s] [%6s] [%-6s] [%c] [%u] [%d] [%ld] %%\n",
+             -42, 7, -3, 0xbeef, 0x1234abcd, 5, "hi", "ab", "cd", 'z', 4000000000u,
+             -2147483647 - 1, 12L);
+  const char* t = _log_text();
+  printf("log: %s", t);
+  CHECK(strcmp(t, "   0.001 [  -42] [7    ] [-0003] [beef] [1234ABCD] [05] [hi] [    ab] [cd    ] "
+                  "[z] [4000000000] [-2147483648] [12] %\n") == 0);
+
+  // overwritten before read: their number, then the last LOG_SIZE bytes
+  uint32_t written = 0;
+  for (int i = 0; i < 500; i++) {
+    log_printf("%03d\n", i);  // 9 + 4 bytes
+    written += 13;
+  }
+  CHECK(log_pending() == LOG_SIZE);
+  t = _log_text();
+  char lost[40];
+  snprintf(lost, sizeof(lost), "\n[%u bytes lost]\n", written - LOG_SIZE);
+  CHECK(strncmp(t, lost, strlen(lost)) == 0);
+  CHECK(strlen(t) == strlen(lost) + LOG_SIZE);
+  CHECK(strcmp(t + strlen(t) - 13, "   0.001 499\n") == 0);
+
+  // a host asking again: from the oldest whole line kept
+  log_enable(LOG_HOST, false);
+  log_enable(LOG_HOST, true);
+  t = _log_text();
+  CHECK(strncmp(t, "   0.001 ", 9) == 0);
+  CHECK(strlen(t) > LOG_SIZE - 13 && strlen(t) <= LOG_SIZE);
+  CHECK(strcmp(t + strlen(t) - 13, "   0.001 499\n") == 0);
+  log_enable(LOG_HOST, false);
+  CHECK(log_on == 0);
+}
+
 int main()
 {
+  test_log();
   test_frame();
   test_start_and_timing();
   test_port_idle();

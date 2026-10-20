@@ -12,11 +12,15 @@ USB-C, while the MPM core runs: the protocols keep running (src/file_server.h).
   mpm_fs.py put LOCAL [PATH]       PATH (default: the name) replaced at once
                                    once the whole file and its CRC-32 check
   mpm_fs.py rm PATH | mv OLD NEW | mkdir PATH
-                                   ppm.txt (the PPM mode's settings, see
-                                   docs/mpm-core.md) is applied at once: put,
-                                   rm and mv print the module's ppm.err
+                                   ppm.txt and debug.txt (settings, see
+                                   docs/mpm-core.md) are applied at once:
+                                   put, rm and mv print the module's errors
   mpm_fs.py eeprom [FILE] [--all]  the EEPROM decoded (mpm_eeprom.py), from the
                                    module or from FILE (a copy got earlier)
+  mpm_fs.py log [-t SECONDS]       the module's debug log (src/log.h): the
+                                   lines it kept (boot included), then live
+                                   until Ctrl-C; debug.txt ("usb = on") turns
+                                   it on from power up, no tool needed
 
 Port: --port, else $V2_PORT, else the first CH343. Requests: "FS", seq, op,
 payload, CRC-32 at 100000 baud 8E2 (the MULTI link); replies in telemetry
@@ -38,7 +42,8 @@ import mpm_eeprom
 
 CH343 = (0x1A86, 0x55D3)
 TELEM_FILE = 0x40
-INFO, LIST, STAT, READ, OPEN, WRITE, CLOSE, REMOVE, RENAME, MKDIR = range(10)
+TELEM_LOG = 0x41
+INFO, LIST, STAT, READ, OPEN, WRITE, CLOSE, REMOVE, RENAME, MKDIR, LOG = range(11)
 DATA_MAX = 128
 ERRORS = {-2: "no such file or directory", -5: "I/O error", -9: "no upload open",
           -12: "out of memory", -17: "exists", -20: "not a directory", -21: "is a directory",
@@ -72,24 +77,32 @@ class Fs:
         self.seq = int(time.monotonic() * 1000) & 0xFF
         self.buf = b""
         self.resent = 0
+        self.on_log = None  # log text seen while waiting for a reply
 
     def close(self):
         self.ser.close()
 
+    def frames(self):
+        """Telemetry frames read so far: (type, data)"""
+        self.buf += self.ser.read(max(1, self.ser.in_waiting))
+        while True:
+            i = self.buf.find(b"MP")
+            if i < 0:
+                self.buf = self.buf[-1:]
+                return
+            self.buf = self.buf[i:]
+            if len(self.buf) < 4 or len(self.buf) < 4 + self.buf[3]:
+                return
+            t, n = self.buf[2], self.buf[3]
+            frame, self.buf = self.buf[4:4 + n], self.buf[4 + n:]
+            yield t, frame
+
     def _reply(self, seq: int, op: int, end: float) -> bytes | None:
         while time.monotonic() < end:
-            self.buf += self.ser.read(max(1, self.ser.in_waiting))
-            while True:
-                i = self.buf.find(b"MP")
-                if i < 0:
-                    self.buf = self.buf[-1:]
-                    break
-                self.buf = self.buf[i:]
-                if len(self.buf) < 4 or len(self.buf) < 4 + self.buf[3]:
-                    break
-                t, n = self.buf[2], self.buf[3]
-                frame, self.buf = self.buf[4:4 + n], self.buf[4 + n:]
-                if t != TELEM_FILE or n < 7:
+            for t, frame in self.frames():
+                if t == TELEM_LOG and self.on_log:
+                    self.on_log(frame)
+                if t != TELEM_FILE or len(frame) < 7:
                     continue
                 if zlib.crc32(frame[:-4]) != struct.unpack("<I", frame[-4:])[0]:
                     continue
@@ -140,6 +153,23 @@ class Fs:
             if len(r) < DATA_MAX:
                 return data
 
+    def log(self, out, seconds: float | None = None):
+        """The log to out until Ctrl-C or seconds: the lines the module kept,
+        then live. Back to debug.txt's setting at the end."""
+        self.on_log = lambda d: (out.write(d), out.flush())
+        self.req(LOG, b"\1")
+        end = time.monotonic() + seconds if seconds else None
+        try:
+            while end is None or time.monotonic() < end:
+                for t, frame in self.frames():
+                    if t == TELEM_LOG:
+                        self.on_log(frame)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.on_log = None
+            self.req(LOG, b"\0")
+
     def put(self, path: str, data: bytes, progress=None):
         self.req(OPEN, struct.pack("<II", len(data), zlib.crc32(data)) + path.encode())
         for off in range(0, len(data), DATA_MAX):
@@ -149,7 +179,7 @@ class Fs:
         self.req(CLOSE)
 
 
-SETTINGS = {"ppm.txt": "ppm.err"}
+SETTINGS = {"ppm.txt": "ppm.err", "debug.txt": "debug.err"}
 
 
 def report_settings(fs: Fs, *paths: str):
@@ -186,6 +216,8 @@ def main():
     p.add_argument("new")
     p = sub.add_parser("mkdir")
     p.add_argument("path")
+    p = sub.add_parser("log")
+    p.add_argument("-t", type=float, help="seconds (default: until Ctrl-C)")
     p = sub.add_parser("eeprom")
     p.add_argument("file", nargs="?", help="a local copy instead of the module's")
     p.add_argument("--all", action="store_true", help="the erased entries too")
@@ -241,6 +273,9 @@ def main():
             report_settings(fs, a.new)
         elif a.cmd == "mkdir":
             fs.req(MKDIR, a.path.encode())
+        elif a.cmd == "log":
+            out = sys.stdout.buffer
+            fs.log(out, a.t)
         elif a.cmd == "eeprom":
             print("\n".join(mpm_eeprom.decode(fs.get("eeprom"), a.all)))
         if fs.resent:

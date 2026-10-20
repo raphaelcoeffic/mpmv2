@@ -31,6 +31,8 @@
 #include "board.h"
 #include "eeprom.h"
 #include "file_server.h"
+#include "debug.h"
+#include "log.h"
 #include "mpm.h"
 #include "mpm_frame.h"
 #include "ppm.h"
@@ -221,6 +223,7 @@ static void _bay_poll()
   uint32_t ms = millis();
   if (_bay_mode != BAY_DETECT) {
     if (ms - _bay_ms <= BAY_LOST_MS) return;
+    debugln("bay: no input");
     if (_bay_mode == BAY_PPM) ppm_timer_set_timeout(0, 0);
     _bay_detect();
     return;
@@ -241,6 +244,7 @@ static void _bay_poll()
   }
   _bay_mode = mode;
   _bay_ms = ms;
+  debugln("bay: %s", mode == BAY_PPM ? "PPM" : "serial");
   if (mode == BAY_PPM) {
     _ppm_ready = false;
     ppm_timer_start();
@@ -351,6 +355,26 @@ static void _file_request()
   uart_tx_irq(uart, frame, MPM_TELEM_HDR_LEN + n);
 }
 
+// The log on the USB link in frames of LOG_FRAME bytes, while there is room
+// for them: with the radio on USB, its telemetry keeps LOG_RESERVE bytes
+#define LOG_FRAME 64
+#define LOG_RESERVE 64
+static void _log_send()
+{
+  uart_t uart = _links[LINK_USB].uart;
+  uint16_t room = MPM_TELEM_HDR_LEN + LOG_FRAME + (_link == LINK_USB ? LOG_RESERVE : 0);
+  while (log_pending() && uart_tx_free(uart) >= room) {
+    uint8_t frame[MPM_TELEM_HDR_LEN + LOG_FRAME];
+    uint8_t n = log_read((char*)frame + MPM_TELEM_HDR_LEN, LOG_FRAME);
+    if (n == 0) break;
+    frame[0] = 'M';
+    frame[1] = 'P';
+    frame[2] = MPM_TELEM_LOG;
+    frame[3] = n;
+    uart_tx_irq(uart, frame, MPM_TELEM_HDR_LEN + n);
+  }
+}
+
 // The EEPROM to the flash as soon as a protocol writes it (bind): about
 // 55 ms of erase and program, the callbacks run in the flash waits
 void mpm_port_idle()
@@ -360,4 +384,5 @@ void mpm_port_idle()
     eeprom_flush();
   }
   if (_file_req_ready) _file_request();
+  if (log_on) _log_send();
 }

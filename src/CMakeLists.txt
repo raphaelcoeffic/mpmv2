@@ -25,6 +25,7 @@ set(firmware_sources
     mpm/upstream/cyrf6936.c
     mpm/upstream/dsm_all.c
     mpm/upstream/telemetry.c
+    log.c
     nor_flash.c
     ppm.c
     frame.c

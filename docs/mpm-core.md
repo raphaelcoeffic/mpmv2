@@ -332,7 +332,8 @@ settings, all optional.
 
 `tools/mpm_fs.py` reads and writes the files over USB-C while the MPM core
 runs (`src/file_server.c`, protocol in `file_server.h`): `info`, `ls [-r]`,
-`get`, `put`, `rm`, `mv`, `mkdir`, `eeprom`. For debugging: the `eeprom` file
+`get`, `put`, `rm`, `mv`, `mkdir`, `eeprom`, `log` (the [debug
+log](#debug-log)). For debugging: the `eeprom` file
 decoded (`mpm_fs.py eeprom`, or `tools/mpm_eeprom.py FILE` for a copy or an
 STM32 module's dump: Multiprotocol.h's layout, the entries set: CYRF ID,
 module ID, RX ids per rx_num, FrSky / AFHDS2A / Bayang / DSM RX, clones;
@@ -396,6 +397,59 @@ MPM v2 (2026-10-20), baysim's PPM on the bay (8 channels), J-Link reads of
 the FS-iA6B (bound over serial, sub 2, option 128) answering, nothing from
 it with PPM off; `rm ppm.txt`: FrSky X2 again; a file with bad values: their
 lines in `ppm.err`, the rest applied.
+
+`debug.txt`: `usb = on` sends the [debug log](#debug-log) on USB from power
+up (default off).
+
+### Debug log
+
+For users without a debugger: `debug()` / `debugln()` (`src/debug.h`, also
+the MPM's own `DEBUG_SERIAL` lines in the protocols) go to a 4 KB ring in
+RAM (`src/log.c`), each line with the time since power up, always: the last
+lines before a problem are there when someone looks. Sent on the USB link
+as telemetry frames of type 0x41 (USB only, like the file replies), from
+the oldest line kept, while `tools/mpm_fs.py log` runs (request `LOG`), or
+from power up with `debug.txt`. A build with `-DDEBUG=ON` also writes them
+to Segger RTT, as before.
+
+```
+$ mpm_fs.py log
+   0.000 ## Boot completed ##
+   0.000 [NOR flash]: JEDEC ID c2 28 14
+   0.005 file system mounted
+   0.013 ppm.txt: protocol 64 sub 0 rx_num 0 option 0, 0 errors
+   0.018 debug.txt: usb off, 0 errors
+   0.027 bay: serial
+   0.037 input: serial frames
+   0.038 FlSky2A (28) sub 2 PWM,SBUS rx_num 0 option -128
+   3.077 input lost
+   3.120 input: serial frames
+   3.175 FrSkyX2 (64) sub 2 LBT(EU) rx_num 0 option 0, bind
+   4.131 bind done
+   4.161 0 pps
+   4.306 Busy 39 16
+   ...
+   6.232 bay: PPM
+   6.241 input: PPM, 4 channels
+   6.286 FrSkyX2 (64) sub 0 D16 rx_num 0 option 0
+```
+
+The core's lines: the bay's input detected or lost, the input (serial
+frames, PPM and its channel count), each protocol start (name, number, sub
+protocol, rx_num, option, bind, low power; or not in the firmware, or no
+such sub protocol), bind done, the settings read. The protocols': what the
+MPM prints in its debug builds (FrSky hop table, received packets a second,
+LBT busy channels, S.Port data from the radio; DSM bind details under
+`DEBUG_BIND`).
+
+A line costs 15 us ("98 pps") to 70 us (a protocol start), 8 us a hex byte
+(CC2652, measured): debug lines stay out of the busy paths. Bytes lost
+before they were sent show as `[N bytes lost]`. The frames go out between
+callbacks when the UART's buffer has room (64 bytes kept for telemetry when
+the radio is on USB). MPM v2 (2026-10-20): boot lines read after the boot,
+`debug.txt` sending from power up without a request and nothing once
+removed, a 64 KB upload and read back identical with the log sent
+meanwhile (FrSky X2 over the bay).
 
 ## Test protocol
 

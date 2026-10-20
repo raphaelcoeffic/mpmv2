@@ -1,5 +1,6 @@
 #include "file_server.h"
 #include "file_system.h"
+#include "log.h"
 
 #include <lfs_util.h>
 #include <string.h>
@@ -270,10 +271,13 @@ uint8_t file_server_request(const uint8_t* req, uint8_t len, uint8_t* reply)
   uint8_t out_n = 0;
   int status;
   if (_lfs && op != FILE_SERVER_READ && op != FILE_SERVER_STAT && op != FILE_SERVER_LIST &&
-      op != FILE_SERVER_INFO) {
+      op != FILE_SERVER_INFO && op != FILE_SERVER_LOG) {
     _read_close();
   }
-  if (!_lfs) {
+  if (op == FILE_SERVER_LOG) {
+    status = n == 1 ? 0 : LFS_ERR_INVAL;
+    if (status == 0) log_enable(LOG_HOST, p[0]);
+  } else if (!_lfs) {
     status = LFS_ERR_IO;
   } else {
     switch (op) {

@@ -29,8 +29,8 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))  // Arduino
 #endif
 #define NOP() __asm__ __volatile__("nop")
-#define debug(...) do {} while (0)
-#define debugln(...) do {} while (0)
+// The MPM's DEBUG_SERIAL lines: the log (debug.h)
+#include "debug.h"
 
 //
 // TX_Def.h: channels as the radio sends them (AETR)

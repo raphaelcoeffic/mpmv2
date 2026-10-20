@@ -277,6 +277,9 @@ packets 102.4 ms apart.
      at power up) if someone needs it. Binding in PPM mode: autobind for now
      (the button at power up opens the boot shell). Channel order: not
      there.
+   - Debug log (done, [mpm-core.md](mpm-core.md#debug-log)): the debug
+     lines kept in RAM, sent on USB-C (`mpm_fs.py log`, or `debug.txt`
+     from power up), for users without a debugger.
    - Factory calibration, after the RF lab: the TX power table (PA output
      against the power setting, per band, within the regulatory limits), the
      RSSI offset of the LNA, a frequency offset if HPOSC leaves one. In the

@@ -1,6 +1,7 @@
 #include "mpm.h"
 #include "mpm_port.h"
 #include "mpm_settings.h"
+#include "debug.h"
 
 #include <limits.h>
 #include <string.h>
@@ -41,6 +42,9 @@ static uint16_t _ppm[MPM_CHANNELS];
 static uint8_t _ppm_n;
 static bool _ppm_pending;
 static uint32_t _last_input_ms;
+// Input of the last frame (log): none, serial frames, PPM
+static enum { INPUT_NONE, INPUT_SERIAL, INPUT_PPM } _input;
+static uint8_t _input_ppm_n;
 
 // Callback scheduling
 static uint32_t _next_us;
@@ -69,7 +73,11 @@ void mpm_telem_send(uint8_t type, const uint8_t* data, uint8_t len)
   mpm_port_write(buf, n + len);
 }
 
-void mpm_bind_done() { mpm.bind_in_progress = false; }
+void mpm_bind_done()
+{
+  if (mpm.bind_in_progress) debugln("bind done");
+  mpm.bind_in_progress = false;
+}
 
 void mpm_sub_invalid() { _sub_valid = false; }
 
@@ -165,6 +173,30 @@ __attribute__((weak)) void mpm_protocol_prepare() {}
 // callbacks, what the chips do by themselves (a packet received)
 __attribute__((weak)) void mpm_protocol_idle() {}
 
+// The protocol (re)started, as the MPM's DEBUG_SERIAL lines
+static void _log_start()
+{
+  if (!_proto) {
+    debugln("protocol %d: not in this firmware", mpm.protocol);
+    return;
+  }
+  char sub[16] = "";
+  const char* names = _proto->sub_names;
+  if (names && mpm.sub_protocol < _proto->n_sub) {
+    uint8_t n = names[0] < sizeof(sub) - 1 ? names[0] : sizeof(sub) - 1;
+    memcpy(sub, names + 1 + mpm.sub_protocol * names[0], n);
+    sub[n] = 0;
+    while (n && (sub[n - 1] == ' ' || sub[n - 1] == 0)) sub[--n] = 0;
+  }
+  if (!_sub_valid) {
+    debugln("%s: no sub protocol %d", _proto->name, mpm.sub_protocol);
+    return;
+  }
+  debugln("%s (%d) sub %d %s rx_num %d option %d%s%s", _proto->name, mpm.protocol,
+          mpm.sub_protocol, sub, mpm.rx_num, mpm.option, mpm.bind_in_progress ? ", bind" : "",
+          mpm.low_power ? ", low power" : "");
+}
+
 static void _protocol_init()
 {
   _callback = 0;
@@ -203,6 +235,7 @@ static void _protocol_init()
       if (_sub_valid) _callback = p->callback;
       break;
     }
+    _log_start();
     _send_status = true;
     _update_telem(ms);
     _next_us = mpm_port_micros() + MPM_FIRST_CALLBACK_US;
@@ -287,7 +320,11 @@ static void _ppm_frame(mpm_frame_t* f)
 
 static void _update_led(uint32_t ms)
 {
-  if (mpm.input && ms - _last_input_ms > MPM_INPUT_TIMEOUT_MS) mpm.input = false;
+  if (mpm.input && ms - _last_input_ms > MPM_INPUT_TIMEOUT_MS) {
+    mpm.input = false;
+    _input = INPUT_NONE;
+    debugln("input lost");
+  }
 
   if ((int32_t)(ms - _blink_ms) < 0) return;
   if (!mpm.input) {
@@ -312,6 +349,8 @@ static bool _update_all()
   if (_rx_pending) {
     _rx_pending = false;
     if (mpm_frame_decode(_rx, _rx_len, &f)) {
+      if (_input != INPUT_SERIAL) debugln("input: serial frames");
+      _input = INPUT_SERIAL;
       _process_frame(&f);
       mpm.input = true;
       _last_input_ms = ms;
@@ -319,6 +358,9 @@ static bool _update_all()
   }
   if (_ppm_pending) {
     _ppm_pending = false;
+    if (_input != INPUT_PPM || _ppm_n != _input_ppm_n) debugln("input: PPM, %d channels", _ppm_n);
+    _input = INPUT_PPM;
+    _input_ppm_n = _ppm_n;
     _ppm_frame(&f);
     _process_frame(&f);
     mpm.input = true;
@@ -341,6 +383,7 @@ void mpm_init()
   _cur_valid = false;
   _rx_pending = false;
   _ppm_pending = false;
+  _input = INPUT_NONE;
   _count = 0;
   _send_status = false;
   _module_id = mpm_port_module_id();

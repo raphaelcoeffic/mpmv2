@@ -33,6 +33,11 @@
 //   REMOVE  path                        -> -
 //   RENAME  old path, 0, new path       -> -
 //   MKDIR   path                        -> -
+//   LOG     on u8                       -> -   the debug log (log.h) on the
+//                                              link from the oldest line
+//                                              kept (1), or as debug.txt
+//                                              says (0); without a file
+//                                              system too
 //
 // The upload goes to FILE_SERVER_UPLOAD until CLOSE: a power cut or an
 // abandoned upload leaves the old file.
@@ -47,6 +52,7 @@
 #define FILE_SERVER_REMOVE 7
 #define FILE_SERVER_RENAME 8
 #define FILE_SERVER_MKDIR  9
+#define FILE_SERVER_LOG    10
 
 #define FILE_SERVER_PATH_MAX   96
 #define FILE_SERVER_DATA_MAX   128  // READ and WRITE

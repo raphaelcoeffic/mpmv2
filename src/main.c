@@ -23,6 +23,7 @@
 #endif
 
 #include "debug.h"
+#include "log.h"
 
 static lfs_t _lfs;
 
@@ -74,6 +75,8 @@ int main(void)
   board_init();
   timer_init();
   leds_init();
+  // Debug lines kept from here (log.h), sent as debug.txt or a host says
+  log_init(millis);
 
   debugln("## Boot completed ##");
 
@@ -96,7 +99,7 @@ int main(void)
     debugln("file system mounted");
   }
   eeprom_init(err == 0 ? &_lfs : 0);
-  // ppm.txt
+  // ppm.txt, debug.txt
   settings_init(err == 0 ? &_lfs : 0);
   // Files from the host over USB (tools/mpm_fs.py), settings applied at once
   file_server_init(err == 0 ? &_lfs : 0, settings_file_changed);

@@ -24,7 +24,38 @@ extern mpm_ppm_settings_t mpm_ppm;
 // The build's settings
 void mpm_ppm_defaults(mpm_ppm_settings_t* s);
 
-// Settings text, "key = value" lines, '#' starts a comment:
+// A settings text: "key = value" lines, '#' starts a comment, spaces around
+// ignored. A token of it (not terminated)
+typedef struct {
+  const char* p;
+  uint32_t len;
+} mpm_tok_t;
+
+// Error messages, "line N: what: token\n" each (terminated, cut to size)
+typedef struct {
+  char* p;
+  uint32_t size, len;
+  int count;  // errors, including those cut
+} mpm_settings_err_t;
+
+// A setting: NULL, what is wrong with the value, or MPM_SETTINGS_UNKNOWN_KEY
+typedef const char* (*mpm_setting_fn_t)(void* ctx, mpm_tok_t key, mpm_tok_t val, uint32_t line);
+extern const char MPM_SETTINGS_UNKNOWN_KEY[];
+
+// fn for each line, an error for each bad one
+void mpm_settings_lines(const char* text, uint32_t len, mpm_setting_fn_t fn, void* ctx,
+                        mpm_settings_err_t* e);
+// line 0: none; t.len 0: no token
+void mpm_settings_error(mpm_settings_err_t* e, uint32_t line, const char* msg, mpm_tok_t t);
+
+// Case and spaces ignored
+bool mpm_tok_equal(mpm_tok_t t, const char* s);
+// Decimal, up to 6 digits
+bool mpm_tok_int(mpm_tok_t t, int32_t* v);
+// 0 or 1, no or yes, off or on, false or true
+bool mpm_tok_bool(mpm_tok_t t, bool* v);
+
+// PPM settings text, "key = value" lines, '#' starts a comment:
 //
 //   protocol   name of the protocol table (FrSkyX2, FlSky2A...; case and
 //              spaces ignored) or its number
