@@ -728,7 +728,10 @@ static void _init_var_queue(uint8_t hdr_len, uint16_t max_len)
     e->status = DATA_ENTRY_PENDING;
     e->config.type = DATA_ENTRY_TYPE_PARTIAL;
     e->config.lenSz = 0;
-    e->config.irqIntv = hdr_len & 0x0F;  // 0: 16
+    // An interrupt every irqIntv bytes (0: 16): the first one at or just
+    // after hdr_len bytes
+    uint8_t n = (hdr_len + 15) / 16;
+    e->config.irqIntv = ((hdr_len + n - 1) / n) & 0x0F;
     e->length = sizeof(e->pktStatus) + sizeof(e->nextIndex) + max_len + RX_APPENDED;
     _rx_foff_set[i] = false;
     _var_ready[i] = false;
@@ -820,7 +823,7 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
                                   void* ctx)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (hdr_len == 0 || hdr_len > 16 || max_len < hdr_len || max_len > RADIO_MAX_PKT_LEN ||
+  if (hdr_len == 0 || hdr_len > 32 || max_len < hdr_len || max_len > RADIO_MAX_PKT_LEN ||
       !len_fn)
     return RADIO_ERR_PARAM;
   // The Bluetooth LE PHY ends short packets with an error when their length

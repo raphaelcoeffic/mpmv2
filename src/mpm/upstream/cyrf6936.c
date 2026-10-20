@@ -287,7 +287,9 @@ static void _tx()
 static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
 {
   (void)ctx;
-  uint16_t len = _rx_var ? frame_rx_var_len(&_frame, RX_MAX, data, n) : _rx_air_max;
+  // Length field: the code length from the SOP, then the length symbol
+  const frame_t* f = _alt && frame_cyrf_rx_is_alt(&_frame, &_frame_alt, data, n) ? &_frame_alt : &_frame;
+  uint16_t len = _rx_var ? frame_rx_var_len(f, RX_MAX, data, n) : _rx_air_max;
   if (len > n) {
     _rx_end_us = micros() + (uint32_t)(len - n) * 8000000 / _phy.symbol_rate;
     _rx_busy = true;
@@ -312,10 +314,13 @@ static void _rx()
   }
   _rx_busy = false;
   if (!_prepare(false)) return;
-  // The CYRF6936 length field is received as part of a fixed length
+  // Length field (8DR with SOP): RX up to the end of the length symbol of
+  // either code length. Else EOP: the maximum length
   uint8_t hdr_len = frame_rx_hdr_len(&_frame);
+  if (_alt && frame_rx_hdr_len(&_frame_alt) > hdr_len) hdr_len = frame_rx_hdr_len(&_frame_alt);
   _rx_var = hdr_len != 0;
   _rx_air_max = frame_rx_len(&_frame, RX_MAX);
+  if (_alt && frame_rx_len(&_frame_alt, RX_MAX) > _rx_air_max) _rx_air_max = frame_rx_len(&_frame_alt, RX_MAX);
   radio_status_t st = radio_rx_start_var(hdr_len ? hdr_len : 1, _rx_air_max, _rx_var_len, 0);
   if (st == RADIO_OK) _state = S_RX;
 }

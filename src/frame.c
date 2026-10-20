@@ -316,7 +316,7 @@ static const uint64_t* _cyrf_symbol_table(const frame_t* f)
 {
   __typeof__(_cyrf_symbols[0])* t = &_cyrf_symbols[f->data32];
   if (!t->valid || memcmp(t->data_code, f->data_code, sizeof(t->data_code))) {
-    // One chip rotations
+    // Also built from the RX interrupt (the length field): one chip rotations
     t->valid = false;
     memcpy(t->data_code, f->data_code, sizeof(t->data_code));
     uint8_t n = _cyrf_n(f);
@@ -1314,10 +1314,13 @@ uint16_t frame_rx_len(const frame_t* f, uint8_t len)
   return _frame_len(f, len) - f->rx_first_start;
 }
 
-// End of the length field in the frame, 0 if the length is fixed (the
-// CYRF6936 length field is received as part of a fixed length)
+// End of the length field in the frame, 0 if the length is fixed. CYRF6936:
+// 8DR with SOP only (SDR: 512 chips, no SOP: the sync word in the length
+// symbol)
 static uint8_t _len_field_end(const frame_t* f)
 {
+  if (f->type == FRAME_CYRF)
+    return f->var_len && !f->sdr && f->sop ? (8 * f->hdr_len + CYRF_GAP_CHIPS + _cyrf_n(f) + 7) / 8 : 0;
   if ((f->type == FRAME_NRF && f->esb && f->dpl) || f->type == FRAME_HS6200 ||
       (f->type == FRAME_XN297 && f->enhanced))
     return f->hdr_len + 1;
@@ -1328,6 +1331,10 @@ static uint8_t _len_field_end(const frame_t* f)
 // Payload size from the length field of a frame
 static uint16_t _var_size(const frame_t* f, const uint8_t* buf)
 {
+  if (f->type == FRAME_CYRF) {
+    uint16_t pos = 8 * f->hdr_len + CYRF_GAP_CHIPS;
+    return _cyrf_decode_byte(f, buf, &pos);
+  }
   if (f->type == FRAME_CC2500) return _cc2500_size(f, buf + f->hdr_len);
   if (f->type == FRAME_XN297) return (buf[f->hdr_len] ^ _scramble(f, f->addr_len)) >> 1;
   return buf[f->hdr_len] >> 2;  // packet control field: 6 bit length first

@@ -64,6 +64,10 @@ static void check_alt(void)
     uint16_t n = t.sync_len + frame_tx_data(&t, p, sizeof(p), full + t.sync_len);
     CHECK(_sync(full + f.rx_start - f.sync_len) == f.rx_sync);
     CHECK(frame_cyrf_rx_is_alt(&f, &alt, full + f.rx_start, n - f.rx_start) == d32);
+    // Variable length RX: the length symbol of either, after the longer header
+    uint8_t hdr = frame_rx_hdr_len(&f) > frame_rx_hdr_len(&alt) ? frame_rx_hdr_len(&f) : frame_rx_hdr_len(&alt);
+    uint16_t rx = frame_rx_var_len(d32 ? &alt : &f, 16, full + f.rx_start, hdr);
+    CHECK(hdr == 17 && rx == n - f.rx_start);
     frame_result_t r64 = frame_decode(&f, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
     frame_result_t r32 = frame_decode(&alt, full + f.rx_start, n - f.rx_start, 16, out, &out_len);
     bool ok = (d32 ? r32 : r64) == FRAME_OK && (d32 ? r64 : r32) != FRAME_OK && out_len == 16 &&

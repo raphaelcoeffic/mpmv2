@@ -93,7 +93,7 @@ radio_status_t radio_rx_start(uint16_t len);
 typedef uint16_t (*radio_len_fn_t)(const uint8_t* data, uint16_t n, void* ctx);
 
 // Start continuous reception of packets of up to max_len bytes, their length
-// given by len_fn() after hdr_len bytes (1 to 16). The RF core takes the
+// given by len_fn() after hdr_len bytes (1 to 32). The RF core takes the
 // length about 100 us after the sync word at the earliest: a shorter packet
 // ends there. One packet per RF core command: RX starts again after each
 // packet (as radio_rx_start(), about 70 us to RX on). The Bluetooth LE PHY:

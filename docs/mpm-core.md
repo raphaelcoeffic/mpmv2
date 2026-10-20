@@ -126,7 +126,11 @@ the protocols read them.
   TX_CTRL / RX_CTRL GO, TX_IRQ_STATUS (TXC cleared on read), RX_IRQ_STATUS,
   RX_COUNT, RX_BUFFER, RSSI (count 21 at -60 dBm, 1.9 dB a count). Without a
   length field the packet ends after EOP_CTRL symbols over the DATA64_THOLD
-  chip errors (`frame_cyrf_rx_count()`). The MFG ID is the module id and 2
+  chip errors (`frame_cyrf_rx_count()`), in an RX of the maximum length.
+  With a length field (8DR with SOP) the RX ends with the packet, as on the
+  chip: the RF core interrupt decodes the length symbol and sets the length
+  (`frame_rx_var_len()`); a length over the 16 byte buffer drops the packet
+  and RX goes on. The MFG ID is the module id and 2
   zero bytes (a DSM receiver bound to an MPM v1 must be bound again). Not
   done: GFSK and DDR modes. PA_SETTING -5 dBm and up: default power.
   Timing: the chip sends at TX GO, the RF core about 430 µs later, the same
@@ -143,8 +147,9 @@ the protocols read them.
   64 chips). A Lemon-RX DSMP answers the 64 chip DSM data with 32 chip
   telemetry, which the MPM receives. With a length field the RX syncs on the
   header bytes both share (`frame_cyrf_rx_alt()`), and the received second
-  SOP copy picks the code length to decode with (`frame_cyrf_rx_is_alt()`).
-  Decoding a DSM telemetry
+  SOP copy picks the code length (`frame_cyrf_rx_is_alt()`), for the length
+  symbol and the decoding: the Lemon's telemetry ends after 85 bytes
+  (0.68 ms), not the 161 of 16 bytes in 64 chips. Decoding a DSM telemetry
   packet takes about 0.7 ms (each symbol against a table of the 128 rotated
   codes, built again when the codes change): done between
   callbacks, before the DSM read 4.4 ms after RX GO. Decoded at that read
