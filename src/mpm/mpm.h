@@ -37,8 +37,9 @@
 #define MPM_PROTO_LIST 0
 
 // PPM input: no dial to pick the protocol, so one entry of the MPM's
-// PPM_prot[] table, set at build time (FrSky X2 by default). Channels in
-// the PPM order, no failsafe, no bind, no telemetry
+// PPM_prot[] table: these build defaults (FrSky X2), then the settings
+// (mpm_settings.h, ppm.txt). Channels in the PPM order, no failsafe, no
+// telemetry, binding by autobind
 #ifndef MPM_PPM_PROTOCOL
 #define MPM_PPM_PROTOCOL 64
 #endif
@@ -51,8 +52,8 @@
 #ifndef MPM_PPM_OPTION
 #define MPM_PPM_OPTION 0
 #endif
-// PPM widths for -100% and +100% (us): EdgeTX's 1500 +- 512, as the MPM's
-// TX_ER9X. Up to MPM_CHANNEL_MIN..MAX, clamped to 0..2047 (+-125%)
+// PPM widths for -100% and +100% (us) by default: EdgeTX's 1500 +- 512, as
+// the MPM's TX_ER9X. Up to MPM_CHANNEL_MIN..MAX, clamped to 0..2047 (+-125%)
 #define MPM_PPM_MIN_100 988
 #define MPM_PPM_MAX_100 2012
 

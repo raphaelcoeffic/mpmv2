@@ -7,6 +7,7 @@
 
 #include "mpm/mpm.h"
 #include "mpm/mpm_port.h"
+#include "mpm/mpm_settings.h"
 
 static int _fails;
 #define CHECK(c)                                                       \
@@ -515,9 +516,103 @@ static void test_ppm()
   CHECK(_cb_n > 120);
   printf("ppm: callbacks %d\n", _cb_n);
 
+  // Settings changed while running (ppm.txt uploaded): the next frame
+  // restarts the protocol with them; the widths for -+100%
+  _clear();
+  _inits = 0;
+  mpm_ppm.protocol = 10;
+  mpm_ppm.sub_protocol = 0;
+  mpm_ppm.rx_num = 3;
+  mpm_ppm.autobind = true;
+  mpm_ppm.min_us = 1000;
+  mpm_ppm.max_us = 2000;
+  static const uint16_t widths2[4] = {1000, 1500, 2000, 1250};
+  static const uint16_t expect2[4] = {204, 1024, 1844, 614};
+  memcpy(_ppm, widths2, sizeof(widths2));
+  _ppm_n = 4;
+  _run_ppm(100000, 22500);
+  CHECK(_inits == 1);
+  CHECK(mpm.protocol == 10 && mpm.sub_protocol == 0 && mpm.rx_num == 3 && mpm.autobind);
+  for (int i = 0; i < 4; i++) CHECK(mpm.channels[i] == expect2[i]);
+  mpm_ppm_defaults(&mpm_ppm);
+
   _clear();
   _run(200000);  // no PPM frames
   CHECK(!mpm.input);
+}
+
+//
+// ppm.txt
+//
+
+static void test_ppm_parse()
+{
+  mpm_ppm_settings_t s;
+  char err[512];
+  mpm_ppm_defaults(&s);
+  CHECK(s.protocol == 127 && s.sub_protocol == 2 && s.min_us == 988 && s.max_us == 2012);
+
+  const char* t1 = "# PPM mode\n"
+                   "sub = two\n"
+                   "protocol = Test  # the test protocol\n"
+                   "rx_num=5\n"
+                   "  option = -7\n"
+                   "autobind = yes\n"
+                   "low_power=on\r\n"
+                   "min_us=1000\n"
+                   "max_us = 2000";
+  CHECK(mpm_ppm_parse(t1, strlen(t1), &s, err, sizeof(err)) == 0 && err[0] == 0);
+  CHECK(s.protocol == 127 && s.sub_protocol == 1 && s.rx_num == 5 && s.option == -7);
+  CHECK(s.autobind && s.low_power && s.min_us == 1000 && s.max_us == 2000);
+
+  // a new protocol without its sub protocol: the first; names and numbers,
+  // case and spaces ignored
+  const char* t2 = "protocol = al pha\n";
+  CHECK(mpm_ppm_parse(t2, strlen(t2), &s, err, sizeof(err)) == 0);
+  CHECK(s.protocol == 10 && s.sub_protocol == 0 && s.rx_num == 5);
+  const char* t3 = "protocol = 20\nsub = B\nautobind = 0\n";
+  CHECK(mpm_ppm_parse(t3, strlen(t3), &s, err, sizeof(err)) == 0);
+  CHECK(s.protocol == 20 && s.sub_protocol == 1 && !s.autobind);
+  const char* t4 = "protocol = TEST\nsub = 2";
+  CHECK(mpm_ppm_parse(t4, strlen(t4), &s, err, sizeof(err)) == 0 && s.sub_protocol == 2);
+  // the option as a byte too
+  const char* t4b = "option = 128\n";
+  CHECK(mpm_ppm_parse(t4b, strlen(t4b), &s, err, sizeof(err)) == 0 && s.option == -128);
+
+  // bad lines change nothing
+  mpm_ppm_settings_t before = s;
+  const char* t5 = "protocol = nope\n"
+                   "sub = Four\n"
+                   "foo = 1\n"
+                   "rx_num = 64\n"
+                   "min_us = 2100\n"
+                   "max_us=2000\n"
+                   "junk\n"
+                   "option = 12x\n";
+  CHECK(mpm_ppm_parse(t5, strlen(t5), &s, err, sizeof(err)) == 7);
+  printf("ppm.txt errors:\n%s", err);
+  CHECK(strstr(err, "line 1: unknown protocol: nope\n"));
+  CHECK(strstr(err, "line 2: no such sub protocol: Four\n"));
+  CHECK(strstr(err, "line 3: unknown key: foo\n"));
+  CHECK(strstr(err, "line 4: rx_num: 0 to 63: 64\n"));
+  CHECK(strstr(err, "line 7: not key = value: junk\n"));
+  CHECK(strstr(err, "line 8: option: -128 to 255: 12x\n"));
+  CHECK(strstr(err, "min_us must be below max_us\n"));
+  CHECK(memcmp(&s, &before, sizeof(s)) == 0);
+  // sub protocols out of range, none for a protocol without
+  const char* t6 = "protocol = Test\nsub = 3\n";
+  CHECK(mpm_ppm_parse(t6, strlen(t6), &s, err, sizeof(err)) == 1);
+  const char* t7 = "protocol = Alpha\nsub = 0\n";
+  CHECK(mpm_ppm_parse(t7, strlen(t7), &s, err, sizeof(err)) == 0 && s.protocol == 10);
+  const char* t8 = "sub = 1\n";
+  CHECK(mpm_ppm_parse(t8, strlen(t8), &s, err, sizeof(err)) == 1);
+
+  // messages cut to the buffer, terminated
+  char small[20];
+  memset(small, 'x', sizeof(small));
+  CHECK(mpm_ppm_parse(t5, strlen(t5), &s, small, sizeof(small)) == 7);
+  CHECK(strlen(small) == sizeof(small) - 1);
+  CHECK(mpm_ppm_parse("", 0, &s, 0, 0) == 0);
 }
 
 int main()
@@ -530,6 +625,7 @@ int main()
   test_invalid();
   test_proto_list();
   test_ppm();
+  test_ppm_parse();
   printf("%s\n", _fails ? "FAILED" : "ok");
   return _fails != 0;
 }

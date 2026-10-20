@@ -12,6 +12,9 @@ USB-C, while the MPM core runs: the protocols keep running (src/file_server.h).
   mpm_fs.py put LOCAL [PATH]       PATH (default: the name) replaced at once
                                    once the whole file and its CRC-32 check
   mpm_fs.py rm PATH | mv OLD NEW | mkdir PATH
+                                   ppm.txt (the PPM mode's settings, see
+                                   docs/mpm-core.md) is applied at once: put,
+                                   rm and mv print the module's ppm.err
   mpm_fs.py eeprom [FILE] [--all]  the EEPROM decoded (mpm_eeprom.py), from the
                                    module or from FILE (a copy got earlier)
 
@@ -146,6 +149,22 @@ class Fs:
         self.req(CLOSE)
 
 
+SETTINGS = {"ppm.txt": "ppm.err"}
+
+
+def report_settings(fs: Fs, *paths: str):
+    """After a change to a settings file: what the module made of it"""
+    for path in paths:
+        name = path.lstrip("/")
+        if name not in SETTINGS:
+            continue
+        try:
+            err = fs.get(SETTINGS[name]).decode(errors="replace")
+            print(f"{name}: errors (the defaults for those lines):\n{err}", end="", file=sys.stderr)
+        except FsError:
+            print(f"{name}: applied", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-p", "--port")
@@ -212,10 +231,14 @@ def main():
             dt = time.monotonic() - t
             print(f"\r{a.local} -> {path}: {len(data)} bytes in {dt:.1f} s ({len(data) / dt / 1024:.1f} KB/s)",
                   file=sys.stderr)
+            report_settings(fs, path)
         elif a.cmd == "rm":
             fs.req(REMOVE, a.path.encode())
+            if a.path.lstrip("/") in SETTINGS:
+                print(f"{a.path.lstrip('/')}: removed, the defaults", file=sys.stderr)
         elif a.cmd == "mv":
             fs.req(RENAME, a.old.encode() + b"\0" + a.new.encode())
+            report_settings(fs, a.new)
         elif a.cmd == "mkdir":
             fs.req(MKDIR, a.path.encode())
         elif a.cmd == "eeprom":

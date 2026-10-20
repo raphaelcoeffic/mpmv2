@@ -13,6 +13,7 @@
 #include "mpm/mpm.h"
 #include "nor_flash.h"
 #include "serial.h"
+#include "settings.h"
 #include "shell.h"
 #include "timer.h"
 #include "uart.h"
@@ -95,8 +96,10 @@ int main(void)
     debugln("file system mounted");
   }
   eeprom_init(err == 0 ? &_lfs : 0);
-  // Files from the host over USB (tools/mpm_fs.py)
-  file_server_init(err == 0 ? &_lfs : 0);
+  // ppm.txt
+  settings_init(err == 0 ? &_lfs : 0);
+  // Files from the host over USB (tools/mpm_fs.py), settings applied at once
+  file_server_init(err == 0 ? &_lfs : 0, settings_file_changed);
 
   mpm_init();
   // Flash work from mpm_port_idle() (EEPROM, files): the protocol keeps

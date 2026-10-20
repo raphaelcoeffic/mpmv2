@@ -1,7 +1,7 @@
-// The file system (lfs_driver.c) and the EEPROM file (eeprom.c) on a
-// simulated NOR flash: format, an older smaller file system grown, power
-// cuts during a flush, a failing block, callbacks writing during a flush,
-// wear over many flushes
+// The file system (lfs_driver.c), the EEPROM file (eeprom.c), the file
+// server and the settings files on a simulated NOR flash: format, an older
+// smaller file system grown, power cuts during a flush or an upload, a
+// failing block, callbacks writing during a flush, wear over many flushes
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +11,10 @@
 #include "file_server.h"
 #include "file_system.h"
 #include "flash_driver.h"
+#include "mpm/mpm.h"
+#include "mpm/mpm_settings.h"
 #include "nor_flash.h"
+#include "settings.h"
 
 static int _fails;
 #define CHECK(c)                                                       \
@@ -432,7 +435,7 @@ static void test_file_server()
 {
   memset(_mem, 0xFF, sizeof(_mem));
   CHECK(_boot());
-  file_server_init(&_lfs);
+  file_server_init(&_lfs, 0);
 
   CHECK(_req(FILE_SERVER_INFO, 0, 0) == 0 && _reply_len == 7 + 12);
   CHECK(_get32(_reply + 3) == 4096 && _get32(_reply + 7) == SECTORS && _get32(_reply + 11) >= 2);
@@ -520,7 +523,7 @@ static void test_file_server()
   }
   CHECK(_req(FILE_SERVER_CLOSE, 0, 0) == 0);
   CHECK(_boot() && _is(7));
-  file_server_init(&_lfs);
+  file_server_init(&_lfs, 0);
   CHECK(_get("big", _back, sizeof(_back)) == 3000 && memcmp(_file, _back, 3000) == 0);
 
   // the EEPROM file rewritten between two READs of it (READ keeps the file
@@ -574,7 +577,7 @@ static void test_upload_power_cut()
   // file after the boot, no upload left
   memset(_mem, 0xFF, sizeof(_mem));
   CHECK(_boot());
-  file_server_init(&_lfs);
+  file_server_init(&_lfs, 0);
   _random(_file, 2000, 5);
   CHECK(_put("table", _file, 2000, _crc32(0, _file, 2000)) == 0);
   memcpy(_saved, _mem, sizeof(_mem));
@@ -583,7 +586,7 @@ static void test_upload_power_cut()
   for (long cut = 0;; cut++) {
     memcpy(_mem, _saved, sizeof(_mem));
     CHECK(_boot());
-    file_server_init(&_lfs);
+    file_server_init(&_lfs, 0);
     _ops_left = cut;
     if (setjmp(_cut) == 0) {
       CHECK(_put("table", _back, 2500, _crc32(0, _back, 2500)) == 0);
@@ -593,7 +596,7 @@ static void test_upload_power_cut()
     _ops_left = -1;
     cuts++;
     CHECK(_boot());
-    file_server_init(&_lfs);
+    file_server_init(&_lfs, 0);
     static uint8_t got[3000];
     int n = _get("table", got, sizeof(got));
     if (n == 2000 && memcmp(got, _file, 2000) == 0) old++;
@@ -602,6 +605,89 @@ static void test_upload_power_cut()
   }
   printf("upload power cut: %d cuts, old file %d, new %d\n", cuts, old, cuts - old);
   CHECK(cuts > 5);
+}
+
+//
+// Settings: ppm.txt through the file server
+//
+
+// The protocols the settings name (the firmware's: protocols.c)
+const mpm_protocol_t mpm_protocols[] = {
+    {64, "FrSkyX2", "\x07" "D16\0   " "D16 8ch" "LBT(EU)" "LBT 8ch", 4, 0, true, false, 0, 0, 0},
+    {28, "FlSky2A", "\x08" "PWM,IBUS" "PPM,IBUS" "PWM,SBUS" "PPM,SBUS", 4, 0, true, true, 0, 0, 0},
+};
+const uint8_t mpm_protocol_count = 2;
+
+static bool _ppm_err(char* out, uint32_t size)
+{
+  static uint8_t buf[600];
+  int n = _get(SETTINGS_PPM_ERR, buf, sizeof(buf));
+  if (n < 0) return false;
+  if ((uint32_t)n >= size) n = size - 1;
+  memcpy(out, buf, n);
+  out[n] = 0;
+  return true;
+}
+
+static int _put_text(const char* path, const char* text)
+{
+  return _put(path, (const uint8_t*)text, strlen(text), _crc32(0, (const uint8_t*)text, strlen(text)));
+}
+
+static void test_settings()
+{
+  memset(_mem, 0xFF, sizeof(_mem));
+  CHECK(_boot());
+  settings_init(&_lfs);
+  file_server_init(&_lfs, settings_file_changed);
+  mpm_ppm_settings_t def;
+  mpm_ppm_defaults(&def);
+  char err[600];
+  CHECK(memcmp(&mpm_ppm, &def, sizeof(def)) == 0 && !_ppm_err(err, sizeof(err)));
+
+  // uploaded: applied at once
+  CHECK(_put_text("ppm.txt", "protocol = FlSky2A\nsub = PWM,SBUS\nrx_num = 2\nautobind = 1\n") == 0);
+  CHECK(mpm_ppm.protocol == 28 && mpm_ppm.sub_protocol == 2 && mpm_ppm.rx_num == 2 && mpm_ppm.autobind);
+  CHECK(!_ppm_err(err, sizeof(err)));
+
+  // bad lines: their defaults, ppm.err; at power up again
+  CHECK(_put_text("/ppm.txt", "protocol = FlSky2A\nrx_num = 99\n") == 0);
+  CHECK(mpm_ppm.protocol == 28 && mpm_ppm.rx_num == 0 && !mpm_ppm.autobind);
+  CHECK(_ppm_err(err, sizeof(err)) && strcmp(err, "line 2: rx_num: 0 to 63: 99\n") == 0);
+  mpm_ppm_defaults(&mpm_ppm);
+  CHECK(_boot());
+  settings_init(&_lfs);
+  file_server_init(&_lfs, settings_file_changed);
+  CHECK(mpm_ppm.protocol == 28 && _ppm_err(err, sizeof(err)));
+
+  // fixed: ppm.err removed
+  CHECK(_put_text("ppm.txt", "# FrSky X2 EU\nprotocol = frskyx2\nsub = lbt(eu)\n") == 0);
+  CHECK(mpm_ppm.protocol == 64 && mpm_ppm.sub_protocol == 2 && !_ppm_err(err, sizeof(err)));
+
+  // removed: the defaults; renamed into place: applied
+  CHECK(_req_path(FILE_SERVER_REMOVE, "ppm.txt") == 0);
+  CHECK(memcmp(&mpm_ppm, &def, sizeof(def)) == 0);
+  CHECK(_put_text("next.txt", "rx_num = 7\n") == 0);
+  CHECK(mpm_ppm.rx_num == 0);
+  char ren[] = "next.txt\0ppm.txt";
+  CHECK(_req(FILE_SERVER_RENAME, ren, sizeof(ren) - 1) == 0);
+  CHECK(mpm_ppm.rx_num == 7);
+
+  // too long: what was read, and a message
+  static char longtext[1500];
+  memset(longtext, ' ', sizeof(longtext) - 1);
+  memcpy(longtext, "rx_num = 9\n", 11);
+  longtext[sizeof(longtext) - 1] = 0;
+  CHECK(_put_text("ppm.txt", longtext) == 0);
+  CHECK(mpm_ppm.rx_num == 9);
+  CHECK(_ppm_err(err, sizeof(err)) && strstr(err, "read up to 1024 bytes only\n"));
+
+  // no file system: the defaults
+  settings_init(0);
+  mpm_ppm_defaults(&mpm_ppm);
+  settings_file_changed("ppm.txt");
+  CHECK(memcmp(&mpm_ppm, &def, sizeof(def)) == 0);
+  file_server_init(&_lfs, 0);
 }
 
 static void test_ram_only()
@@ -624,6 +710,7 @@ int main()
   test_wear();
   test_file_server();
   test_upload_power_cut();
+  test_settings();
   test_ram_only();
   printf("%s\n", _fails ? "FAILED" : "ok");
   return _fails != 0;

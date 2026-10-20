@@ -1,5 +1,6 @@
 #include "mpm.h"
 #include "mpm_port.h"
+#include "mpm_settings.h"
 
 #include <limits.h>
 #include <string.h>
@@ -260,23 +261,26 @@ static void _process_frame(const mpm_frame_t* f)
     if (mpm.channels[4 + i] > MPM_CHANNEL_SWITCH) mpm.channel_aux |= 1 << i;
 }
 
-// A PPM frame as a serial one, as the MPM's PPM mode: the protocol of the
-// dial position, the channels scaled from the widths
+// A PPM frame as a serial one, as the MPM's PPM mode: the model of the
+// settings (mpm_ppm), the channels scaled from the widths
 static void _ppm_frame(mpm_frame_t* f)
 {
+  const mpm_ppm_settings_t* s = &mpm_ppm;
   memset(f, 0, sizeof(*f));
-  f->protocol = MPM_PPM_PROTOCOL;
-  f->sub_protocol = MPM_PPM_SUB_PROTOCOL;
-  f->rx_num = MPM_PPM_RX_NUM;
-  f->option = MPM_PPM_OPTION;
+  f->protocol = s->protocol;
+  f->sub_protocol = s->sub_protocol;
+  f->rx_num = s->rx_num;
+  f->option = s->option;
+  f->autobind = s->autobind;
+  f->low_power = s->low_power;
   f->disable_telem = true;
   for (uint8_t i = 0; i < MPM_CHANNELS; i++) {
     if (i >= _ppm_n) {
       f->channels[i] = MPM_CHANNEL_CENTER;
       continue;
     }
-    int32_t v = ((int32_t)_ppm[i] - MPM_PPM_MIN_100) * (MPM_CHANNEL_MAX - MPM_CHANNEL_MIN) /
-                    (MPM_PPM_MAX_100 - MPM_PPM_MIN_100) + MPM_CHANNEL_MIN;
+    int32_t v = ((int32_t)_ppm[i] - s->min_us) * (MPM_CHANNEL_MAX - MPM_CHANNEL_MIN) /
+                    (s->max_us - s->min_us) + MPM_CHANNEL_MIN;
     f->channels[i] = v < 0 ? 0 : v > 2047 ? 2047 : v;
   }
 }

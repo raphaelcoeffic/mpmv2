@@ -5,6 +5,12 @@
 #include <string.h>
 
 static lfs_t* _lfs;
+static void (*_changed)(const char* path);
+
+static void _notify(const char* path)
+{
+  if (_changed) _changed(path);
+}
 
 // Last reply, sent again for a retried request
 static uint8_t _last[FILE_SERVER_REPLY_MAX];
@@ -68,9 +74,10 @@ static void _upload_abort()
 
 void file_server_sync() { _read_close(); }
 
-void file_server_init(lfs_t* lfs)
+void file_server_init(lfs_t* lfs, void (*changed)(const char* path))
 {
   _lfs = lfs;
+  _changed = changed;
   _last_len = 0;
   _up_open = false;
   _rd_open = false;
@@ -211,6 +218,7 @@ static int _close()
   int err = lfs_file_close(_lfs, &_up);
   if (!err) err = lfs_rename(_lfs, FILE_SERVER_UPLOAD, _up_path);
   if (err) lfs_remove(_lfs, FILE_SERVER_UPLOAD);
+  else _notify(_up_path);
   return err;
 }
 
@@ -218,7 +226,9 @@ static int _remove(const uint8_t* p, uint32_t n)
 {
   char path[FILE_SERVER_PATH_MAX + 1];
   if (!_path(path, p, n)) return LFS_ERR_INVAL;
-  return lfs_remove(_lfs, path);
+  int err = lfs_remove(_lfs, path);
+  if (!err) _notify(path);
+  return err;
 }
 
 static int _rename(const uint8_t* p, uint32_t n)
@@ -228,7 +238,12 @@ static int _rename(const uint8_t* p, uint32_t n)
   char from[FILE_SERVER_PATH_MAX + 1], to[FILE_SERVER_PATH_MAX + 1];
   uint32_t from_len = sep - p;
   if (!_path(from, p, from_len) || !_path(to, sep + 1, n - from_len - 1)) return LFS_ERR_INVAL;
-  return lfs_rename(_lfs, from, to);
+  int err = lfs_rename(_lfs, from, to);
+  if (!err) {
+    _notify(from);
+    _notify(to);
+  }
+  return err;
 }
 
 static int _mkdir(const uint8_t* p, uint32_t n)

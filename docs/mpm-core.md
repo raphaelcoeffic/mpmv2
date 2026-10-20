@@ -64,17 +64,18 @@ input is detected again. A PPM frame ends 2.4 ms after its last channel
 pulse; it needs 4 to 16 channels after a sync gap, and a pulse below
 800 us drops the frame until the next sync (the MPM's `bad_frame`: no
 shifted channels). The core takes it as a serial frame with the protocol of
-one `PPM_prot[]` entry, set at build time: `MPM_PPM_PROTOCOL` (64, FrSky
-X2), `MPM_PPM_SUB_PROTOCOL`, `MPM_PPM_RX_NUM`, `MPM_PPM_OPTION` (the
-MPM v2 has no dial). Widths scaled as the MPM's `TX_ER9X`, EdgeTX's
-1500 +- 512 us for +-100% (988 -> 204, 2012 -> 1844), clamped to 0..2047;
-missing channels at the center. No telemetry (S.Port stays released), no
-bind, no failsafe, no channel order in PPM mode. Tested with baysim's PPM
+one `PPM_prot[]` entry (`mpm_ppm`, the MPM v2 has no dial): the build's
+`MPM_PPM_PROTOCOL` (64, FrSky X2), `MPM_PPM_SUB_PROTOCOL`, `MPM_PPM_RX_NUM`,
+`MPM_PPM_OPTION`, or `ppm.txt` ([Settings](#settings)). Widths scaled as
+the MPM's `TX_ER9X`, EdgeTX's 1500 +- 512 us for +-100% (988 -> 204,
+2012 -> 1844; other widths in `ppm.txt`), clamped to 0..2047; missing
+channels at the center. No telemetry (S.Port stays released), no bind
+other than autobind, no failsafe, no channel order in PPM mode. Tested with baysim's PPM
 ([update.md](update.md#tested-over-the-module-bay)): 4 to 16 channels,
 both polarities, the widths to the microsecond over 500 reads (30 counter
 wraps), the X8R linked (TX_LQI 100), PPM to serial and back in about 1 s.
 
-Not there yet: PPM telemetry and bind, channel order remapping (`disable_ch_map` is decoded only), the telemetry
+Not there yet: PPM telemetry and the bind button in PPM mode, channel order remapping (`disable_ch_map` is decoded only), the telemetry
 buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
 frames), the telemetry formats other than `MULTI_TELEMETRY` (`Telemetry.ino`:
 FrSky hub, S.Port, AFHDS2A and DSM frames only).
@@ -337,7 +338,7 @@ STM32 module's dump: Multiprotocol.h's layout, the entries set: CYRF ID,
 module ID, RX ids per rx_num, FrSky / AFHDS2A / Bayang / DSM RX, clones;
 `--all` lists the erased ones too), written back (binds moved to another
 module; the module reads it at power up, and its RAM copy overwrites the
-file at the next EEPROM write), config files later.
+file at the next EEPROM write), the [settings](#settings).
 
 - Requests: frames starting with `FS` on the USB link (100000 8E2, the
   MULTI link: no MULTI frame starts so), seq, op, payload, CRC-32 (zlib's);
@@ -358,6 +359,43 @@ file at the next EEPROM write), config files later.
   identical, no request sent again; the receiver's telemetry 84 to 89
   frames/s throughout (86 without transfers); the EEPROM file read back
   with the FS-iA6B's RX id at offset 50.
+
+### Settings
+
+Text files at the root, all optional (`src/settings.c`): without one, the
+build's defaults. Read at power up and again when the file server replaces,
+removes or renames one: applied at once, the protocol restarted if it
+changed. A file's bad lines keep their default and are listed in an error
+file next to it (removed when there are none); `mpm_fs.py put`, `mv` and
+`rm` print what the module made of it. Only the first 1024 bytes are read.
+
+`ppm.txt`, the PPM mode's model (`src/mpm/mpm_settings.h`):
+
+```
+# FS-iA6B, bound with rx_num 0
+protocol = FlSky2A    # name of the protocol table (case and spaces ignored) or number
+sub = PWM,SBUS        # sub protocol name or number; a protocol alone: the first
+rx_num = 0            # 0 to 63
+option = 128          # -128 to 127, or the byte 0 to 255
+autobind = no         # bind at each start (also 0/1, off/on, false/true)
+low_power = no
+min_us = 988          # PPM widths for -100% and +100%
+max_us = 2012
+```
+
+```
+$ mpm_fs.py put ppm_bad.txt ppm.txt
+ppm.txt: errors (the defaults for those lines):
+line 3: rx_num: 0 to 63: 99
+line 4: option: -128 to 255: 300
+```
+
+MPM v2 (2026-10-20), baysim's PPM on the bay (8 channels), J-Link reads of
+`mpm_ppm` and the core's frame: DSM X 2F option 7 from `ppm.txt`, then a new
+`ppm.txt` put while running: AFHDS2A at once (1000 us still read as 223),
+the FS-iA6B (bound over serial, sub 2, option 128) answering, nothing from
+it with PPM off; `rm ppm.txt`: FrSky X2 again; a file with bad values: their
+lines in `ppm.err`, the rest applied.
 
 ## Test protocol
 

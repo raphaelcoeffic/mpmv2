@@ -12,6 +12,7 @@ set(firmware_sources
     mpm/mpm.c
     mpm/mpm_frame.c
     mpm/mpm_port.c
+    mpm/mpm_settings.c
     mpm/protocols.c
     mpm/proto_test.c
     mpm/upstream/mpm_compat.c
@@ -29,6 +30,7 @@ set(firmware_sources
     frame.c
     radio.c
     serial.c
+    settings.c
     shell.c
     spi.c
     syscalls.c

@@ -54,8 +54,10 @@
 #define FILE_SERVER_REPLY_MAX  250
 #define FILE_SERVER_UPLOAD     ".upload"
 
-// lfs: a mounted file system, or NULL (every request: LFS_ERR_IO)
-void file_server_init(lfs_t* lfs);
+// lfs: a mounted file system, or NULL (every request: LFS_ERR_IO).
+// changed (or NULL): called with each path an upload replaced, REMOVE
+// removed, RENAME renamed (both)
+void file_server_init(lfs_t* lfs, void (*changed)(const char* path));
 
 // Before the file system is written elsewhere (an EEPROM flush): closes the
 // file READ keeps open, which would go on reading a replaced file's old
