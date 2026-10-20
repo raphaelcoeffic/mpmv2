@@ -54,7 +54,27 @@ TX_INV. S.Port stays released until the first frame from the bay.
 Telemetry goes back on the link of the last frame. Tested through the radio
 simulator ([update.md](update.md#tested-over-the-module-bay)).
 
-Not there yet: PPM input, channel order remapping (`disable_ch_map` is decoded only), the telemetry
+**PPM** (the bay only). The bay's input is detected on DIO22 with
+`ppm.c`: GPT0 A captures the falling edges (24 bits at 48 MHz), and after
+a gap of more than 2.2 ms the next 16 intervals are sampled by DMA. Four
+channel widths in a row (800 to 2200 us) mean PPM, at most one interval
+above 200 us means serial (UART1 then takes the pin), else detect again;
+after 1 s without a frame (a MULTI frame that decodes, or a PPM frame) the
+input is detected again. A PPM frame ends 2.4 ms after its last channel
+pulse; it needs 4 to 16 channels after a sync gap, and a pulse below
+800 us drops the frame until the next sync (the MPM's `bad_frame`: no
+shifted channels). The core takes it as a serial frame with the protocol of
+one `PPM_prot[]` entry, set at build time: `MPM_PPM_PROTOCOL` (64, FrSky
+X2), `MPM_PPM_SUB_PROTOCOL`, `MPM_PPM_RX_NUM`, `MPM_PPM_OPTION` (the
+MPM v2 has no dial). Widths scaled as the MPM's `TX_ER9X`, EdgeTX's
+1500 +- 512 us for +-100% (988 -> 204, 2012 -> 1844), clamped to 0..2047;
+missing channels at the center. No telemetry (S.Port stays released), no
+bind, no failsafe, no channel order in PPM mode. Tested with baysim's PPM
+([update.md](update.md#tested-over-the-module-bay)): 4 to 16 channels,
+both polarities, the widths to the microsecond over 500 reads (30 counter
+wraps), the X8R linked (TX_LQI 100), PPM to serial and back in about 1 s.
+
+Not there yet: PPM telemetry and bind, channel order remapping (`disable_ch_map` is decoded only), the telemetry
 buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
 frames), the telemetry formats other than `MULTI_TELEMETRY` (`Telemetry.ino`:
 FrSky hub, S.Port, AFHDS2A and DSM frames only).

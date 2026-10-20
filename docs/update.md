@@ -277,7 +277,8 @@ module through D2). Two USB serial ports: a bridge to the bay lines, both
 inverted in the GPIO block, at the host's line settings (so
 `stk500_flash.py` and `radio_sim.py` run through it unchanged), and a
 control port: power, polarity, the PPM line driven or left floating (no
-radio), pad levels, and a trace of the bytes both ways with microsecond
+radio), PPM instead of serial (a PIO state machine, 1 us steps), pad
+levels, and a trace of the bytes both ways with microsecond
 times. `tools/bench/baysim.py` runs the tests below.
 
 Both lines are safe for the RP2040's 3.3 V: the radio only pulls the PPM
@@ -299,13 +300,32 @@ With baysim (2026-10-20), boot loader and bench application from
   power on (the line rising with R22 before the boot loader holds it low);
   EdgeTX only listens after its sync. The first sync answered: 7 ms after
   power on (none at 5 ms); EdgeTX's first, at 10 ms, is in.
-- **Window** (point 3; host timed, 1 to 2 ms): PPM line driven at idle (a
-  radio): syncs answered from 7 to 290 ms, none from 310 ms; PPM line
-  floating (no radio, R14 high): answered from 10 to 25 ms, none from
-  30 ms (20 ms after the boot loader starts).
+- **Window** (point 3; the sync's time from the baysim trace): PPM line
+  driven at idle (a radio): syncs answered from 7 to 290 ms, none from
+  310 ms; PPM line floating (no radio, R14 high): answered at 11.7 ms, none
+  from 26.6 ms (20 ms after the boot loader starts).
+- **The first reply** to a sync 15 to 20 ms after power on reads
+  `11 f1` (framing error) about once in five at baysim, instead of
+  `14 10`: `radio_tx_on()` takes S.Port from released to idle a few
+  microseconds before the start bit, and the receiver, out of the released
+  line's break, misses it. A radio's next sync (100 ms later) gets a clean
+  reply. A short idle time before the first reply would fix it.
 - **Serial frames** (point 5): MULTI frames (100k 8E2) from 5 ms after
   power on, then a sync at 60 to 290 ms: never answered, the frames end the
-  window. PPM not tried yet (baysim sends no PPM).
+  window. PPM (EdgeTX's 8 channels at 1500, 22.5 ms, 300 us pulses) from
+  before power on, then a sync: answered up to 21.6 ms, none from 26.6 ms,
+  both polarities (negative PPM idles at the "no radio" level, positive
+  PPM's pulses count as noise): the application starts after the boot
+  loader's shortest window.
+- **PPM input** (`build-mpm`, `baysim.py ppm`, the MPM core's state read
+  over J-Link): detected and decoded, 4 to 16 channels, both polarities,
+  the widths exact to the microsecond (500 reads over 11 s, about 30
+  wraps of the capture counter: no glitch), EdgeTX's -100/0/+100% widths
+  (988, 1500, 2012 us) to 204, 1024, 1844; 3 channels: no input. FrSky X2
+  with the X8R: TX_LQI 100, RX RSSI 91 to 94. Serial to PPM and back: about
+  1 s (the input timeout), the X8R back 4 s later (UNI-RX's hold). Serial
+  after the detection: the first status 84 to 90 ms after power on (75 to
+  82 before, one frame more).
 - **The application on the bay** (`build-mpm`: MPM core, boot loader
   layout, flashed over the bay: 80476 bytes in 29.9 s): `radio_sim.py -p
   <baysim link> status` gets the status telemetry every 500 ms through
@@ -328,13 +348,13 @@ With baysim (2026-10-20), boot loader and bench application from
   plain signal loss (the hop sequence going on) is back in 0.2 to 0.4 s
   ([mpm-core.md](mpm-core.md#real-receivers)).
 
-Not yet: PPM, the 200 KB image over the bay (tested over USB), an internal
+Not yet: the 200 KB image over the bay (tested over USB), an internal
 module's polarity (`telem_invert` clear). A real radio is still needed for the EdgeTX side (`mpm-v2-flash`)
 and the radios' own line levels.
 
 ## Next
 
-1. PPM; a real radio.
+1. A real radio.
 2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
    path works.
 3. Generalise the radio port (UART0 or UART1, polarity) for internal

@@ -1,5 +1,6 @@
 // MULTI-Module core against a simulated radio: frame format, protocol start,
-// callback timing, status and protocol list telemetry, bind, input loss
+// callback timing, status and protocol list telemetry, bind, input loss, PPM
+// (built with MPM_PPM_PROTOCOL 127, MPM_PPM_SUB_PROTOCOL 2)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,17 @@ bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
   _frame_ready = false;
   memcpy(buf, _frame, _frame_len);
   *len = _frame_len;
+  return true;
+}
+static uint16_t _ppm[MPM_CHANNELS];
+static uint8_t _ppm_n;
+static bool _ppm_ready;
+bool mpm_port_read_ppm(uint16_t* us, uint8_t* n)
+{
+  if (!_ppm_ready) return false;
+  _ppm_ready = false;
+  memcpy(us, _ppm, sizeof(_ppm));
+  *n = _ppm_n;
   return true;
 }
 uint16_t mpm_port_write_free() { return 256; }
@@ -408,6 +420,50 @@ static void test_proto_list()
   }
 }
 
+// PPM: the build's protocol, the widths scaled as the MPM's TX_ER9X, no
+// telemetry, input loss as with serial
+static void _run_ppm(uint32_t us, uint32_t period)
+{
+  uint32_t end = _us + us;
+  uint32_t next = _us;
+  while ((int32_t)(_us - end) < 0) {
+    if ((int32_t)(_us - next) >= 0) {
+      _ppm_ready = true;
+      next += period;
+    }
+    mpm_poll();
+    _us += 3;
+  }
+}
+
+static void test_ppm()
+{
+  _us = 3000000;
+  _radio_on = false;
+  mpm_init();
+  _clear();
+  _inits = 0;
+
+  static const uint16_t widths[8] = {988, 1500, 2012, 1100, 700, 2400, 1501, 1250};
+  static const uint16_t expect[8] = {204, 1024, 1844, 383, 0, 2047, 1025, 623};
+  memcpy(_ppm, widths, sizeof(widths));
+  _ppm_n = 8;
+  _run_ppm(500000, 22500);
+  CHECK(_inits == 1);
+  CHECK(mpm.protocol == 127 && mpm.sub_protocol == 2 && mpm.rx_num == 0 && mpm.option == 0);
+  CHECK(mpm.proto_valid && mpm.input && mpm.disable_telem);
+  for (int i = 0; i < 8; i++) CHECK(mpm.channels[i] == expect[i]);
+  for (int i = 8; i < MPM_CHANNELS; i++) CHECK(mpm.channels[i] == MPM_CHANNEL_CENTER);
+  CHECK(mpm.channel_aux == 0x02);  // channel 6 above the switch level
+  CHECK(_telem_len == 0);
+  CHECK(_cb_n > 120);
+  printf("ppm: callbacks %d\n", _cb_n);
+
+  _clear();
+  _run(200000);  // no PPM frames
+  CHECK(!mpm.input);
+}
+
 int main()
 {
   test_frame();
@@ -416,6 +472,7 @@ int main()
   test_bind();
   test_invalid();
   test_proto_list();
+  test_ppm();
   printf("%s\n", _fails ? "FAILED" : "ok");
   return _fails != 0;
 }

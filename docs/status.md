@@ -242,8 +242,8 @@ packets 102.4 ms apart.
    protocols).
 3. **Port the MPM core.** Done for the serial link ([mpm-core.md](mpm-core.md)):
    scheduler, protocol table, frames, status and protocol list, and the
-   MPM v2 module bay (UART1, tested through the radio simulator). Left: PPM
-   input, channel order, wait-for-bind.
+   MPM v2 module bay (UART1, and PPM, tested through the radio simulator).
+   Left: channel order, wait-for-bind, PPM telemetry and bind.
    Then bring protocols over one family at a time, each checked on the bench
    (`proto_capture.py` and the suites work against the CC2652 too).
 4. **Measure and fix the timing.** Measure RF core command latencies, then

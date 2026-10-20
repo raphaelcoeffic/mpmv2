@@ -51,8 +51,15 @@
 #define TIMER_DMA_CHAN  UDMA_CHAN_TIMER0_A
 #define DMA_BUFFER_SIZE PPM_MAX_CHANNELS
 
+// Edge time mode: the prescaler extends the counter to 24 bits (349 ms at
+// 48 MHz), counting up from 0 to TAILR | TAPR << 16, then wrapping
+#define TIMER_MASK 0xFFFFFF
+
 static uint16_t ppm_channels[PPM_MAX_CHANNELS];
 static volatile uint16_t valid_channels;
+// Since the last sync gap: an interval too short (a glitch), no frame until
+// the next sync, so that channels can't shift (the MPM's bad_frame)
+static bool frame_bad;
 static volatile uint32_t edge_start;
 
 static uint16_t ppm_frame_timeout;
@@ -167,12 +174,19 @@ static void _ppm_timer_isr()
     uint32_t last_edge = match_register();
     clear_capture_event();
 
-    uint32_t pulse = (last_edge - edge_start) / 48;
+    uint32_t pulse = ((last_edge - edge_start) & TIMER_MASK) / 48;
     edge_start = last_edge;
 
     if (ppm_timer_mode == PPM_MODE_NORMAL) {
-      if (pulse < PULSE_MIN_US || pulse > PULSE_MAX_US) {
+      if (pulse > PULSE_MAX_US) {
+        // sync gap: a new frame
         valid_channels = 0;
+        frame_bad = false;
+        return;
+      }
+      if (pulse < PULSE_MIN_US || frame_bad) {
+        valid_channels = 0;
+        frame_bad = true;
         return;
       }
       reset_frame_timeout();
@@ -226,9 +240,8 @@ void ppm_timer_init(uint32_t pin)
   TimerConfigure(TIMER_BASE, TIMER_CONFIG | TIMER_CFG_B_ONE_SHOT);
   TimerEventControl(TIMER_BASE, TIMER_INST, TIMER_EVENT_NEG_EDGE);
 
-  // prescaler must be set so that we can use the 24-bit extention
-  // (does not work as prescaler though)
-  TimerPrescaleSet(TIMER_BASE, TIMER_INST, 0xFFFF);
+  // the prescaler is the counter's upper 8 bits in edge time mode
+  TimerPrescaleSet(TIMER_BASE, TIMER_INST, 0xFF);
 
   // prescaler is "normal" as we're using timer B in count-down mode
   TimerPrescaleSet(TIMER_BASE, TIMER_B, 48 - 1);
@@ -247,7 +260,8 @@ void ppm_timer_init(uint32_t pin)
 void ppm_timer_start()
 {
   valid_channels = edge_start = 0;
-  TimerLoadSet(TIMER_BASE, TIMER_INST, 0);
+  frame_bad = true;
+  TimerLoadSet(TIMER_BASE, TIMER_INST, 0xFFFF);
 
   TimerIntEnable(TIMER_BASE, TIMER_EVENT);
   TimerEnable(TIMER_BASE, TIMER_INST);
@@ -255,11 +269,13 @@ void ppm_timer_start()
 
 void ppm_timer_stop()
 {
+  // also ends a detection's sampling, if one runs
+  _stop_rx_dma();
   TimerIntDisable(TIMER_BASE, TIMER_EVENT);
-  TimerDisable(TIMER_BASE, TIMER_INST);
+  ppm_timer_mode = PPM_MODE_NORMAL;
 }
 
-void ppm_timer_set_timeout(uint16_t us, void (*cb)())
+void ppm_timer_set_timeout(uint16_t us, ppm_callback_t cb)
 {
   if (us) {
     ppm_frame_timeout = us;
@@ -290,9 +306,9 @@ void ppm_stop_detect()
   ppm_timer_mode = PPM_MODE_NORMAL;
 
   // compute timings
-  ppm_channels[0] = (dma_buffer[0] - edge_start) / 48;
+  ppm_channels[0] = ((dma_buffer[0] - edge_start) & TIMER_MASK) / 48;
   for (int i = 1; i < PPM_MAX_CHANNELS; i++) {
-    uint16_t pulse = (dma_buffer[i] - dma_buffer[i - 1]) / 48;
+    uint16_t pulse = ((dma_buffer[i] - dma_buffer[i - 1]) & TIMER_MASK) / 48;
     if (pulse < detect_pulse_min) detect_pulse_min = pulse;
     ppm_channels[i] = pulse;
   }

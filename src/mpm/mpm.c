@@ -34,6 +34,10 @@ static bool _cur_valid;
 static uint8_t _rx[MPM_FRAME_MAX_LEN];
 static uint8_t _rx_len;
 static bool _rx_pending;
+// PPM frame waiting to be processed: channel widths, us
+static uint16_t _ppm[MPM_CHANNELS];
+static uint8_t _ppm_n;
+static bool _ppm_pending;
 static uint32_t _last_input_ms;
 
 // Callback scheduling
@@ -255,6 +259,27 @@ static void _process_frame(const mpm_frame_t* f)
     if (mpm.channels[4 + i] > MPM_CHANNEL_SWITCH) mpm.channel_aux |= 1 << i;
 }
 
+// A PPM frame as a serial one, as the MPM's PPM mode: the protocol of the
+// dial position, the channels scaled from the widths
+static void _ppm_frame(mpm_frame_t* f)
+{
+  memset(f, 0, sizeof(*f));
+  f->protocol = MPM_PPM_PROTOCOL;
+  f->sub_protocol = MPM_PPM_SUB_PROTOCOL;
+  f->rx_num = MPM_PPM_RX_NUM;
+  f->option = MPM_PPM_OPTION;
+  f->disable_telem = true;
+  for (uint8_t i = 0; i < MPM_CHANNELS; i++) {
+    if (i >= _ppm_n) {
+      f->channels[i] = MPM_CHANNEL_CENTER;
+      continue;
+    }
+    int32_t v = ((int32_t)_ppm[i] - MPM_PPM_MIN_100) * (MPM_CHANNEL_MAX - MPM_CHANNEL_MIN) /
+                    (MPM_PPM_MAX_100 - MPM_PPM_MIN_100) + MPM_CHANNEL_MIN;
+    f->channels[i] = v < 0 ? 0 : v > 2047 ? 2047 : v;
+  }
+}
+
 static void _update_led(uint32_t ms)
 {
   if (mpm.input && ms - _last_input_ms > MPM_INPUT_TIMEOUT_MS) mpm.input = false;
@@ -278,14 +303,21 @@ static void _update_led(uint32_t ms)
 static bool _update_all()
 {
   uint32_t ms = mpm_port_millis();
+  mpm_frame_t f;
   if (_rx_pending) {
     _rx_pending = false;
-    mpm_frame_t f;
     if (mpm_frame_decode(_rx, _rx_len, &f)) {
       _process_frame(&f);
       mpm.input = true;
       _last_input_ms = ms;
     }
+  }
+  if (_ppm_pending) {
+    _ppm_pending = false;
+    _ppm_frame(&f);
+    _process_frame(&f);
+    mpm.input = true;
+    _last_input_ms = ms;
   }
   _update_led(ms);
   _update_telem(ms);
@@ -303,6 +335,7 @@ void mpm_init()
   _change = false;
   _cur_valid = false;
   _rx_pending = false;
+  _ppm_pending = false;
   _count = 0;
   _send_status = false;
   _module_id = mpm_port_module_id();
@@ -317,6 +350,11 @@ void mpm_poll()
   if (mpm_port_read_frame(_rx, &len)) {
     _rx_len = len;
     _rx_pending = true;
+  }
+  uint8_t n;
+  if (mpm_port_read_ppm(_ppm, &n)) {
+    _ppm_n = n;
+    _ppm_pending = true;
   }
 
   // Nothing to run: wait for input, the next callback right after
@@ -345,7 +383,7 @@ void mpm_poll()
   // Late: the next callback right away. Else make sure the input gets
   // processed even if the protocol never leaves enough time for it
   if ((int32_t)(_next_us - mpm_port_micros()) < 0) return;
-  if (_rx_pending && ++_count > MPM_UPDATE_FORCE) {
+  if ((_rx_pending || _ppm_pending) && ++_count > MPM_UPDATE_FORCE) {
     _count = 0;
     _update_all();
   }

@@ -13,6 +13,9 @@ uint32_t mpm_port_millis();
 void mpm_port_init();
 // Latest frame received from the radio, if any since the last call
 bool mpm_port_read_frame(uint8_t* buf, uint8_t* len);
+// Latest PPM frame, if any since the last call: the channel widths in us
+// (MPM v2 module bay)
+bool mpm_port_read_ppm(uint16_t* us, uint8_t* n);
 // Telemetry to the radio
 void mpm_port_write(const uint8_t* data, uint8_t len);
 // Room left for telemetry (bytes)

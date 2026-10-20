@@ -9,6 +9,12 @@
 // telemetry invert bit is clear (EdgeTX: an internal module), as the STM32
 // MULTI-Module switches its TX_INV.
 //
+// The bay's input is serial or PPM, detected on DIO22 as the edge times
+// show (ppm.c: 16 intervals sampled after a gap; 4 channel widths in a row:
+// PPM, at most one interval above 200 us: serial), then UART1 or the PPM
+// capture. No frame for BAY_LOST_MS: detected again. PPM goes to the core
+// as channel widths (mpm_port_read_ppm()), S.Port stays released.
+//
 // MPM v2 without USB: U8 puts S.Port on UART0 RX, which then hears the
 // module's own telemetry (not inverted back: UART errors, the frames are
 // dropped; read right, "MP" isn't a frame header either)
@@ -24,6 +30,7 @@
 
 #include "board.h"
 #include "mpm_frame.h"
+#include "ppm.h"
 #include "radio.h"
 #include "timer.h"
 #include "uart.h"
@@ -109,9 +116,39 @@ static void _link_init(uint8_t i, uint32_t rx, uint32_t tx, void (*frame_receive
 }
 
 #if defined(MODULE_RX)
+// No frame for this long (ms): the input is detected again
+#define BAY_LOST_MS 1000
+// Sampling not done after this long (ms): the edges stopped, start again
+#define BAY_DETECT_MS 200
+// PPM frame end: this long after the last channel pulse (us)
+#define BAY_PPM_TIMEOUT_US 2400
+// Detection: interval above which serial isn't (us)
+#define BAY_SERIAL_MAX_US 200
+
+typedef enum {
+  BAY_DETECT = 0,
+  BAY_SERIAL,
+  BAY_PPM,
+} bay_mode_t;
+
+static bay_mode_t _bay_mode;
+static uint32_t _bay_ms;  // detection start, then the last frame
 static int8_t _bay_invert = -1;  // S.Port: -1 released, else TX1_INV
 
-static void _frame_received_bay() { _frame_received(LINK_BAY); }
+static uint16_t _ppm[PPM_MAX_CHANNELS];
+static uint8_t _ppm_n;
+static volatile bool _ppm_ready;
+
+static void _frame_received_bay()
+{
+  if (_bay_mode == BAY_SERIAL) {
+    _frame_received(LINK_BAY);
+  } else {
+    // UART1 RX is on no pin
+    _links[LINK_BAY].rx_error = false;
+    uart_reset_rx_len(UART1);
+  }
+}
 static void _uart_error_bay(uart_error_t error)
 {
   (void)error;
@@ -128,12 +165,85 @@ static void _bay_telem_invert(bool invert)
   _bay_invert = invert;
 }
 
+// From the interrupt, BAY_PPM_TIMEOUT_US after the last channel pulse
+static void _ppm_frame(const uint16_t* ppm, uint32_t channels)
+{
+  if (channels < PPM_MIN_CHANNELS) return;
+  memcpy(_ppm, ppm, channels * sizeof(_ppm[0]));
+  _ppm_n = channels;
+  _ppm_ready = true;
+}
+
+static void _bay_detect()
+{
+  _bay_mode = BAY_DETECT;
+  _bay_ms = millis();
+  ppm_timer_init(MODULE_RX);
+  ppm_start_detect();
+}
+
+// As analyse_input_signal() was in main.c
+static bay_mode_t _bay_analyse()
+{
+  ppm_stop_detect();
+  uint32_t n = ppm_get_valid_channels();
+  const uint16_t* t = ppm_get_channels();
+
+  uint32_t channels = 0;
+  while (channels < n && t[channels] >= PULSE_MIN_US && t[channels] <= PULSE_MAX_US) channels++;
+  if (channels >= PPM_MIN_CHANNELS) return BAY_PPM;
+
+  uint32_t long_pulses = 0;
+  for (uint32_t i = 0; i < n; i++)
+    if (t[i] > BAY_SERIAL_MAX_US) long_pulses++;
+  return long_pulses <= 1 ? BAY_SERIAL : BAY_DETECT;
+}
+
+static void _bay_poll()
+{
+  uint32_t ms = millis();
+  if (_bay_mode != BAY_DETECT) {
+    if (ms - _bay_ms <= BAY_LOST_MS) return;
+    if (_bay_mode == BAY_PPM) ppm_timer_set_timeout(0, 0);
+    _bay_detect();
+    return;
+  }
+
+  if (!ppm_detect_done()) {
+    if (ms - _bay_ms > BAY_DETECT_MS) {
+      ppm_timer_stop();
+      _bay_detect();
+    }
+    return;
+  }
+
+  bay_mode_t mode = _bay_analyse();
+  if (mode == BAY_DETECT) {
+    _bay_detect();
+    return;
+  }
+  _bay_mode = mode;
+  _bay_ms = ms;
+  if (mode == BAY_PPM) {
+    _ppm_ready = false;
+    ppm_timer_start();
+    ppm_timer_set_timeout(BAY_PPM_TIMEOUT_US, _ppm_frame);
+  } else {
+    // the frame in progress is lost (its start missed)
+    bool masked = IntMasterDisable();
+    _links[LINK_BAY].rx_error = false;
+    uart_reset_rx_len(UART1);
+    if (!masked) IntMasterEnable();
+    IOCPortConfigureSet(MODULE_RX, IOC_PORT_MCU_UART1_RX, IOC_STD_INPUT | IOC_IOMODE_INV);
+  }
+}
+
 static void _bay_init()
 {
   // TX on a pin with nothing on it until the first frame: MODULE_TX stays
-  // the GPIO of board_init() (S.Port released)
-  _link_init(LINK_BAY, MODULE_RX, IOID_UNUSED, _frame_received_bay, _uart_error_bay);
-  IOCPortConfigureSet(MODULE_RX, IOC_PORT_MCU_UART1_RX, IOC_STD_INPUT | IOC_IOMODE_INV);
+  // the GPIO of board_init() (S.Port released). RX: after the detection
+  _link_init(LINK_BAY, IOID_UNUSED, IOID_UNUSED, _frame_received_bay, _uart_error_bay);
+  _bay_detect();
 }
 #endif
 
@@ -147,6 +257,9 @@ void mpm_port_init()
 
 bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
 {
+#if defined(MODULE_RX)
+  _bay_poll();
+#endif
   if (!_frame_ready) return false;
   bool masked = IntMasterDisable();
   memcpy(buf, _frame, _frame_len);
@@ -155,11 +268,33 @@ bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
   _frame_ready = false;
   if (!masked) IntMasterEnable();
 #if defined(MODULE_RX)
-  // V1 frames (no flags byte): inverted, a radio's external bay
-  if (_link == LINK_BAY)
+  // Only MULTI frames count (PPM read as serial also gives bytes). V1
+  // frames (no flags byte): inverted, a radio's external bay
+  mpm_frame_t f;
+  if (_link == LINK_BAY && mpm_frame_decode(buf, *len, &f)) {
+    _bay_ms = millis();
     _bay_telem_invert(*len <= MPM_FRAME_V1_LEN || (buf[MPM_FRAME_V1_LEN] & MPM_FRAME_TELEM_INVERT));
+  }
 #endif
   return true;
+}
+
+bool mpm_port_read_ppm(uint16_t* us, uint8_t* n)
+{
+#if defined(MODULE_RX)
+  if (!_ppm_ready) return false;
+  bool masked = IntMasterDisable();
+  memcpy(us, _ppm, _ppm_n * sizeof(_ppm[0]));
+  *n = _ppm_n;
+  _ppm_ready = false;
+  if (!masked) IntMasterEnable();
+  _bay_ms = millis();
+  return true;
+#else
+  (void)us;
+  (void)n;
+  return false;
+#endif
 }
 
 void mpm_port_write(const uint8_t* data, uint8_t len) { uart_tx_irq(_links[_link].uart, data, len); }
