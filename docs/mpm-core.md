@@ -205,7 +205,7 @@ width and period each second, gaps.
 | FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds, servos follow; no telemetry (receive only) |
 | FrSky X8R (ACCST v2, EU LBT firmware) | FrSky X2 (64) sub 2 | binds, CH1-4 on SBUS; telemetry: TX_LQI 99 to 100 (as the 4-in-1), RX RSSI about 85, A1 |
 | FlySky FS-iA6B | AFHDS2A (28) sub 2 (PWM,SBUS), option 128 | binds (until the receiver answers), CH1-4 on SBUS at its serial servo port; telemetry (option bit 7) about 80 frames/s: RX 4.85 V, error rate 1%, RSSI 60, noise 101, SNR 41 |
-| Spektrum AR610C | DSM (6) sub 2 (DSMX 22 ms), option 6 (channels) | binds (receiver first in bind mode), servo on AUX1 follows (`--sweep-ch 6`); no telemetry |
+| Spektrum AR610C | DSM (6) sub 4 (Auto): bind response 0xA2 (DSMX 22 ms), 7 channels; also sub 2 option 6 | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 46 pulses/s at 22 ms as with the 4-in-1 (same bind response to both); once, the first bind after rewiring, a response 0x01 (DSM2 22 ms), not seen again; no telemetry |
 | Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); telemetry (32 chip codes) 44 to 46 frames/s, one every other 11 ms frame (16 to 20 before the decoding between callbacks): QoS (frame loss A 90 to 96, RX 4.95 V), TM1000 (temperature), sensors 0x03, 0x0A, 0x12, 0x34, 0x40 |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
