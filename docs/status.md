@@ -185,7 +185,8 @@ packets 102.4 ms apart.
   no reference to compare with.
 - **Real receivers and models.** The ported MPM protocols on the LaunchPad
   bind and drive the owned receivers as the 4-in-1 does: FrSky V8R4-II
-  (V8 and D8) and X8R (X2 LBT), FlySky FS-iA6B (AFHDS2A, telemetry),
+  (V8 and D8) and X8R (X2 LBT; with UNI-RX firmware X and X2, FCC and
+  EU), FlySky FS-iA6B (AFHDS2A, telemetry),
   Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto) and Lemon-RX DSMP
   (DSM telemetry); signal loss and 10 to 42 minute runs on the V8R4-II and
   the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). Not yet: V2x2,

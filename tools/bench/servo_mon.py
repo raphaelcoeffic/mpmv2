@@ -96,10 +96,15 @@ class ServoMon:
         while not self.replies.empty():
             self.replies.get_nowait()
         self.ser.write(s.encode() + b"\n")
-        try:
-            return self.replies.get(timeout=timeout)
-        except queue.Empty:
-            return ""
+        end = time.monotonic() + timeout
+        while (left := end - time.monotonic()) > 0:
+            try:
+                r = self.replies.get(timeout=left)
+            except queue.Empty:
+                break
+            if r.startswith(("ok", "err")):  # not a report cut by the port opening
+                return r
+        return ""
 
     def in2(self, mode: str, pin: int = 9) -> str:
         """The second input: off, servo or sbus"""
