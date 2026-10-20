@@ -19,7 +19,7 @@ definitions are in `src/board.h`, the levels at boot in `board_init()`.
 | 15 | ANT_SEL | SKY66112: 0 = ANT1 (J2), 1 = ANT2 (J3) |
 | 16, 17 | TDO, TDI | J10 |
 | 18 | LED DIN | TC2020RGB |
-| 19 | BOOT | ROM boot loader backdoor: R15 pull-up, Q1 from CH343 DTR/RTS |
+| 19 | BOOT | ROM boot loader backdoor: R15 pull-up, Q1 from CH343 DTR/RTS (as on ESP32 boards: DTR low and RTS high reset, DTR high and RTS low pull BOOT low, the same level on both does nothing; `tools/rom_flash.py`) |
 | 21 | TX1 | U9 XOR with TX1_INV, then D4 onto S.Port (R22 pull-up) |
 | 22 | RX1 | CPPM, radio bay pin 1, through D3 (R14 pull-up) |
 | 23 | RX_INV | U9 2B |

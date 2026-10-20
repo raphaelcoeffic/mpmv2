@@ -20,104 +20,107 @@ the black-box of RF microcontrollers" by Adam Batori and Robert Pafford
 [tools](https://github.com/rjp5th/beyond-ble-tools)): thanks for the ideas
 and the inspiration.
 
-Radio bench build (LaunchPad, `src/bench.c` command shell on UART0 at 921600
-baud instead of the MPM):
+## Trying it
+
+What it takes: the MPM v2 board, a USB-C cable, and Python 3.10 or later
+with [uv](https://docs.astral.sh/uv/) (the tools declare their packages,
+`uv run` installs them; without uv: `pip install pyserial` and
+`python3 tools/<script>`). No debugger needed. Linux and macOS see the
+board's CH343 as a standard USB serial port; on Windows, if no COM port
+appears, install WCH's CH343 driver.
+
+The firmware files (from a release, or [built](#building) in `build-mpm/`):
+
+| File | What | For |
+|---|---|---|
+| `mpm-v2-full.bin`, `mpm-v2-full.hex` | the whole internal flash: boot loader, application, CCFG | the first install, or a recovery |
+| `mpm-v2.bin` | the application with the MULTI signature | updates, through the MPM v2 boot loader |
+
+### First install, over USB-C
 
 ```bash
-cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
+uv run tools/rom_flash.py mpm-v2-full.bin
+```
+
+`rom_flash.py` opens the CC2652's ROM boot loader through the CH343 (a blank
+chip opens it anyway), erases the internal flash, writes the image and
+checks it by CRC, then resets: 5 to 15 s. It works whatever the chip holds,
+so it is also the way back from a bad update. The external flash (EEPROM
+file, settings) is not touched. `--info` reads the chip and writes nothing;
+the port is the first CH343, or `--port` / `$V2_PORT`.
+
+With a debugger on J10 instead (J-Link, XDS110...): write
+`mpm-v2-full.hex` with any tool that takes one, e.g. OpenOCD
+(`tools/flash_jlink.sh` shows the commands). TI's UniFlash should take it
+too, through a debugger or the ROM boot loader (not tried).
+
+### Is it running?
+
+```bash
+uv run tools/mpm_fs.py log -t 2      # the module's debug log since power up
+uv run tools/mpm_fs.py info          # its file system (the external flash)
+```
+
+The log starts with `## Boot completed ##`, the file system and the
+settings read; then the radio's input and each protocol start show up as
+they come. What the module does, its settings files (`ppm.txt`,
+`debug.txt`) and the log: [docs/mpm-core.md](docs/mpm-core.md).
+
+### Updates
+
+- **Over USB-C:** `uv run tools/stk500_flash.py mpm-v2.bin --verify`
+  (about 50 s; through the MPM v2 boot loader, as a radio does it), or
+  `rom_flash.py mpm-v2-full.bin` again (faster, the same result).
+- **From the radio** ("Flash External Multi" with `mpm-v2.bin`): needs an
+  EdgeTX build with MPM v2 support (branch `mpm-v2-flash`, not in an EdgeTX
+  release yet). Tested over the module bay with a radio simulator, not yet
+  with a real radio: see [docs/update.md](docs/update.md).
+
+## Building
+
+Prerequisites: the [Arm GNU
+Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
+(`arm-none-eabi-gcc` in `PATH`, 14.2 used), CMake 3.21 or later, Ninja,
+Python 3.
+
+The MPM v2 firmware (MULTI-Module core and boot loader):
+
+```bash
+cmake -S . -B build-mpm -G Ninja -DBOOTLOADER=ON
+ninja -C build-mpm                # mpm-v2-full.bin / .hex, mpm-v2.bin
+ninja -C build-mpm flash          # J-Link on J10: boot loader and application
+```
+
+Host unit tests (a C compiler):
+
+```bash
+make -C tests/frame               # the framings
+make -C tests/mpm                 # the MPM core, the log
+make -C tests/storage             # littlefs on a simulated NOR flash, EEPROM, file server, settings
+```
+
+Radio bench builds (`src/bench.c` command shell instead of the MPM, see
+[docs/bench.md](docs/bench.md)):
+
+```bash
+# MPM v2 board: console on USB-C, J-Link on J10
+cmake -S . -B build-v2 -G Ninja -DBENCH=ON
+ninja -C build-v2 flash
+# LaunchPad: UART0 at 921600 baud
+cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON
 ninja -C build-bench
 openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
-make -C tests/frame    # host unit tests of the framings
-make -C tests/mpm      # host unit tests of the MPM core
 ```
 
-On the MPM v2 board (console on the USB-C port, J-Link on J10):
-
-```bash
-cmake -S . -B build-v2 -G Ninja -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
-ninja -C build-v2 flash
-```
-
-# Compilation Instructions
-
-This README provides instructions for compiling the project using CMake with the
-available configuration options.
-
-## Prerequisites
-
-- CMake (version 3.x or later)
-- [ARM GNU Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
-
-## Configuration Options
-
-The project supports the following configuration options that can be enabled or
-disabled during the build process:
+Options (`-D<option>=ON|OFF`; the build type is Release unless
+`CMAKE_BUILD_TYPE` says otherwise):
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `BOARD_CC2652R1_LAUNCHXL` | Set target board to CC2652R1-LAUNCHXL. If OFF, MPM with CC2652RB is assumed. | OFF |
-| `DEBUG` | Enable debug output via Segger RTT. | OFF |
-| `USE_CCFG` | Include MCU user configuration (CCFG). | ON |
-| `USE_XOSC` | Use external oscillator (or HPOSC on CC2652RB). | ON |
-| `DRIVERLIB_NOROM` | Use compiled driverlib instead of ROM. | OFF |
-| `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see `docs/bench.md`). | OFF |
-| `BOOTLOADER` | Boot loader at 0x0 (update from the radio), application at 0x2000 (see `docs/update.md`). | OFF |
-
-## Building the Project
-
-### Basic Build
-
-```bash
-# Create and navigate to build directory
-mkdir build
-cd build
-
-# Generate build files with default configuration
-cmake ..
-
-# Compile the project
-cmake --build .
-```
-
-### Customizing Build Options
-
-To customize build options, you can use the `-D` flag with CMake:
-
-```bash
-# Example: Enable debug output and target the CC2652R1 LaunchXL board
-cmake -DDEBUG=ON -DBOARD_CC2652R1_LAUNCHXL=ON ..
-
-# Example: Disable CCFG and use compiled driverlib
-cmake -DUSE_CCFG=OFF -DDRIVERLIB_NOROM=ON ..
-```
-
-## Examples
-
-### Building for CC2652R1 LaunchXL with Debug
-
-```bash
-cmake -DBOARD_CC2652R1_LAUNCHXL=ON -DDEBUG=ON ..
-cmake --build .
-```
-
-### Building for MPM with CC2652RB (Default)
-
-```bash
-# No need to specify BOARD_CC2652R1_LAUNCHXL as it's OFF by default
-cmake ..
-cmake --build .
-```
-
-### Advanced: Disabling External Oscillator
-
-```bash
-cmake -DUSE_XOSC=OFF ..
-cmake --build .
-```
-
-## Notes
-
-- When `BOARD_CC2652R1_LAUNCHXL` is OFF, the build targets an MPM board with CC2652RB
-- When using CC2652RB, the `USE_XOSC` option will configure HPOSC instead of an external oscillator
-- Enabling `DEBUG` will configure Segger RTT for debug output
-- The `DRIVERLIB_NOROM` option determines whether to use the compiled driverlib or the ROM version
+| `BOOTLOADER` | Boot loader at 0x0 (update from the radio), application at 0x2000 (see [docs/update.md](docs/update.md)). | OFF |
+| `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see [docs/bench.md](docs/bench.md)). | OFF |
+| `BOARD_CC2652R1_LAUNCHXL` | Target the CC2652R1 LaunchPad. If OFF, the MPM v2 board (CC2652RB). | OFF |
+| `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
+| `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
+| `USE_XOSC` | External crystal (HPOSC on the CC2652RB). | ON |
+| `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |

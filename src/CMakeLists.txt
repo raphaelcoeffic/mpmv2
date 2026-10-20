@@ -137,13 +137,18 @@ add_custom_command(
 
 if (BOOTLOADER)
   # firmware.bin gets the image header (length, CRC) the boot loader checks,
-  # mpm-v2.bin is the file for the radio (MULTI signature appended)
+  # mpm-v2.bin is the file for the radio (MULTI signature appended),
+  # mpm-v2-full.bin / .hex the whole flash for a first install (boot loader,
+  # CCFG, application)
   add_custom_command(
     TARGET firmware POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill 0xff bootloader.elf bootloader.bin
     COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fw_image.py firmware.bin
             --version ${PROJECT_VERSION} --out mpm-v2.bin
+            --full bootloader.bin mpm-v2-full
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+  add_dependencies(firmware bootloader)
   # J-Link: ninja -C <build dir> flash (boot loader and application)
   add_custom_target(flash
     COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh

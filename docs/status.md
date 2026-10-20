@@ -266,6 +266,9 @@ packets 102.4 ms apart.
    radio, serial frames ending it, the application's frames and telemetry);
    EdgeTX branch `mpm-v2-flash` for the MPM v2 files. Next: a real radio. See
    [update.md](update.md).
+   First install without a debugger: `mpm-v2-full.bin` through the ROM boot
+   loader over USB-C (`tools/rom_flash.py`, README "Trying it"). Prebuilt
+   files: GitHub releases (none yet).
 8. **Settings and calibration.** No file is part of the firmware (it runs
    with a blank flash); files customise and trace
    ([mpm-core.md](mpm-core.md#storage), `tools/mpm_fs.py` over USB-C).

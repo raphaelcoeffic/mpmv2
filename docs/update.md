@@ -200,6 +200,14 @@ ninja -C build-bl flash               # J-Link: boot loader + application
 tools/stk500_flash.py build-bl/mpm-v2.bin --verify   # USB-C: as EdgeTX does it
 ```
 
+`mpm-v2-full.bin` / `.hex` (also built) hold the whole flash: boot
+loader, application, CCFG. `tools/rom_flash.py` writes it over USB-C through
+the ROM boot loader, for the first install or a recovery (no debugger; see
+the README's "Trying it"). Tested on the MPM v2 (2026-10-20): internal
+flash erased over J-Link, USB-C the only power, `rom_flash.py` 13.5 s at
+115200 baud (4.4 s at 460800, the default), the application up with its
+file system; then `stk500_flash.py --verify` over it, 48 s.
+
 `stk500_flash.py` resets the CC2652 through the CH343 DTR (BOOT high) and
 syncs every 10 ms, within the 20 ms console window. With `--no-reset` it
 syncs for 5 s like EdgeTX; `--invert` drives the radio bay through a plain
