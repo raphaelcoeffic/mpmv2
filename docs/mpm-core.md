@@ -47,12 +47,15 @@ As the MPM:
 - **LED**: the MPM blink patterns (no input, invalid protocol, bind).
 
 **Links.** UART0 (LaunchPad: XDS110 back channel; MPM v2: USB console) and,
-on the MPM v2, the module bay: UART1 in on the PPM pin (inverted), telemetry
-out on S.Port through U9, inverted unless the frame's `telem_invert` bit is
-clear (EdgeTX sets it for the external bay), as the STM32 MULTI-Module's
-TX_INV. S.Port stays released until the first frame from the bay.
-Telemetry goes back on the link of the last frame. Tested through the radio
-simulator ([update.md](update.md#tested-over-the-module-bay)).
+on the MPM v2, the module bay: UART1 in on the PPM pin (idle high: EdgeTX's
+`ETX_Pol_Inverted`), telemetry out on S.Port through U9, idle low unless the
+frame's `telem_invert` bit is clear (EdgeTX sets it for the external bay),
+as the STM32 MULTI-Module's TX_INV. S.Port stays released until the first
+frame from the bay. Telemetry goes back on the link of the last frame.
+Tested on a TX15 (EdgeTX, 2026-10-21): frames decoded, the radio reads the
+status ("Protocol invalid" for FlySky). baysim drives the PPM pin idle low
+(`invert 1`), not as a radio: see
+[update.md](update.md#link-polarity).
 
 **PPM** (the bay only). The bay's input is detected on DIO22 with
 `ppm.c`: GPT0 A captures the falling edges (24 bits at 48 MHz), and after

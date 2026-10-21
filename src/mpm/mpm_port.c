@@ -1,13 +1,14 @@
 // MULTI-Module core on the board: the radio link, 100000 baud 8E2, on UART0
 // (LaunchPad: XDS110 back channel, MPM v2: USB console), not inverted, and
 // on the MPM v2 also the module bay on UART1: in on the PPM pin (MODULE_RX,
-// inverted, as a radio's external bay sends), telemetry out on S.Port
-// (MODULE_TX through U9). Telemetry goes back on the link of the last frame.
+// idle high: EdgeTX's ETX_Pol_Inverted, the bay's "normal" being idle low;
+// seen on a TX15), telemetry out on S.Port (MODULE_TX through U9). Telemetry
+// goes back on the link of the last frame.
 //
 // S.Port stays released (board_init()) until the first frame from the bay,
-// then is inverted (TX1_INV set, U9 holds it low at idle) unless the frame's
-// telemetry invert bit is clear (EdgeTX: an internal module), as the STM32
-// MULTI-Module switches its TX_INV.
+// then is inverted (TX1_INV set, U9 holds it low at idle: the S.Port EdgeTX
+// reads, ETX_Pol_Normal) unless the frame's telemetry invert bit is clear
+// (EdgeTX: an internal module), as the STM32 MULTI-Module switches its TX_INV.
 //
 // The bay's input is serial or PPM, detected on DIO22 as the edge times
 // show (ppm.c: 16 intervals sampled after a gap; 4 channel widths in a row:
@@ -255,7 +256,7 @@ static void _bay_poll()
     _links[LINK_BAY].rx_error = false;
     uart_reset_rx_len(UART1);
     if (!masked) IntMasterEnable();
-    IOCPortConfigureSet(MODULE_RX, IOC_PORT_MCU_UART1_RX, IOC_STD_INPUT | IOC_IOMODE_INV);
+    IOCPortConfigureSet(MODULE_RX, IOC_PORT_MCU_UART1_RX, IOC_STD_INPUT);
   }
 }
 

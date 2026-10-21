@@ -7,7 +7,8 @@ and EdgeTX writes it through the module bay, no USB and no tools.
 Status: the boot loader (`src/bootloader/`, `-DBOOTLOADER=ON`) works over
 USB with a host tool that does what EdgeTX does; the EdgeTX side is on
 branch `mpm-v2-flash` (not pushed). Not yet tried from a radio: the module
-bay lines (inverted, S.Port polarity through U9) are untested, see
+bay's levels are now those of a TX15 running MULTI frames (2026-10-21, see
+[Link polarity](#link-polarity)), the update itself is untested, see
 [To test with a radio](#to-test-with-a-radio).
 
 ## What EdgeTX does today
@@ -29,9 +30,10 @@ modules with `MULTI_TYPE_ELRS`):
    (`_internal_module_set_pwr()`, `_external_module_set_pwr()` in
    `boards/generic_stm32/module_ports.cpp`), so the module always starts
    from power up.
-3. **Link.** 57600 8N1. The radio sends on the PPM pin (bay pin 1), inverted
-   (soft serial), and receives on S.Port, inverted. Internal modules use the
-   duplex internal USART instead.
+3. **Link.** 57600 8N1. The radio sends on the PPM pin (bay pin 1) and
+   receives on S.Port, both `ETX_Pol_Inverted`: idle high on the bay (the
+   bay's "normal" is idle low). Internal modules use the duplex internal
+   USART instead.
 4. **STK500v1 subset** (the replies are `STK_INSYNC` 0x14 ... `STK_OK`
    0x10, each command ends with `CRC_EOP` 0x20):
 
@@ -112,11 +114,13 @@ page back right after writing it works.
    336 KB), too slow for every start: it is checked once, at the first start
    after an update, then the boot loader clears `checked` (bits only go from
    1 to 0: no erase) and resets.
-2. **Sync window.** STK500 on the radio link (UART1, inverted) and on the
+2. **Sync window.** STK500 on the radio link (UART1, idle high) and on the
    console (UART0, the CH343 on USB-C), 57600 8N1. The application starts:
    - after `BL_CONSOLE_MS` (20 ms) when the radio line is at the "no radio"
-     level for 20 ms (`BL_RADIO_ABSENT_LEVEL`: R14 pulls DIO22 up with
-     nothing on the PPM pin);
+     level for 20 ms (`BL_RADIO_ABSENT_LEVEL`, a board setting). Not on the
+     MPM v2: R14 pulls DIO22 up with nothing on the PPM pin, the level of
+     the radio's idle line, so the window runs its full length on the USB
+     bench too;
    - as soon as the radio line carries anything but `STK_GET_SYNC`: serial
      frames (100k 8E2) and PPM read as framing errors and other bytes at
      57600 (more than `BL_NOISE_BYTES`, 8);
@@ -159,12 +163,24 @@ reset to the application answering on USB.
 
 ## Link polarity
 
-The radio sends inverted on the PPM pin and reads S.Port inverted. The boot
-loader inverts DIO22 in the I/O controller. S.Port is only driven once a
-sync came from the radio: TX1_INV (DIO24) set first, so that U9 holds S.Port
-low (the idle level of inverted serial) before UART1 takes DIO21 over; the
-`board_init()` levels (S.Port released) are back before the application
-starts. Untested on a radio.
+EdgeTX names polarities after its own UART: on the bay, through the
+radio's inverters, `ETX_Pol_Normal` idles low and `ETX_Pol_Inverted` idles
+high. For the update it sends on the PPM pin and reads S.Port, both
+inverted (`multi_firmware_update.cpp`): idle high. Its MULTI frames are
+inverted too (idle high on the PPM pin, seen on a TX15 on 2026-10-21), but
+it reads their telemetry on S.Port normal (idle low, as FrSky S.Port).
+
+The boot loader (`BL_RADIO_INVERTED 0`) reads DIO22 as is. S.Port is only
+driven once a sync came from the radio: TX1_INV (DIO24) cleared, so U9
+passes the UART's idle level (high, released through D4, R22 pulls it up)
+before UART1 takes DIO21 over; the `board_init()` levels (S.Port released)
+are back before the application starts. The application reads DIO22 as is
+and drives S.Port idle low (TX1_INV set) for the frames' telemetry.
+
+Until 2026-10-21 both were the other way round (DIO22 inverted, the boot
+loader's S.Port idle low), as baysim drove them: the TX15's frames came in
+as framing and parity errors, so the module never left "no input".
+The update with these levels is untested on a radio.
 
 ## Internal modules
 
@@ -233,14 +249,14 @@ and what may go wrong:
 
 1. **Sync over the module bay** (EdgeTX `mpm-v2-flash`, "Flash External
    Multi" with `mpm-v2.bin`).
-   - *RX polarity:* DIO22 is inverted in the I/O controller on the
-     assumption that the radio's soft serial idles low on the PPM pin. If
-     the bytes arrive wrong, no sync, and the window ends on "noise".
-   - *S.Port polarity through U9:* the reasoning is that TX1_INV = 1 makes
-     U9 pull S.Port low at idle (D4) and R22 pull it up for the high bits.
-     If D4 / R22 work the other way, EdgeTX reads nothing ("no response")
-     or garbage. Check the S.Port level on a scope before and after the
-     sync.
+   - *RX polarity:* DIO22 read as is: EdgeTX's inverted soft serial idles
+     high on the PPM pin, as its MULTI frames do on a TX15. If the bytes
+     arrive wrong, no sync, and the window ends on "noise".
+   - *S.Port polarity through U9:* TX1_INV = 0 lets the UART's idle level
+     through, released by D4 and pulled up by R22: idle high, what
+     EdgeTX's inverted reading expects. If EdgeTX reads nothing ("no
+     response") or garbage, check the S.Port level on a scope before and
+     after the sync.
    - *S.Port drive strength:* R22 against the radio's S.Port input
      (pull-down?) decides the high level and the edge times at 57600.
 2. **Window timing with a real power up.** EdgeTX powers the module up
@@ -249,10 +265,10 @@ and what may go wrong:
    first or second sync inside the 300 ms window.
    - *A glitch at power up* (the line or the module rail rising) reads as
      one or two bytes: below `BL_NOISE_BYTES`, but to be checked.
-3. **No radio and radio not sending.** `BL_RADIO_ABSENT_LEVEL` assumes DIO22
-   reads high (R14) with nothing on the PPM pin, and low (radio soft serial
-   idle) with a radio. Check both levels, and the time to the application:
-   - module on USB alone (bench): 20 ms window;
+3. **No radio and radio not sending.** No `BL_RADIO_ABSENT_LEVEL` on the
+   MPM v2: DIO22 reads high (R14) with nothing on the PPM pin, and high
+   (the radio's idle line) with a radio. Check the time to the application:
+   - module on USB alone (bench): the full 300 ms window;
    - radio powering the module before it sends (EdgeTX boot): the window
      runs until the first frames, at most 300 ms;
    - radios whose PPM pin idles high or floats while the radio boots: the
@@ -301,9 +317,9 @@ With baysim (2026-10-20), boot loader and bench application from
 - **Update** (points 1 and 6): `baysim.py flash`, EdgeTX's sequence
   (power off 3 s, sync every 100 ms): the sync at 88 ms is answered 0.5 ms
   later, then 118912 bytes in 44.3 s, 465 pages read back and verified;
-  the new application runs (J-Link: PC in `bench_loop`). So the S.Port
-  polarity through U9 and D4 is right: idle low with TX1_INV set, and
-  EdgeTX's inverted reading at 57600 gets the replies.
+  the new application runs (J-Link: PC in `bench_loop`). With baysim's
+  levels, idle low on both lines, which a real radio doesn't use (see
+  [Link polarity](#link-polarity)): the update is to test again.
 - **Power up** (point 2): S.Port shows two breaks, 1.8 and 5.5 ms after
   power on (the line rising with R22 before the boot loader holds it low);
   EdgeTX only listens after its sync. The first sync answered: 7 ms after

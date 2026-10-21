@@ -217,8 +217,8 @@ static void radio_tx_on()
 {
 #if defined(BL_RADIO_TX)
   #if defined(MODULE_TX_INV)
-  // U9 inverts: set it first, the idle GPIO level then holds S.Port at the
-  // idle level of inverted serial (low) before the UART takes the pin over
+  // U9 inverts with TX1_INV set: set it first, the idle GPIO level then
+  // holds S.Port at the UART's idle level before the UART takes the pin over
   GPIO_writeDio(MODULE_TX_INV, BL_RADIO_INVERTED);
   IOCPortConfigureSet(BL_RADIO_TX, IOC_PORT_MCU_UART1_TX, IOC_STD_OUTPUT);
   #else
