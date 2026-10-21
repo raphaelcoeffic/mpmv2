@@ -10,7 +10,8 @@ a radio's levels and the host's line settings) and the control port.
 
 Levels as EdgeTX's external bay: the PPM pin idles high; S.Port idles low
 for MULTI telemetry (reboot, and radio_sim.py on the link: baysim's
-default), high for the boot loader's replies (flash, window).
+default), high for the boot loader's replies (flash, window: back to the
+telemetry levels after them).
 
   baysim.py pwr 0|1                 module supply
   baysim.py level                   pad levels of both lines
@@ -123,6 +124,7 @@ def cmd_flash(bay: BaySim, link: str, a):
     out = p.communicate(timeout=600)[0]
     time.sleep(0.3)
     bay.cmd("trace 0")
+    bay.cmd("invert 0 1")  # the application's telemetry, for radio_sim.py
     print("\n".join(l for l in out.splitlines() if "/" not in l or " in " in l))
     t_on = next(int(e[1]) for e in bay.events if e[0] == "P" and e[2] == "1")
     for e in [e for e in bay.events if e[0] != "P"][:8]:
@@ -169,6 +171,7 @@ def cmd_window(bay: BaySim, link_port: str, a):
         at = f" (sent at {(sent[-1] - t_on) / 1000:.1f} ms)" if sent and t_on is not None else ""
         print(f"{a.mode} {d:4d} ms: {r.hex() or '-'}{at}", flush=True)
     bay.cmd("tx drive")
+    bay.cmd("invert 0 1")
     link.close()
 
 
