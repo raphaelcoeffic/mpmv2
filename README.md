@@ -72,9 +72,13 @@ they come. What the module does, its settings files (`ppm.txt`,
   (about 50 s; through the MPM v2 boot loader, as a radio does it), or
   `rom_flash.py mpm-v2-full.bin` again (faster, the same result).
 - **From the radio** ("Flash External Multi" with `mpm-v2.bin`): needs an
-  EdgeTX build with MPM v2 support (branch `mpm-v2-flash`, not in an EdgeTX
-  release yet). Tested over the module bay with a radio simulator, not yet
-  with a real radio: see [docs/update.md](docs/update.md).
+  EdgeTX build with MPM v2 support, not in an EdgeTX release yet: branch
+  [`mpm-v2-passthrough-2.12`](https://github.com/EdgeTX/edgetx/tree/mpm-v2-passthrough-2.12)
+  (EdgeTX 2.12 with the MPM v2 files and the pass-through below). Tested on
+  a TX15: see [docs/update.md](docs/update.md#tested-on-a-radio).
+- **Through the radio's USB** (the same EdgeTX branch, CLI on the radio's
+  USB serial): `uv run tools/stk500_flash.py mpm-v2.bin --port <radio port>
+  --radio --verify`, the radio passing the bytes to the external bay.
 
 ## Building
 

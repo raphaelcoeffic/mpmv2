@@ -189,10 +189,12 @@ packets 102.4 ms apart.
   EU), FlySky FS-iA6B (AFHDS2A, telemetry),
   Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto) and Lemon-RX DSMP
   (DSM telemetry); signal loss and 10 to 42 minute runs on the V8R4-II and
-  the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). Not yet: V2x2,
-  a real radio (the module bay so far through a radio simulator, see
-  [update.md](update.md#tested-over-the-module-bay)). The E01X CRC question
-  needs a model.
+  the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). On a real
+  radio (TX15, EdgeTX 2.12, 2026-10-21): MULTI frames, status, the
+  protocol scan, FlySky and AFHDS2A (FS-iA6B telemetry in EdgeTX), PPM
+  ([mpm-core.md](mpm-core.md)), updates and a watchdog reboot
+  ([update.md](update.md#tested-on-a-radio)). Not yet: V2x2. The E01X CRC
+  question needs a model.
 - **Timing.** Measured (bench `timing`, `timing.py`), against what the MPM
   protocols need ([radio-interface.md](radio-interface.md)): TX starts 124 us
   after the call (+-1 us), or at a set time; a hop takes 136 us; TX to RX 79
@@ -242,7 +244,8 @@ packets 102.4 ms apart.
    protocols).
 3. **Port the MPM core.** Done for the serial link ([mpm-core.md](mpm-core.md)):
    scheduler, protocol table, frames, status and protocol list, and the
-   MPM v2 module bay (UART1, and PPM, tested through the radio simulator).
+   MPM v2 module bay (UART1, and PPM, tested through the radio simulator
+   and on a TX15).
    Left: channel order, wait-for-bind, PPM telemetry and bind.
    Then bring protocols over one family at a time, each checked on the bench
    (`proto_capture.py` and the suites work against the CC2652 too).
@@ -264,11 +267,14 @@ packets 102.4 ms apart.
    MULTI-Module, works over USB and over the module bay (radio simulator
    on an RP2040-Zero: EdgeTX's sequence, the window with and without a
    radio, serial frames ending it, the application's frames and telemetry);
-   EdgeTX branch `mpm-v2-flash` for the MPM v2 files. Next: a real radio. See
-   [update.md](update.md).
+   EdgeTX branch `mpm-v2-flash` for the MPM v2 files (on 2.12:
+   `mpm-v2-passthrough-2.12`, with the pass-through from the radio's USB,
+   EdgeTX PR #7927). Tested on a TX15: an update from the radio, one
+   through its USB. Left: an image past 128 KB, a wrong file, a pulled
+   module. See [update.md](update.md).
    First install without a debugger: `mpm-v2-full.bin` through the ROM boot
    loader over USB-C (`tools/rom_flash.py`, README "Trying it"). Prebuilt
-   files: GitHub releases (v0.1.0, 2026-10-20).
+   files: GitHub releases (v0.1.0, 2026-10-20; v0.2.0, 2026-10-21).
 8. **Settings and calibration.** No file is part of the firmware (it runs
    with a blank flash); files customise and trace
    ([mpm-core.md](mpm-core.md#storage), `tools/mpm_fs.py` over USB-C).
