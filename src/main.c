@@ -14,7 +14,6 @@
 #include "nor_flash.h"
 #include "serial.h"
 #include "settings.h"
-#include "shell.h"
 #include "timer.h"
 #include "uart.h"
 
@@ -40,19 +39,6 @@ static void _flash_yield()
   do {
     mpm_poll();
   } while (mpm_time_left() < FLASH_SLICE_US && micros() - start < FLASH_WAIT_MAX_US);
-}
-
-static bool detect_button()
-{
-  uint32_t pin = BUTTON;
-  IOCPinTypeGpioInput(pin);
-  IOCIOPortPullSet(pin, IOC_IOPULL_UP);
-  delay_us(100);
-
-  uint32_t start = millis();
-  while ((millis() - start) < 10 && !GPIO_readDio(pin)) {}
-
-  return millis() - start >= 10 ? true : false;
 }
 
 static void leds_init()
@@ -83,12 +69,6 @@ int main(void)
 #if defined(BENCH)
   bench_loop();
 #endif
-
-  bool button_pressed = detect_button();
-  if (button_pressed) {
-    debugln("button pressed detected");
-    shell_loop();
-  }
 
   // The protocols' EEPROM (CYRF ID, RX ids) in the external flash. RAM only
   // without it

@@ -28,19 +28,3 @@ target_compile_definitions(littlefs
   INTERFACE
   LFS_NO_MALLOC
 )
-
-# ihex
-add_library(ihex INTERFACE)
-
-set(IHEX_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ihex)
-
-target_include_directories(ihex
-  INTERFACE
-  ${IHEX_DIR}
-)
-
-target_sources(ihex
-  INTERFACE
-  ${IHEX_DIR}/kk_ihex_write.c
-)
-

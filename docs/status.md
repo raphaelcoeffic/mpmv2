@@ -284,7 +284,7 @@ packets 102.4 ms apart.
      replaced over USB, bad lines listed in `ppm.err`; missing file or key:
      the build's `MPM_PPM_*`. One profile (no dial); a selection (a channel
      at power up) if someone needs it. Binding in PPM mode: autobind for now
-     (the button at power up opens the boot shell). Channel order: not
+     (the button is free: no firmware uses it). Channel order: not
      there.
    - Debug log (done, [mpm-core.md](mpm-core.md#debug-log)): the debug
      lines kept in RAM, sent on USB-C (`mpm_fs.py log`, or `debug.txt`

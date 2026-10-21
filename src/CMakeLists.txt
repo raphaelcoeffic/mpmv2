@@ -5,7 +5,6 @@ set(firmware_sources
     eeprom.c
     file_server.c
     flash_driver.c
-    ihex.c
     lfs_driver.c
     led_rgb.c
     main.c
@@ -33,7 +32,6 @@ set(firmware_sources
     radio.c
     serial.c
     settings.c
-    shell.c
     spi.c
     syscalls.c
     timer.c
@@ -118,7 +116,6 @@ target_link_libraries(firmware
     driverlib_cc13x2_cc26x2
     segger_rtt
     littlefs
-    ihex
 )
 
 if (BOOTLOADER)
