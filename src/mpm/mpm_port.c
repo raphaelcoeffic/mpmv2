@@ -176,13 +176,19 @@ static void _uart_error_bay(uart_error_t error)
 }
 
 // The UART's idle level (1) gives a released S.Port with TX1_INV clear, the
-// idle level of inverted serial (low) with it set
+// idle level of inverted serial (low) with it set. The released line reads
+// as a break to an idle low receiver: S.Port stays idle BAY_TELEM_IDLE_US
+// before the first byte, else the radio misses its start bit (the protocol
+// list's first reply, sent once, was lost so)
+#define BAY_TELEM_IDLE_US 500
 static void _bay_telem_invert(bool invert)
 {
   if (_bay_invert == invert) return;
   GPIO_writeDio(MODULE_TX_INV, invert);
   if (_bay_invert < 0) IOCPortConfigureSet(MODULE_TX, IOC_PORT_MCU_UART1_TX, IOC_STD_OUTPUT);
   _bay_invert = invert;
+  uint32_t t = micros();
+  while (micros() - t < BAY_TELEM_IDLE_US) {}
 }
 
 // From the interrupt, BAY_PPM_TIMEOUT_US after the last channel pulse

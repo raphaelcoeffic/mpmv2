@@ -51,9 +51,14 @@ on the MPM v2, the module bay: UART1 in on the PPM pin (idle high: EdgeTX's
 `ETX_Pol_Inverted`), telemetry out on S.Port through U9, idle low unless the
 frame's `telem_invert` bit is clear (EdgeTX sets it for the external bay),
 as the STM32 MULTI-Module's TX_INV. S.Port stays released until the first
-frame from the bay. Telemetry goes back on the link of the last frame.
-Tested on a TX15 (EdgeTX, 2026-10-21): frames decoded, the radio reads the
-status ("Protocol invalid" for FlySky). baysim drives the PPM pin idle low
+frame from the bay, then idle 500 us before its first byte (out of the
+released level, a break to the radio's idle low receiver, the first start
+bit was missed: the protocol list's count, sent once, never reached EdgeTX
+and its scan fell back to the built-in list). Telemetry goes back on the
+link of the last frame. Tested on a TX15 (EdgeTX, 2026-10-21): frames decoded, the radio reads the
+status ("Protocol invalid" for FlySky) and the protocol list scan (the
+drop-down shows the ported protocols; a model on a protocol not in the list
+shows its number: EdgeTX's `getProtoLabel()` after a scan). baysim drives the PPM pin idle low
 (`invert 1`), not as a radio: see
 [update.md](update.md#link-polarity).
 

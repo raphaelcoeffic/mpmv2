@@ -132,6 +132,7 @@ static uint16_t _proto_list_callback()
   if (idx >= mpm_protocol_count) {
     // 0xFF: number of protocols
     d[n++] = idx == 0xFF ? mpm_protocol_count : 0xFF;
+    debugln("protocol list: %s", idx == 0xFF ? "count" : "end");
   } else {
     const mpm_protocol_t* p = &mpm_protocols[idx];
     d[n++] = p->id;
@@ -219,6 +220,7 @@ static void _protocol_init()
   _blink_ms = ms;
 
   if (mpm.protocol == MPM_PROTO_LIST) {
+    debugln("protocol list");
     _callback = _proto_list_callback;
     _list_option = -1;
     _next_us = mpm_port_micros();
