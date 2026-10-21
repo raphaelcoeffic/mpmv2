@@ -8,6 +8,10 @@
 const mpm_protocol_t mpm_protocols[] = {
   // id, name, sub protocol names, number of sub protocols, option, failsafe, channel map, init, callback, end bind
   // (none: bind done). In protocol number order
+#ifdef FLYSKY_A7105_INO
+  {PROTO_FLYSKY, "FlySky", "\x04" "Std\0" "V9x9" "V6x6" "V912" "CX20", 5, MPM_OPTION_NONE, false, true,
+   FLYSKY_init, FLYSKY_callback, 0},
+#endif
 #ifdef FRSKYD_CC2500_INO
   {PROTO_FRSKYD, "FrSky D", "\x06" "D8\0   " "Cloned", 2, MPM_OPTION_RFTUNE, false, false, FRSKYD_init,
    FRSKYD_callback, 0},

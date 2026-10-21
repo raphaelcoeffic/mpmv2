@@ -27,6 +27,7 @@
 #define A7105_ENABLE_LOW_POWER
 #define FORCE_AFHDS2A_TUNING 0  // no channel 15 tuning (Validate.h)
 
+#define FLYSKY_A7105_INO
 #define AFHDS2A_A7105_INO
 #define AFHDS2A_FW_TELEMETRY
 

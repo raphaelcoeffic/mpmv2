@@ -30,6 +30,10 @@ uint16_t FRSKYV_callback();
 void FRSKYX_init();
 uint16_t FRSKYX_callback();
 #endif
+#ifdef FLYSKY_A7105_INO
+void FLYSKY_init();
+uint16_t FLYSKY_callback();
+#endif
 #ifdef AFHDS2A_A7105_INO
 void AFHDS2A_init();
 uint16_t AFHDS2A_callback();

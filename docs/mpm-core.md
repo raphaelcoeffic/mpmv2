@@ -105,6 +105,7 @@ functions are built as one file, as the MPM builds its `.ino` files.
 | `iface_cc2500.h`, `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
 | `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`) |
 | `iface_a7105.h`, `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
+| `FlySky_a7105.c` | FlySky (AFHDS): Std, V9x9, V6x6, V912, CX20 |
 | `AFHDS2A_a7105.c` | AFHDS2A |
 | `iface_cyrf6936.h`, `cyrf6936.c` | CYRF6936 emulation (`CYRF6936_SPI.ino`), see below |
 | `dsm_all.c` | DSM (`DSM.c`, `DSM_cyrf6936.c`; macOS file names are case insensitive: not `dsm.c`) |
@@ -208,6 +209,7 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | FrSky X (15, D16 v1) | same payloads, 9001 µs | same (random and counter bytes masked, CRC checked) |
 | FrSky X2 (64, sub 2 LBT) | same payloads, 9002 µs | same (data channel from `FrSkyX2_init_hop()`) |
 | FrSky V (25) | same payloads; timing differs, see below | same (seed and CRC masked) |
+| FlySky (1) | not yet compared (`proto_compare.py flysky`) | |
 | AFHDS2A (28) | same payloads, 7701 µs | same, 61.6 ms between visits of the channel |
 | DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
 

@@ -21,6 +21,7 @@ set(firmware_sources
     mpm/upstream/cc2500.c
     mpm/upstream/frsky.c
     mpm/upstream/a7105.c
+    mpm/upstream/FlySky_a7105.c
     mpm/upstream/AFHDS2A_a7105.c
     mpm/upstream/cyrf6936.c
     mpm/upstream/dsm_all.c

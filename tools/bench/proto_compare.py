@@ -11,6 +11,7 @@ and after; the payloads and packet intervals are compared.
   proto_compare.py bayang
   proto_compare.py bayang --secs 6 --sub 1
   proto_compare.py dsm --sub 3
+  proto_compare.py flysky --sub 1
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
@@ -168,6 +169,34 @@ def dsm_bind_ok(p: bytes) -> bool:
     return len(p) == 16 and p[8:10] == (s1 & 0xFFFF).to_bytes(2, "big") and p[14:16] == (s2 & 0xFFFF).to_bytes(2, "big")
 
 
+FLYSKY_TX_CHANNELS = [
+    (0x12, 0x34, 0x56, 0x78), (0x18, 0x27, 0x36, 0x45), (0x41, 0x82, 0x36, 0x57), (0x84, 0x13, 0x65, 0x72),
+    (0x87, 0x64, 0x15, 0x32), (0x76, 0x84, 0x13, 0x52), (0x71, 0x62, 0x84, 0x35), (0x71, 0x86, 0x43, 0x52)]
+
+
+def flysky_hop0(addr: bytes, sub: int) -> int:
+    """hopping_frequency[0] of FLYSKY_init()"""
+    a3 = addr[3] - 0x70 if (addr[3] & 0xF0) > 0x90 else addr[3]
+    row, offset = a3 & 0x0F, a3 // 16
+    hop = [0] * 16
+    for i in range(16):
+        t = FLYSKY_TX_CHANNELS[row >> 1][i >> 2]
+        t = (t & 0x0F if i & 2 else t >> 4) * 0x0A + (0x50 if i & 1 else 0)
+        if sub == 4:  # CX20
+            if t == 0x0A:
+                t += 0x37
+            if t == 0xA0:
+                t = 0x37 if offset < 4 else 0x2D if offset < 9 else 0x29
+        hop[15 - i if row & 1 else i] = t - offset
+    return hop[0]
+
+
+def flysky_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind on A7105 channel 1, data on hopping_frequency[0]"""
+    return [Capture("bind", "preset flysky;ch 1", 21, bind=True),
+            Capture("data", f"preset flysky;ch {flysky_hop0(addr, sub)}", 21)]
+
+
 def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> list[Capture]:
     """DSMX: bind on channel 13 (SDR), data on hopping_frequency[0] with its
     SOP / data codes and the CH2 CRC seed (the first packet there; it
@@ -191,7 +220,7 @@ def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> l
 
 
 # name: (protocol number, captures(addr, sub))
-CASES = {"bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
+CASES = {"flysky": (1, flysky_capture), "bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
          "frskyx2": (64, frskyx2_capture),
          "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture)}
