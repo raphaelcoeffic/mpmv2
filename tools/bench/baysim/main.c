@@ -8,15 +8,20 @@
  * line settings (baud rate, data bits, parity, stop bits) apply to the
  * UART, so radio_sim.py (100000 8E2) and stk500_flash.py (57600 8N1) run
  * unchanged. Or LINK_TX_PIN sends PPM (command ppm), from a PIO state
- * machine. Both lines are inverted in the GPIO block, as a radio's
- * external bay (invert 0: an internal module's UART).
+ * machine. Each line's polarity is set in the GPIO block (invert): as a
+ * radio's external bay, the PPM pin idles high (EdgeTX's ETX_Pol_Inverted,
+ * MULTI frames and flashing alike), S.Port idles low for the frames'
+ * telemetry (ETX_Pol_Normal) and high for the boot loader's replies when
+ * flashing (ETX_Pol_Inverted). Default: the frames' levels.
  *
  * USB port "baysim ctrl" (CDC 1): text commands, one per line, each
  * answered by "ok ..." or "err ...":
  *
  *   ping                version
  *   pwr 0|1             the module supply (high-side switch on POWER_PIN)
- *   invert 0|1          line polarity (1: idle low, a radio's bay)
+ *   invert TX [RX]      line polarities, 1: idle low. TX: the PPM pin (a
+ *                       radio: 0), RX: S.Port (MULTI telemetry: 1, the boot
+ *                       loader: 0). One value: both lines
  *   tx drive|float      PPM pin driven (a radio) or left to the module's
  *                       pull-up (no radio)
  *   level               pad levels of both lines, before the inversion
@@ -56,7 +61,7 @@
 #include "ppm.pio.h"
 #include "tusb.h"
 
-#define VERSION "baysim 2"
+#define VERSION "baysim 3"
 
 #ifndef LINK_UART
 #define LINK_UART 0
@@ -102,7 +107,8 @@ static uint32_t ev_lost;
 static uint8_t tx_buf[TX_BUF];
 static volatile uint32_t tx_head, tx_tail;
 
-static bool invert = true;
+static bool tx_invert;         // PPM pin idle low
+static bool rx_invert = true;  // S.Port idle low
 static bool trace;
 static bool tx_float;
 static bool ppm_on;              // PPM on LINK_TX_PIN instead of the UART
@@ -167,8 +173,8 @@ static void line_apply(void)
     if (ppm_on)
         gpio_set_outover(LINK_TX_PIN, ppm_negative ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
     else
-        gpio_set_outover(LINK_TX_PIN, invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
-    gpio_set_inover(LINK_RX_PIN, invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+        gpio_set_outover(LINK_TX_PIN, tx_invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
+    gpio_set_inover(LINK_RX_PIN, rx_invert ? GPIO_OVERRIDE_INVERT : GPIO_OVERRIDE_NORMAL);
     gpio_set_oeover(LINK_TX_PIN, tx_float ? GPIO_OVERRIDE_LOW : GPIO_OVERRIDE_NORMAL);
     // S.Port is pulled up on the module (R22): no pull here
     gpio_disable_pulls(LINK_RX_PIN);
@@ -492,10 +498,11 @@ static void command(char *line)
     } else if (!strcmp(argv[0], "pwr") && argc == 2) {
         power_set(atoi(argv[1]) != 0);
         ctrl_printf("ok pwr=%d t=%lu", gpio_get_out_level(POWER_PIN), (unsigned long)time_us_32());
-    } else if (!strcmp(argv[0], "invert") && argc == 2) {
-        invert = atoi(argv[1]) != 0;
+    } else if (!strcmp(argv[0], "invert") && (argc == 2 || argc == 3)) {
+        tx_invert = atoi(argv[1]) != 0;
+        rx_invert = atoi(argv[argc - 1]) != 0;
         line_apply();
-        ctrl_printf("ok invert=%d", invert);
+        ctrl_printf("ok invert=%d %d", tx_invert, rx_invert);
     } else if (!strcmp(argv[0], "tx") && argc == 2 && (!strcmp(argv[1], "drive") || !strcmp(argv[1], "float"))) {
         tx_float = !strcmp(argv[1], "float");
         line_apply();

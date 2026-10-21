@@ -5,8 +5,12 @@
 # ///
 """The module bay simulator (baysim/, an RP2040-Zero) in front of the MPM v2:
 GP12 to the bay's PPM pin, GP13 from its S.Port pin, the module supply
-through GP11. Two USB serial ports: the link (a bridge to the bay lines,
-inverted, at the host's line settings) and the control port.
+through GP11. Two USB serial ports: the link (a bridge to the bay lines, at
+a radio's levels and the host's line settings) and the control port.
+
+Levels as EdgeTX's external bay: the PPM pin idles high; S.Port idles low
+for MULTI telemetry (reboot, and radio_sim.py on the link: baysim's
+default), high for the boot loader's replies (flash, window).
 
   baysim.py pwr 0|1                 module supply
   baysim.py level                   pad levels of both lines
@@ -105,7 +109,7 @@ def cmd_flash(bay: BaySim, link: str, a):
     bay.cmd("trace 0")
     bay.cmd("ppm off")
     bay.cmd("tx drive")
-    bay.cmd("invert 1")
+    bay.cmd("invert 0 0")
     bay.cmd("pwr 0")
     time.sleep(3)
     bay.events.clear()
@@ -129,6 +133,7 @@ def cmd_flash(bay: BaySim, link: str, a):
 def cmd_window(bay: BaySim, link_port: str, a):
     link = serial.Serial(link_port, 57600, timeout=0.05)
     bay.cmd("ppm off")
+    bay.cmd("invert 0 0")
     for d in (int(x) for x in a.delays.split(",")):
         bay.cmd("pwr 0")
         bay.cmd("tx float" if a.mode == "float" else "tx drive")
@@ -172,6 +177,7 @@ def cmd_reboot(bay: BaySim, link_port: str, a):
     from radio_sim import Radio
 
     bay.cmd("ppm off")
+    bay.cmd("invert 0 1")
     with Radio(link_port) as radio:
         radio.set(protocol=a.proto, sub=a.sub, option=0)
         time.sleep(1)
