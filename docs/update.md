@@ -208,10 +208,12 @@ An internal MPM v2 has no USB, but EdgeTX gives the PC a way to it:
 So for an internal module: radio UART on DIO2 / DIO3, BOOTCMD on DIO19.
 
 An external module has its own USB-C, but the radio's USB works too with an
-EdgeTX patch (branch `mpm-v2-passthrough-2.12`, not pushed): EdgeTX 2.12 and
-main only pass through to the internal module (`// TODO: external module`
-in `cliSerialPassthrough()`). `serialpassthrough rfmod 1 <baud>` opens the
-bay as "Flash external Multi" does (TX on the PPM pin, RX on S.Port, both
+EdgeTX patch (EdgeTX PR #7927 on main, branch `cli-ext-module-passthrough`;
+the same two commits on 2.12 in `mpm-v2-passthrough-2.12`): EdgeTX 2.12 and
+main only pass through to the internal module
+(`// TODO: external module` in `cliSerialPassthrough()`).
+`serialpassthrough rfmod 1 <baud> ppm` opens the bay as "Flash external
+Multi" does (TX on the PPM pin, RX on S.Port, both
 idle high, softserial if needed), powers the bay off for 500 ms and on again
 with the ports open, and passes bytes until the radio's USB is unplugged
 (the bay powered off, the pulses back). `stk500_flash.py --radio` sends the
