@@ -45,6 +45,15 @@ add_executable(firmware
 )
 target_include_directories(firmware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Release builds are -Os; the code on the radio's time-critical paths gets
+# -O2: RF core commands and interrupts, the frame encoders and decoders
+# (CYRF6936 sync search, DSM telemetry decoded between callbacks), the
+# scheduler's alarms, and the bench's measurements (bench.c). -O3 measured
+# the same (timing.py within 1 us, DSM telemetry 45.5 frames/s) for 9 KB more
+set_source_files_properties(radio.c frame.c timer.c bench.c
+    PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
+)
+
 set(board_definitions "")
 if (USE_XOSC)
     if (BOARD_CC2652R1_LAUNCHXL)

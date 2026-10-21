@@ -69,7 +69,7 @@ they come. What the module does, its settings files (`ppm.txt`,
 ### Updates
 
 - **Over USB-C:** `uv run tools/stk500_flash.py mpm-v2.bin --verify`
-  (about 50 s; through the MPM v2 boot loader, as a radio does it), or
+  (about 30 s; through the MPM v2 boot loader, as a radio does it), or
   `rom_flash.py mpm-v2-full.bin` again (faster, the same result).
 - **From the radio** ("Flash External Multi" with `mpm-v2.bin`): needs an
   EdgeTX build with MPM v2 support, not in an EdgeTX release yet: branch
