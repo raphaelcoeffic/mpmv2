@@ -292,6 +292,16 @@ and what may go wrong:
    the radio cut the module power? If so, time from the first frame to the
    module sending RF again. Expected: the window ends on the first frame
    (8 bytes of noise), plus the application's start.
+   *Tested* (TX15, EdgeTX 2.12, 2026-10-21): a special function on a
+   switch runs `while(1){}` in the mixer task, so the frames stop and,
+   the mixer no longer resetting it, the watchdog resets the radio. The
+   module keeps sending while the frames stop (input lost only changes
+   the LED), then reboots with the radio: the bay's power is cut (its log
+   starts again). FlySky received by the 4-in-1 on one hop
+   channel: 1.45 s without packets from the reset to the first packet.
+   Application: frames detected 36 ms after its start, FlySky at 43 ms;
+   the rest is the radio's boot, the bay power-up and the boot loader
+   window, not split yet (Saleae on the bay's power and PPM pins).
 5. **PPM input** instead of serial: PPM edges must count as noise (framing
    errors). A PPM train with long gaps could end the window late only if
    it looks idle for 300 ms, which it can't.
