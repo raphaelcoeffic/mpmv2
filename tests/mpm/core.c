@@ -326,7 +326,7 @@ static void test_start_and_timing()
   const uint8_t* d = s->data;
   CHECK(d[0] == (MPM_STATUS_INPUT | MPM_STATUS_SERIAL | MPM_STATUS_PROTO_VALID |
                  MPM_STATUS_FAILSAFE | MPM_STATUS_CH_MAP));
-  CHECK(d[1] == 1 && d[2] == 3 && d[3] == 4 && d[4] == 74);
+  CHECK(d[1] == 2 && d[2] == 3 && d[3] == MPM_PORT_VERSION_MAJOR && d[4] == MPM_PORT_VERSION_MINOR);
   CHECK(d[5] == 0xE4);
   CHECK(d[6] == 20 && d[7] == 10);  // next, previous
   CHECK(memcmp(d + 8, "Test\0\0\0", 7) == 0);

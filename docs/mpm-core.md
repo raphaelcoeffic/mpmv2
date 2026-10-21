@@ -38,8 +38,11 @@ As the MPM:
   bind; cleared, the protocol's `end_bind()` is called (none: bind done).
 - **Status telemetry** (`MP` 0x01, 24 bytes) at each protocol start, then
   every 500 ms, not for protocol 0 and not with telemetry disabled. Version
-  1.3.4.74: the MPM release whose link this follows (EdgeTX warns below
-  1.3.3.0).
+  2.3.<major>.<minor> of the project version (0.1.0: V2.3.0.1): major 2 for
+  the MPM v2 port; minor 3 because EdgeTX only sends the frames' extra data
+  (FrSky D16 bind option, S.Port, DSM, config) with minor >= 3, and checks
+  the whole version against 1.3.3.0 ("module upgrade") and 1.3.3.30 (DSM
+  clone). The protocols are those of MPM v1.3.4.74.
 - **Protocol list** (protocol 0, `MP` 0x11): the entry given by the option,
   0xFF for the count, as EdgeTX scans it (`io/multi_protolist.cpp`).
 - **Module id**: the chip's IEEE 802.15.4 address (last 32 bits), plus

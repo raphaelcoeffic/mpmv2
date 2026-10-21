@@ -56,7 +56,8 @@ if (USE_XOSC)
     endif()
     list(APPEND board_definitions USE_XOSC)
 endif()
-target_compile_definitions(firmware PRIVATE ${board_definitions})
+target_compile_definitions(firmware PRIVATE ${board_definitions}
+    MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
 
 if (BOOTLOADER)
     # Boot loader in sector 0 with CCFG, application at 0x2000 (docs/update.md)

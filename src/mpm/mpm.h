@@ -9,12 +9,19 @@
 
 #include "mpm_frame.h"
 
-// Version in the status telemetry: the MPM release whose serial link and
-// telemetry this follows. EdgeTX warns below 1.3.3.0
-#define MPM_VERSION_MAJOR 1
+// Version in the status telemetry: 2.3.<port major>.<port minor> (the
+// CMake project version). Major 2: the MPM v2 port, not an upstream 1.x
+// build. Minor 3: EdgeTX sends the frames' extra data (D16 bind option,
+// S.Port, DSM, config) only with minor >= 3, warns below 1.3.3.0 and hides
+// DSM clone below 1.3.3.30
+#ifndef MPM_PORT_VERSION_MAJOR
+  #define MPM_PORT_VERSION_MAJOR 0
+  #define MPM_PORT_VERSION_MINOR 0
+#endif
+#define MPM_VERSION_MAJOR 2
 #define MPM_VERSION_MINOR 3
-#define MPM_VERSION_REVISION 4
-#define MPM_VERSION_PATCH 74
+#define MPM_VERSION_REVISION MPM_PORT_VERSION_MAJOR
+#define MPM_VERSION_PATCH MPM_PORT_VERSION_MINOR
 
 // No frame from the radio for this long: input signal lost, the protocol
 // callbacks stop
