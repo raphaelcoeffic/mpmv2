@@ -1,14 +1,15 @@
+#include "board.h"  // IWYU pragma: keep (SX1281_NSS)
+#include "sx1281.h"
+
+#if defined(SX1281_NSS)
+
 #include <stddef.h>
 
 #include <driverlib/gpio.h>
 #include <driverlib/ioc.h>
 
-#include "board.h"
 #include "spi.h"
-#include "sx1281.h"
 #include "timer.h"
-
-#if defined(SX1281_NSS)
 
 // Commands (datasheet table 12-1)
 #define CMD_GET_STATUS 0xC0

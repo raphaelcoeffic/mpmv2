@@ -1,22 +1,19 @@
-#include <driverlib/gpio.h>
-#include <driverlib/interrupt.h>
-#include <driverlib/ioc.h>
-#include <driverlib/prcm.h>
-#include <driverlib/sys_ctrl.h>
-#include <driverlib/uart.h>
-
-#include "bench.h"
+#if defined(BENCH)
+  #include "bench.h"
+#endif
 #include "board.h"
 #include "eeprom.h"
 #include "file_server.h"
 #include "file_system.h"
 #include "mpm/mpm.h"
 #include "nor_flash.h"
-#include "serial.h"
 #include "settings.h"
 #include "timer.h"
-#include "uart.h"
 
+#if defined(LED_GREEN) && defined(LED_RED)
+  #include <driverlib/gpio.h>
+  #include <driverlib/ioc.h>
+#endif
 #if defined(LED_SPI) && defined(LED_DIN)
   #include "led_rgb.h"
 #endif

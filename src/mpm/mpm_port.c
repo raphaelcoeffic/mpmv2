@@ -32,14 +32,18 @@
 #include "board.h"
 #include "eeprom.h"
 #include "file_server.h"
-#include "debug.h"
 #include "log.h"
 #include "mpm.h"
 #include "mpm_frame.h"
-#include "ppm.h"
 #include "radio.h"
 #include "timer.h"
 #include "uart.h"
+
+#if defined(MODULE_RX)
+  // The module bay: PPM detected against serial
+  #include "debug.h"
+  #include "ppm.h"
+#endif
 
 #if defined(LED_GREEN)
 #elif defined(LED_SPI) && defined(LED_DIN)

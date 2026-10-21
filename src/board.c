@@ -5,8 +5,9 @@
 
 #define POWER_DOMAINS (PRCM_DOMAIN_PERIPH | PRCM_DOMAIN_SERIAL)
 
-// Set the level before enabling the output: no glitch
-static inline void _gpio_output(uint32_t pin, uint32_t level)
+// Set the level before enabling the output: no glitch. Unused on a board
+// without any of the pins below (LaunchPad)
+__attribute__((unused)) static inline void _gpio_output(uint32_t pin, uint32_t level)
 {
   GPIO_writeDio(pin, level);
   IOCPinTypeGpioOutput(pin);
