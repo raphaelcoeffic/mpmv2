@@ -61,9 +61,9 @@ and its scan fell back to the built-in list). Telemetry goes back on the
 link of the last frame. Tested on a TX15 (EdgeTX, 2026-10-21): frames decoded, the radio reads the
 status ("Protocol invalid" for FlySky) and the protocol list scan (the
 drop-down shows the ported protocols; a model on a protocol not in the list
-shows its number: EdgeTX's `getProtoLabel()` after a scan). baysim drives the PPM pin idle low
-(`invert 1`), not as a radio: see
-[update.md](update.md#link-polarity).
+shows its number: EdgeTX's `getProtoLabel()` after a scan). baysim 3 sets
+each line's polarity as a radio does (before, it drove the PPM pin idle
+low): see [update.md](update.md#link-polarity).
 
 **PPM** (the bay only). The bay's input is detected on DIO22 with
 `ppm.c`: GPT0 A captures the falling edges (24 bits at 48 MHz), and after
@@ -85,6 +85,28 @@ other than autobind, no failsafe, no channel order in PPM mode. Tested with bays
 ([update.md](update.md#tested-over-the-module-bay)): 4 to 16 channels,
 both polarities, the widths to the microsecond over 500 reads (30 counter
 wraps), the X8R linked (TX_LQI 100), PPM to serial and back in about 1 s.
+
+On a TX15 (EdgeTX 2.12, external module PPM, 2026-10-21, J-Link reads of
+the values and the debug log): PPM detected 76 ms after the application
+starts, with either polarity ("−" idles low on the bay, "+" high; the
+falling edges give the same intervals), and kept through a polarity change
+while running. Sticks over the whole 988 to 2012 us on their channels,
+1 us of jitter at rest (100 reads); 8 to 16 channels followed one at a time,
+channel 16 following a switch; below 4 channels the input is lost, as
+expected. **Frame length:** EdgeTX sends the channels, then a 3 ms tail,
+and starts a frame every frame length (12.5 to 40 ms, whatever the channel
+count); a start during the tail cuts it short. With 8 channels at 12.5 ms
+and the sticks centred, the gap after the last channel was ~1.5 ms: no frame
+end, the input lost (detected as PPM, then "no input" every second); at
+15 ms it depends on the sticks (lost for a channel total between ~12.6 and
+15 ms); at full deflection the next start is skipped (the DMA still runs)
+and frames come every 25 ms. Safe: channels x 2.012 ms + 3 ms (19.1 ms for
+8 channels), EdgeTX's default 22.5 ms. A receiver needs a sync gap of about
+3 ms too: an EdgeTX setting problem
+([EdgeTX #7928](https://github.com/EdgeTX/edgetx/issues/7928)), not
+something a shorter end of frame could fix (a channel is up to 2.2 ms).
+With short gaps two frames can also read as one (a 16 channel frame once,
+the first 8 channels right).
 
 Not there yet: PPM telemetry and the bind button in PPM mode, channel order remapping (`disable_ch_map` is decoded only), the telemetry
 buffer level flag, wait-for-bind, the bind button, `MULTI_SYNC` (input sync
