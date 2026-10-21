@@ -14,10 +14,20 @@ padded with zeros, LEAVE_PROGMODE at the end or on error.
   stk500_flash.py --port /dev/cu.usbserial-X --no-reset --invert ...
                                                     radio bay through a USB
                                                     serial adapter
+  stk500_flash.py --port /dev/cu.usbmodemX --radio ...
+                                                    through the radio's USB
+                                                    (EdgeTX CLI, external
+                                                    module pass-through)
 
 Port: --port, else $V2_PORT, else the first CH343. The CH343 resets the
 CC2652 (DTR) with BOOT high (RTS), then the sync goes out every 10 ms: the
 boot loader listens on the console for at least 50 ms after reset.
+
+--radio: "serialpassthrough rfmod 1 57600" to the EdgeTX CLI, which stops
+the pulses, powers the bay off for 500 ms and on again with the ports open
+(EdgeTX patch, branch mpm-v2-passthrough-2.12): the sync goes out every
+10 ms for the boot loader's 300 ms window. The radio stays in pass-through
+until its USB cable is unplugged.
 """
 
 import argparse
@@ -79,6 +89,12 @@ class Stk:
         time.sleep(0.05)
         self.s.dtr = True
 
+    def passthrough(self):
+        self.s.reset_input_buffer()
+        self.s.write(b"serialpassthrough rfmod 1 57600\n")
+        time.sleep(0.2)
+        print(self.s.read(self.s.in_waiting).decode(errors="replace").strip())
+
     def sync(self, period: float, timeout: float) -> bool:
         self.s.reset_input_buffer()
         end = time.time() + timeout
@@ -134,6 +150,7 @@ def main():
     ap.add_argument("file", help="mpm-v2.bin (image + MULTI signature)")
     ap.add_argument("--port")
     ap.add_argument("--no-reset", action="store_true", help="don't reset through DTR, sync for 5 s as EdgeTX")
+    ap.add_argument("--radio", action="store_true", help="EdgeTX CLI on --port: pass-through to the external bay")
     ap.add_argument("--invert", action="store_true", help="inverted serial (radio bay through a plain adapter)")
     ap.add_argument("--no-check", action="store_true", help="skip the file signature check")
     ap.add_argument("--verify", action="store_true", help="read each page back after writing it")
@@ -144,7 +161,10 @@ def main():
         print(f"signature {check_signature(data)}")
 
     stk = Stk(a.port or find_port(), a.invert)
-    if a.no_reset:
+    if a.radio:
+        stk.passthrough()
+        ok = stk.sync(0.01, 2)
+    elif a.no_reset:
         ok = stk.sync(0.1, 5)
     else:
         stk.reset()

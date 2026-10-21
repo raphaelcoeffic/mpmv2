@@ -6,10 +6,10 @@ and EdgeTX writes it through the module bay, no USB and no tools.
 
 Status: the boot loader (`src/bootloader/`, `-DBOOTLOADER=ON`) works over
 USB with a host tool that does what EdgeTX does; the EdgeTX side is on
-branch `mpm-v2-flash` (not pushed). Not yet tried from a radio: the module
-bay's levels are now those of a TX15 running MULTI frames (2026-10-21, see
-[Link polarity](#link-polarity)), the update itself is untested, see
-[To test with a radio](#to-test-with-a-radio).
+branch `mpm-v2-flash` (not pushed; `mpm-v2-flash-2.12` on EdgeTX 2.12).
+From a radio: one update on a TX15 over the external bay (2026-10-21, see
+[Tested on a radio](#tested-on-a-radio)); the rest of
+[To test with a radio](#to-test-with-a-radio) is still open.
 
 ## What EdgeTX does today
 
@@ -207,6 +207,16 @@ An internal MPM v2 has no USB, but EdgeTX gives the PC a way to it:
 
 So for an internal module: radio UART on DIO2 / DIO3, BOOTCMD on DIO19.
 
+An external module has its own USB-C, but the radio's USB works too with an
+EdgeTX patch (branch `mpm-v2-passthrough-2.12`, not pushed): EdgeTX 2.12 and
+main only pass through to the internal module (`// TODO: external module`
+in `cliSerialPassthrough()`). `serialpassthrough rfmod 1 <baud>` opens the
+bay as "Flash external Multi" does (TX on the PPM pin, RX on S.Port, both
+idle high, softserial if needed), powers the bay off for 500 ms and on again
+with the ports open, and passes bytes until the radio's USB is unplugged
+(the bay powered off, the pulses back). `stk500_flash.py --radio` sends the
+command and syncs every 10 ms: the boot loader answers in its 300 ms window.
+
 ## Tools
 
 ```sh
@@ -227,7 +237,9 @@ file system; then `stk500_flash.py --verify` over it, 48 s.
 `stk500_flash.py` resets the CC2652 through the CH343 DTR (BOOT high) and
 syncs every 10 ms, within the 20 ms console window. With `--no-reset` it
 syncs for 5 s like EdgeTX; `--invert` drives the radio bay through a plain
-USB serial adapter (TX to the PPM pin, RX from S.Port).
+USB serial adapter (TX to the PPM pin, RX from S.Port); `--radio` goes
+through a radio's USB serial (EdgeTX CLI, see
+[Internal modules](#internal-modules) for the external bay).
 
 ## Not chosen
 
@@ -297,8 +309,12 @@ and what may go wrong:
 external bay: GP12 to the PPM pin (bay pin 1), GP13 from S.Port (pin 5),
 GP11 a high-side switch on the module supply (pin 3, as the radios'
 `modulePortSetPower()`), USB-C of the MPM v2 unplugged (it would power the
-module through D2). Two USB serial ports: a bridge to the bay lines, both
-inverted in the GPIO block, at the host's line settings (so
+module through D2). Two USB serial ports: a bridge to the bay lines, each
+line's polarity set in the GPIO block as a radio's (`invert TX RX`): the
+PPM pin idle high, S.Port idle low for MULTI telemetry (the default) and
+high for the boot loader's replies (`baysim.py flash` and `window`; until
+baysim 3, 2026-10-21, both lines idled low, see
+[Link polarity](#link-polarity)), at the host's line settings (so
 `stk500_flash.py` and `radio_sim.py` run through it unchanged), and a
 control port: power, polarity, the PPM line driven or left floating (no
 radio), PPM instead of serial (a PIO state machine, 1 us steps), pad
@@ -308,6 +324,27 @@ times. `tools/bench/baysim.py` runs the tests below.
 Both lines are safe for the RP2040's 3.3 V: the radio only pulls the PPM
 pin low (D3, R14 to 3.3 V on the module side) and the module only pulls
 S.Port low (D4, R22 to 3.3 V).
+
+## Tested on a radio
+
+TX15, EdgeTX 2.12 with the `mpm-v2-flash` patch (branch `mpm-v2-flash-2.12`),
+the MPM v2 in its external bay (2026-10-21): "Flash external Multi" with
+`mpm-v2.bin` from the SD card's `FIRMWARE` folder, over an application
+flashed before with the J-Link (4 bytes longer, so that the result tells
+the two apart): flashed successfully. Read back over the J-Link: the
+application area is `firmware.bin` byte for byte except `checked`, cleared
+by the boot loader after the CRC; the old image's last bytes overwritten by
+EdgeTX's 24 byte MULTI signature (it writes the whole file, past the
+image's length: harmless). The new application then runs (serial at 37 ms,
+EdgeTX's protocol scan, FlySky). Points 1 and 6 for a 126 KB image; not
+yet: an image past 128 KB, a wrong file, a pulled module.
+
+Through the radio's USB (EdgeTX 2.12 with the pass-through patch, branch
+`mpm-v2-passthrough-2.12`, CLI on the USB serial):
+`stk500_flash.py build-mpm/mpm-v2.bin --port /dev/cu.usbmodem... --radio
+--verify` synced in the first power-up window, 504 pages written and read
+back in 61 s. After unplugging the radio's USB the application ran (FlySky
+on all 16 hops, received by the 4-in-1).
 
 ## Tested over the module bay
 
