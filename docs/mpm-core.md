@@ -212,9 +212,19 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | FrSky X (15, D16 v1) | same payloads, 9001 µs | same (random and counter bytes masked, CRC checked) |
 | FrSky X2 (64, sub 2 LBT) | same payloads, 9002 µs | same (data channel from `FrSkyX2_init_hop()`) |
 | FrSky V (25) | same payloads; timing differs, see below | same (seed and CRC masked) |
-| FlySky (1) | not yet compared (`proto_compare.py flysky`) | |
+| FlySky (1) | not yet compared (`proto_compare.py flysky`) | real A7105, see below |
 | AFHDS2A (28) | same payloads, 7701 µs | same, 61.6 ms between visits of the channel |
 | DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
+
+FlySky, not yet against the MPM's own FlySky: the MPM v2 in a TX15's bay
+(EdgeTX 2.12) received by the 4-in-1's A7105 (bench, 1 m) on each of its 16
+hop channels, 1 s each: 30 to 44 packets with a good CRC (0 to 4 bad), the
+module id, the radio's channels, one packet every 24.2 ms on a channel (16 x
+1.51 ms). The FlySky table only transmits: as a receiver its MODE_CTRL
+(0x01) 0x42 leaves AIF (bit 5) clear, the A7105 then listens an IF (500 kHz)
+off and the packets show up 600 kHz below; with `w 0x01 62` (as AFHDS2A)
+from -300 to +100 kHz, as AFHDS2A's (`suite_a7105.py` receives with the
+AFHDS2A table for this reason).
 
 DSM: the bench `cyrfid` command gives the MPM the port's CYRF ID (RAM
 only), the codes of the capture channel come from `DSM.c`. The SDR bind
