@@ -209,15 +209,18 @@ So for an internal module: radio UART on DIO2 / DIO3, BOOTCMD on DIO19.
 
 An external module has its own USB-C, but the radio's USB works too with an
 EdgeTX patch (EdgeTX PR #7927 on main, branch `cli-ext-module-passthrough`;
-the same two commits on 2.12 in `mpm-v2-passthrough-2.12`): EdgeTX 2.12 and
+the same commits on 2.12 in `mpm-v2-passthrough-2.12`): EdgeTX 2.12 and
 main only pass through to the internal module
 (`// TODO: external module` in `cliSerialPassthrough()`).
 `serialpassthrough rfmod 1 <baud> ppm` opens the bay as "Flash external
 Multi" does (TX on the PPM pin, RX on S.Port, both
 idle high, softserial if needed), powers the bay off for 500 ms and on again
-with the ports open, and passes bytes until the radio's USB is unplugged
-(the bay powered off, the pulses back). `stk500_flash.py --radio` sends the
-command and syncs every 10 ms: the boot loader answers in its 300 ms window.
+with the ports open, and passes bytes until the radio's USB is unplugged,
+the host sends a break, or, with `hangup` as the last argument, the host
+closes the port (DTR drop); then the bay is powered off and the pulses come
+back. `stk500_flash.py --radio` sends the command with `hangup` and syncs
+every 10 ms: the boot loader answers in its 300 ms window, and the
+pass-through ends when the script exits.
 
 ## Tools
 

@@ -23,11 +23,11 @@ Port: --port, else $V2_PORT, else the first CH343. The CH343 resets the
 CC2652 (DTR) with BOOT high (RTS), then the sync goes out every 10 ms: the
 boot loader listens on the console for at least 50 ms after reset.
 
---radio: "serialpassthrough rfmod 1 57600 ppm" to the EdgeTX CLI, which stops
+--radio: "serialpassthrough rfmod 1 57600 ppm hangup" to the EdgeTX CLI, which stops
 the pulses, powers the bay off for 500 ms and on again with the ports open
 (EdgeTX PR #7927, the ppm mode): the sync goes out every
-10 ms for the boot loader's 300 ms window. The radio stays in pass-through
-until its USB cable is unplugged.
+10 ms for the boot loader's 300 ms window. The pass-through ends when this
+script exits and closes the port (hangup: DTR drops).
 """
 
 import argparse
@@ -91,7 +91,7 @@ class Stk:
 
     def passthrough(self):
         self.s.reset_input_buffer()
-        self.s.write(b"serialpassthrough rfmod 1 57600 ppm\n")
+        self.s.write(b"serialpassthrough rfmod 1 57600 ppm hangup\n")
         time.sleep(0.2)
         print(self.s.read(self.s.in_waiting).decode(errors="replace").strip())
 
