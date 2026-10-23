@@ -12,6 +12,8 @@ receiver on the bench: I/Q bursts of up to 16380 samples (about 1 ms at
   sdr.py survey                     unknown transmitter: sweep 2400 to 2484 MHz and
                                     report channels, bit rate, sync word, payload
   sdr.py survey 2411 --n 200 -v     one window (2405 to 2417 MHz), each packet
+  sdr.py v2x2 2440 --secs 60        V2x2 packets in one window: whole payload,
+                                    CRC, decoded fields, then the bytes that moved
 
 Measured on the bench (ESP32-S3, esp-sdr f86da81): the spectrum is inverted
 (demod() conjugates), FREQ takes whole MHz, so tune 1 MHz off the signal to
@@ -249,7 +251,7 @@ def rate_class(x: np.ndarray) -> tuple[float, float] | None:
     return next((sps, c) for sps, c in res if c >= 0.8 * best)
 
 
-def analyze(x: np.ndarray) -> dict:
+def analyze(x: np.ndarray, dump: int = DUMP) -> dict:
     """One burst: carrier offset, bit rate, deviation, bits, sync word."""
     xc = np.conj(x)
     f0 = centre(fm(xc))
@@ -276,7 +278,7 @@ def analyze(x: np.ndarray) -> dict:
         sb = sig_bits(hexs, pre, lsb)
         i, inv = find_bits(bits, sb)
         if i is not None:
-            body = (1 - bits if inv else bits)[i + len(sb):i + len(sb) + 8 * DUMP]
+            body = (1 - bits if inv else bits)[i + len(sb):i + len(sb) + 8 * dump]
             r["kind"], r["dump"] = name, pack(body, lsb)
             if hexs == "710f55" and len(body) >= 40:
                 r["dump"] += f"  addr {xn297_addr(r['dump'])}"
@@ -383,6 +385,62 @@ def survey(sdr: Sdr, centres: list[int], n: int, verbose: bool):
             print(f"    {k:4}x {d}")
 
 
+V2X2_ADDR = bytes.fromhex("6868688866")  # 66 88 68 68 68 as sent, last byte first
+
+
+def crc16_nrf(data: bytes) -> int:
+    """nRF24L01 2 byte CRC (CCITT, init 0xffff) over the address and the payload."""
+    crc = 0xFFFF
+    for b in data:
+        crc ^= b << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021 if crc & 0x8000 else crc << 1) & 0xFFFF
+    return crc
+
+
+def v2x2_fields(p: bytes) -> str:
+    """V2X2_send_packet(): throttle, rudder, elevator, aileron (sign + magnitude
+    for the last 3), 3 trims, TX id, flags2, flags, checksum."""
+    s8 = lambda b: -(b & 0x7F) if b & 0x80 else b
+    ok = "ok" if sum(p[:15]) & 0xFF == p[15] else "BAD"
+    return (f"T {p[0]:3} R {s8(p[1]):+4} E {s8(p[2]):+4} A {s8(p[3]):+4}  trim {p[4]:02x} {p[5]:02x} {p[6]:02x}"
+            f"  id {p[7:10].hex()}  f2 {p[10]:02x} {p[11:14].hex()}  flags {p[14]:02x}  sum {ok}")
+
+
+def v2x2(sdr: Sdr, centre: int, secs: float):
+    """V2x2 packets in one window until secs or Ctrl-C: one line per CRC checked
+    packet, then the range of each payload byte."""
+    sdr.cmd("BANDWIDTH 13")
+    sdr.cmd(f"FREQ {centre}")
+    t_start, floor, seen, bad = time.time(), np.inf, [], 0
+    try:
+        while time.time() - t_start < secs:
+            time.sleep(random.uniform(0, 0.003))
+            iq = sdr.cap()
+            iq = iq - iq.mean()
+            floor = min(floor, float(np.percentile(np.abs(iq), 10)))
+            for b0, b1 in bursts(iq, max(5 * floor, 8), int(SURVEY_MIN_US * 1e-6 * FS)):
+                r = analyze(iq[b0:b1], dump=18)
+                if not r.get("kind", "").startswith("nRF24 address 6688686868") or not RING[0] <= abs(r["f0"]) <= RING[1]:
+                    continue
+                d = bytes.fromhex(r["dump"])
+                if len(d) < 18 or crc16_nrf(V2X2_ADDR + d[:16]) != int.from_bytes(d[16:18], "big"):
+                    bad += 1
+                    continue
+                seen.append(d[:16])
+                print(f"{time.time() - t_start:6.1f} s {centre + r['f0'] / 1e6:8.2f} MHz  {d[:16].hex(' ')}"
+                      f"  {v2x2_fields(d[:16])}", flush=True)
+    except KeyboardInterrupt:
+        pass
+    print(f"\n{len(seen)} packets with a good CRC, {bad} cut or bad")
+    if seen:
+        a = np.frombuffer(b"".join(seen), np.uint8).reshape(-1, 16)
+        print("byte  min max  values")
+        for i in range(16):
+            v = sorted(set(a[:, i].tolist()))
+            print(f"  {i:2}   {v[0]:02x}  {v[-1]:02x}  {len(v)}" + (f"  ({' '.join(f'{x:02x}' for x in v)})" if len(v) <= 8 else ""))
+
+
 def multiple(kind: str, kinds: Counter, recs: list[dict]) -> str:
     """Unknown packets at a multiple of the rate of more common ones: often
     the same signal (a slow one with few transitions in the capture)."""
@@ -415,12 +473,13 @@ def channels(mhz: list[float], gap: float = 0.25) -> list[tuple[float, int]]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("what", choices=("info", "cap", "survey"))
+    ap.add_argument("what", choices=("info", "cap", "survey", "v2x2"))
     ap.add_argument("freq", nargs="*", type=int, help="MHz: cap (default 2442), survey window centres "
                     "(default 2401 to 2481 every 5 MHz, each covers 0.8 to 6 MHz on both sides)")
     ap.add_argument("--gain", default="40", help="manual gain index, or 'auto' (hardware AGC)")
     ap.add_argument("--n", type=int, default=20, help="survey: captures per window")
     ap.add_argument("-v", action="store_true", help="survey: each packet")
+    ap.add_argument("--secs", type=float, default=60, help="v2x2: capture time")
     a = ap.parse_args()
     with Sdr() as sdr:
         if a.what == "info":
@@ -428,6 +487,12 @@ def main():
                 print(f"{c:11} {sdr.cmd(c)}")
             return 0
         sdr.cmd("GAIN HARDWARE" if a.gain == "auto" else f"GAIN MANUAL {a.gain}")
+        if a.what == "v2x2":
+            try:
+                v2x2(sdr, a.freq[0] if a.freq else 2440, a.secs)
+            finally:
+                sdr.cmd("BANDWIDTH 0")
+            return 0
         if a.what == "survey":
             try:
                 survey(sdr, a.freq or list(range(2401, 2482, 5)), a.n, a.v)

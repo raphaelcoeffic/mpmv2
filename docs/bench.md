@@ -193,10 +193,21 @@ before the preamble). Its bind packets (ID 7f 08 c8, flags c0, CRC checked)
 hop on the 16 channels of the ID 0 table (row 0, increment 0), where the MPM
 binds on its own ID's table.
 
+`sdr.py v2x2` stays on one window and prints each V2x2 packet whole (16
+bytes, the nRF24 CRC checked, fields as `V2X2_send_packet()` fills them),
+then the values each byte took: about one packet a second. The car's
+transmitter sends throttle in byte 2 (the MPM's elevator, 7f forward, ff
+reverse), steering in byte 1 (rudder, ff left, 7f right), the steering and
+throttle trims in bytes 4 and 5 (40 at centre), 00 in bytes 0, 6 and the
+flags. The 4-in-1 (V2x2, RX number 0: bind channels 3 MHz from the car
+transmitter's) binds the car without its bind button and drives it; the car
+keeps the bind across a power cycle and stops at once on signal loss.
+
 ```sh
 tools/bench/sdr.py info
 tools/bench/sdr.py survey                    whole band, 20 captures per window
 tools/bench/sdr.py survey 2411 --n 200 -v    one window, each packet
+tools/bench/sdr.py v2x2 2440 --secs 60       V2x2 packets, whole, then the bytes that moved
 CC_PORT=v2 tools/bench/sdr_compare.py flysky
 CC_PORT=v2 tools/bench/sdr_compare.py joysway --bits 48 64
 CC_PORT=v2 tools/bench/sdr_compare.py nrf2m --ch 40
