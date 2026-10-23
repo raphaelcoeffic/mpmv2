@@ -314,9 +314,10 @@ for 32 bytes at 250 kbps (500 us: 24% retransmissions).
 | Enhanced mode, unscrambled, 1 Mbps and 250 kbps | 100% (MPM branch `xn297-enhanced-xorout`) | 100% |
 
 XN297 needs no prefix (3 byte preamble). The unscrambled enhanced mode CRC
-xorout table (`xn297_crc_xorout_enhanced`, from the XN297 dump) is applied
-only by `XN297_ReadEnhancedPayload()` in debug builds of the MPM: the branch
-`xn297-enhanced-xorout` applies it on TX and RX in all builds. No MPM protocol
+xorout (a table from the XN297 dump until upstream #1199, computed since, as in
+`src/frame.c`) is applied only by `XN297_ReadEnhancedPayload()` in XN297Dump
+builds of the MPM: the branch `xn297-enhanced-xorout` applies it on TX and RX
+in all builds. No MPM protocol
 uses this mode, and it is checked against the CC2652 only, not against a real
 XN297.
 

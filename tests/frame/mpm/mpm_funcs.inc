@@ -1,5 +1,5 @@
-// From the DIY-Multiprotocol-TX-Module XN297_EMU.ino (GPL v3 or later), kept
-// as close to the original as possible to test frame.c against it
+// From the DIY-Multiprotocol-TX-Module XN297_EMU.ino (GPL v3 or later, master d3293af),
+// kept as close to the original as possible to test frame.c against it
 
 static void __attribute__((unused)) XN297_WritePayload(uint8_t* msg, uint8_t len)
 {
@@ -37,10 +37,7 @@ static void __attribute__((unused)) XN297_WritePayload(uint8_t* msg, uint8_t len
 		crc = 0xb5d2;
 		for (uint8_t i = offset; i < last; ++i)
 			crc16_update( buf[i], 8);
-		if(xn297_scramble_enabled)
-			crc ^= pgm_read_word(&xn297_crc_xorout_scrambled[xn297_addr_len - 3 + len]);
-		else
-			crc ^= pgm_read_word(&xn297_crc_xorout[xn297_addr_len - 3 + len]);
+		crc ^= XN297_crc_xorout(xn297_scramble_enabled, 8 * (xn297_addr_len + len));
 		buf[last++] = crc >> 8;
 		buf[last++] = crc & 0xff;
 	}
@@ -48,6 +45,7 @@ static void __attribute__((unused)) XN297_WritePayload(uint8_t* msg, uint8_t len
 	// send packet
 	XN297_SendPayload(buf, last);
 }
+
 static void __attribute__((unused)) XN297_WriteEnhancedPayload(uint8_t* msg, uint8_t len, uint8_t noack)
 {
 	uint8_t buf[32];
@@ -106,9 +104,9 @@ static void __attribute__((unused)) XN297_WriteEnhancedPayload(uint8_t* msg, uin
 			crc16_update( buf[i], 8);
 		crc16_update( buf[last] & 0xc0, 2);
 		if (xn297_scramble_enabled)
-			crc ^= pgm_read_word(&xn297_crc_xorout_scrambled_enhanced[xn297_addr_len-3+len]);
+			crc ^= XN297_crc_xorout(true, 8 * (xn297_addr_len + len) + 10);
 		//else
-		//	crc ^= pgm_read_word(&xn297_crc_xorout_enhanced[xn297_addr_len - 3 + len]);
+		//	crc ^= XN297_crc_xorout(false, 8 * (xn297_addr_len + len) + 10);
 
 		buf[last++] |= (crc >> 8) >> 2;
 		buf[last++] = ((crc >> 8) << 6) | ((crc & 0xff) >> 2);
@@ -120,6 +118,7 @@ static void __attribute__((unused)) XN297_WriteEnhancedPayload(uint8_t* msg, uin
 	// send packet
 	XN297_SendPayload(buf, last);
 }
+
 static bool __attribute__((unused)) XN297_ReadPayload(uint8_t* msg, uint8_t len)
 { //!!! Don't forget if using CRC to do a +2 on the received packet length (NRF24L01_11_RX_PW_Px !!! or CC2500_06_PKTLEN)
 	uint8_t buf[32];
@@ -148,15 +147,13 @@ static bool __attribute__((unused)) XN297_ReadPayload(uint8_t* msg, uint8_t len)
 	for (uint8_t i = 0; i < len; ++i)
 		crc16_update( buf[i], 8);
 	//xorout
-	if(xn297_scramble_enabled)
-		crc ^= pgm_read_word(&xn297_crc_xorout_scrambled[xn297_addr_len - 3 + len]);
-	else
-		crc ^= pgm_read_word(&xn297_crc_xorout[xn297_addr_len - 3 + len]);
+	crc ^= XN297_crc_xorout(xn297_scramble_enabled, 8 * (xn297_addr_len + len));
 	//test
 	if( (crc >> 8) == buf[len] && (crc & 0xff) == buf[len+1])
 		return true;	// CRC  OK
 	return false;		// CRC NOK
 }
+
 static uint8_t __attribute__((unused)) XN297_ReadEnhancedPayload(uint8_t* msg, uint8_t len)
 { //!!! Don't forget do a +2 and if using CRC add +4 on any of the used NRF24L01_11_RX_PW_Px !!!
 	uint8_t buffer[32];
@@ -193,10 +190,10 @@ static uint8_t __attribute__((unused)) XN297_ReadEnhancedPayload(uint8_t* msg, u
 	crc16_update( buffer[pcf_size+1] & 0xc0, 2);
 	//xorout
 	if (xn297_scramble_enabled)
-		crc ^= pgm_read_word(&xn297_crc_xorout_scrambled_enhanced[xn297_addr_len-3+pcf_size]);
+		crc ^= XN297_crc_xorout(true, 8 * (xn297_addr_len + pcf_size) + 10);
 #ifdef XN297DUMP_NRF24L01_INO
 	else
-		crc ^= pgm_read_word(&xn297_crc_xorout_enhanced[xn297_addr_len - 3 + pcf_size]);
+		crc ^= XN297_crc_xorout(false, 8 * (xn297_addr_len + pcf_size) + 10);
 #endif
 	uint16_t crcxored=(buffer[pcf_size+1]<<10)|(buffer[pcf_size+2]<<2)|(buffer[pcf_size+3]>>6) ;
 	if( crc == crcxored)
