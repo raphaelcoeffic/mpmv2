@@ -691,7 +691,7 @@ CC2500, MPM v2 -> MPM below 100% at full power at first: Redpine 80%, Hitec
   the 256 byte USB buffer when the host is slow to fetch it; the chips, armed
   for one packet ("rx 0" on the CC2500), miss everything sent meanwhile. The
   same 23 ms stalls took CYRF6936 packets in pairs (Kyosho3 at a 10 ms
-  period). Fixed in `mpm-bench` (7be801b, output through a RAM ring): the
+  period). Fixed in `mpm-bench` (2590841, output through a RAM ring): the
   worst read is then 400 us late, and all 18 CC2500 setups get 100% at full
   power but Corona V2. Hitec and Ares, which had looked like overload (100% at
   -5 dBm, worse at +20 and -21 dBm), were these stalls too.
@@ -701,7 +701,7 @@ CC2500, MPM v2 -> MPM below 100% at full power at first: Redpine 80%, Hitec
   run, each 3 bytes short (last payload byte and status missing).
   `bench_receive()` reads `RXBYTES` before checking `MARCSTATE`: when the
   packet ends between the two reads, the MPM takes the radio as idle with the
-  old byte count and flushes the rest. Fixed in `mpm-bench` (941479a, reads
+  old byte count and flushes the rest. Fixed in `mpm-bench` (a212e9a, reads
   `MARCSTATE` first): `frskyxeu` rev 200/200, other=0, in 3 runs out of 3
   (`CC_INIT="pwr 0x12d6"`).
 
