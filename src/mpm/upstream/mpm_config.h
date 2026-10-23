@@ -8,10 +8,12 @@
 #define SPORT_TELEMETRY
 #define FAILSAFE_ENABLE
 
-// NRF24L01 / XN297 family: XN297 emulation on the CC2652 (xn297.c)
+// NRF24L01 / XN297 family: NRF24L01 and XN297 emulations on the CC2652
+// (nrf24l01.c, xn297.c)
 #define NRF24L01_INSTALLED
 
 #define BAYANG_NRF24L01_INO
+#define V2X2_NRF24L01_INO
 #define BAYANG_HUB_TELEMETRY
 
 // CC2500 family: CC2500 emulation on the CC2652 (cc2500.c)

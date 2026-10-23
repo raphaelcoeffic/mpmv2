@@ -12,6 +12,7 @@ and after; the payloads and packet intervals are compared.
   proto_compare.py bayang --secs 6 --sub 1
   proto_compare.py dsm --sub 3
   proto_compare.py flysky --sub 1
+  proto_compare.py v2x2
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
@@ -197,6 +198,27 @@ def flysky_capture(addr: bytes, sub: int) -> list[Capture]:
             Capture("data", f"preset flysky;ch {flysky_hop0(addr, sub)}", 21)]
 
 
+V2X2_FREQ = [  # freq_hopping[][] of V2X2_nrf24l01.ino
+    [0x27, 0x1B, 0x39, 0x28, 0x24, 0x22, 0x2E, 0x36, 0x19, 0x21, 0x29, 0x14, 0x1E, 0x12, 0x2D, 0x18],
+    [0x2E, 0x33, 0x25, 0x38, 0x19, 0x12, 0x18, 0x16, 0x2A, 0x1C, 0x1F, 0x37, 0x2F, 0x23, 0x34, 0x10],
+    [0x11, 0x1A, 0x35, 0x24, 0x28, 0x18, 0x25, 0x2A, 0x32, 0x2C, 0x14, 0x27, 0x36, 0x34, 0x1C, 0x17],
+    [0x22, 0x27, 0x17, 0x39, 0x34, 0x28, 0x2B, 0x1D, 0x18, 0x2A, 0x21, 0x38, 0x10, 0x26, 0x20, 0x1F]]
+
+
+def v2x2_hop0(addr: bytes) -> int:
+    """hopping_frequency[0] of V2X2_set_tx_id(): row = sum of addr[1..3] & 3,
+    increment its bits 2 to 4, channels divisible by 16 lowered by 3"""
+    s = sum(addr[1:4]) & 0xFF
+    v = V2X2_FREQ[s & 3][0] + ((s & 0x1E) >> 2)
+    return v if v & 0x0F else v - 3
+
+
+def v2x2_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind (flags c0, 4 s) and data on hopping_frequency[0], address 66 88 68 68 68"""
+    nrf = f"preset nrf1m;nrf 6688686868 2;ch {v2x2_hop0(addr)}"
+    return [Capture("bind", nrf, 16, bind=True), Capture("data", nrf, 16)]
+
+
 def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> list[Capture]:
     """DSMX: bind on channel 13 (SDR), data on hopping_frequency[0] with its
     SOP / data codes and the CH2 CRC seed (the first packet there; it
@@ -223,7 +245,7 @@ def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> l
 CASES = {"flysky": (1, flysky_capture), "bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
          "frskyx2": (64, frskyx2_capture),
-         "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture)}
+         "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture), "v2x2": (5, v2x2_capture)}
 
 
 def masked(p: str, mask: tuple) -> str:

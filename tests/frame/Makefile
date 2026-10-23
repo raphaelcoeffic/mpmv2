@@ -5,7 +5,7 @@ CC ?= cc
 CFLAGS ?= -O1 -Wall -Wno-unused-function
 SRC := ../../src
 BUILD := build
-TESTS := xn297_mpm sync_prefix esb_capture cc2500 hott a7105 cyrf_dsm cyrf_dsm_bind \
+TESTS := xn297_mpm sync_prefix esb_capture nrf_v2x2 cc2500 hott a7105 cyrf_dsm cyrf_dsm_bind \
          cyrf_devo cyrf_kyosho3 hs6200_rf2500 frskyl var_len
 
 all: $(TESTS:%=$(BUILD)/%)

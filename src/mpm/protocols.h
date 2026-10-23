@@ -14,6 +14,10 @@ void end_bind_counter();
 void BAYANG_init();
 uint16_t BAYANG_callback();
 #endif
+#ifdef V2X2_NRF24L01_INO
+void V2X2_init();
+uint16_t V2X2_callback();
+#endif
 #ifdef DSM_CYRF6936_INO
 void DSM_init();
 uint16_t DSM_callback();

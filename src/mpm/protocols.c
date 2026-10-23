@@ -16,6 +16,10 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_FRSKYD, "FrSky D", "\x06" "D8\0   " "Cloned", 2, MPM_OPTION_RFTUNE, false, false, FRSKYD_init,
    FRSKYD_callback, 0},
 #endif
+#ifdef V2X2_NRF24L01_INO
+  {PROTO_V2X2, "V2x2", "\x06" "Std\0  " "JXD506" "MR101\0", 3, MPM_OPTION_NONE, false, false, V2X2_init,
+   V2X2_callback, end_bind_counter},
+#endif
 #ifdef DSM_CYRF6936_INO
   {PROTO_DSM, "DSM", "\x04" "2 1F" "2 2F" "X 1F" "X 2F" "Auto" "R 1F" "2SFC", 7, MPM_OPTION_MAXTHR,
    false, true, DSM_init, DSM_callback, 0},
