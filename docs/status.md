@@ -187,13 +187,13 @@ packets 102.4 ms apart.
   bind and drive the owned receivers as the 4-in-1 does: FrSky V8R4-II
   (V8 and D8) and X8R (X2 LBT; with UNI-RX firmware X and X2, FCC and
   EU), FlySky FS-iA6B (AFHDS2A, telemetry),
-  Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto) and Lemon-RX DSMP
-  (DSM telemetry); signal loss and 10 to 42 minute runs on the V8R4-II and
+  Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto), Lemon-RX DSMP
+  (DSM telemetry) and a WLtoys K989 car (V2x2); signal loss and 10 to 42 minute runs on the V8R4-II and
   the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). On a real
   radio (TX15, EdgeTX 2.12, 2026-10-21): MULTI frames, status, the
   protocol scan, FlySky and AFHDS2A (FS-iA6B telemetry in EdgeTX), PPM
   ([mpm-core.md](mpm-core.md)), updates and a watchdog reboot
-  ([update.md](update.md#tested-on-a-radio)). Not yet: V2x2. The E01X CRC
+  ([update.md](update.md#tested-on-a-radio)). Not yet: V2x2 from a radio. The E01X CRC
   question needs a model.
 - **Timing.** Measured (bench `timing`, `timing.py`), against what the MPM
   protocols need ([radio-interface.md](radio-interface.md)): TX starts 124 us
