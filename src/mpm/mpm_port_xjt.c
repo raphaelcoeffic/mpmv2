@@ -9,7 +9,8 @@
 // driven: idle low (the UART's idle high, inverted by the buffer: the S.Port
 // EdgeTX reads, ETX_Pol_Normal) unless the frame's telemetry invert bit is
 // clear (EdgeTX: an internal module), as the STM32 MULTI-Module switches its
-// TX_INV. No PPM input, no USB, no external flash: the EEPROM is RAM only.
+// TX_INV. No PPM input, no USB, no external flash: the EEPROM is the
+// board's I2C chip (eeprom_xjt.c).
 #include "mpm_port.h"
 
 #include <driverlib/gpio.h>
@@ -21,6 +22,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "eeprom.h"
 #include "mpm.h"
 #include "mpm_frame.h"
 #include "radio.h"
@@ -135,4 +137,8 @@ void mpm_port_reset_rf() { radio_off(); }
 // The chip's IEEE 802.15.4 address: its last 32 bits
 uint32_t mpm_port_module_id() { return HWREG(FCFG1_BASE + FCFG1_O_MAC_15_4_0); }
 
-void mpm_port_idle() {}
+// The EEPROM to its chip as soon as a protocol writes it (bind)
+void mpm_port_idle()
+{
+  if (eeprom_dirty()) eeprom_flush();
+}

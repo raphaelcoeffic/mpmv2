@@ -126,7 +126,8 @@
   // DIO_11  -> red LED, DIO_13 -> green LED (1 = on). DIO_12: driven
   //            with them by the stock app, no visible LED
   //
-  // ST M95160-W SPI EEPROM: pins not mapped yet
+  // DIO_9  <-> I2C EEPROM SDA, DIO_10 -> SCL (open drain, board pull-ups):
+  //            256 bytes (M24C02 type) at 0x51
   //
   #define MODULE_RX     IOID_26
   #define SPORT_TX      IOID_29
@@ -140,6 +141,10 @@
   #define LED_RED       IOID_11
   #define LED_GREEN     IOID_13
   #define LED_UNKNOWN   IOID_12
+  //
+  #define EEPROM_SDA    IOID_9
+  #define EEPROM_SCL    IOID_10
+  #define EEPROM_I2C_ADDR 0x51
   //
   // RF core TX power word (CC2650 table), out of the antenna port through
   // the PA (FrSky's table): 0x0CC7 9 dBm, 0x0CC9 12, 0x0CCB 14, 0x144B 15,

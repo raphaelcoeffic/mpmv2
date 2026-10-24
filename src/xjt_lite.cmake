@@ -46,17 +46,20 @@ add_xjt_application(xjtl-test xjtl_test.c board.c timer.c)
 # Radio bring-up: a shell on the bay link driving the RF core
 add_xjt_application(xjtl-radio xjtl_radio.c board.c timer.c radio.c syscalls.c)
 
+# EEPROM pin probe
+add_xjt_application(xjtl-eeprom xjtl_eeprom.c mpm/eeprom_xjt.c board.c log.c timer.c syscalls.c)
+
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h)
 add_xjt_application(firmware
     main_xjt.c
     board.c
-    eeprom.c
     frame.c
     log.c
     radio.c
     syscalls.c
     timer.c
     uart.c
+    mpm/eeprom_xjt.c
     mpm/mpm.c
     mpm/mpm_frame.c
     mpm/mpm_port_xjt.c
@@ -74,7 +77,6 @@ add_xjt_application(firmware
 )
 target_compile_definitions(firmware_elf PRIVATE
     MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
-target_link_libraries(firmware_elf littlefs)
 set_source_files_properties(radio.c frame.c timer.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )
