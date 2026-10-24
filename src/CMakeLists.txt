@@ -54,12 +54,11 @@ set_source_files_properties(radio.c frame.c timer.c bench.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )
 
-set(board_definitions "")
-if (BOARD_CC2652R1_LAUNCHXL)
+set(board_definitions BOARD_${BOARD})
+if (BOARD STREQUAL "CC2652R1_LAUNCHXL")
     message("## Target is CC2652R1-LAUNCHXL: 48 MHz xtal")
-    list(APPEND board_definitions BOARD_CC2652R1_LAUNCHXL)
-else()
-    message("## Target is CC2652RB: HPOSC (BAW)")
+elseif (BOARD STREQUAL "MPM_V2")
+    message("## Target is MPM v2 (CC2652RB): HPOSC (BAW)")
     list(APPEND board_definitions MCU_CC2652RB)
 endif()
 target_compile_definitions(firmware PRIVATE ${board_definitions}

@@ -28,7 +28,7 @@
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
   //
-#else
+#elif defined(BOARD_MPM_V2)
   // *****************
   // * MPM v2 pinout *
   // *****************
@@ -101,6 +101,8 @@
   #define BL_RADIO_TX       MODULE_TX
   #define BL_RADIO_INVERTED 0
   //
+#else
+  #error "No board: BOARD_<name> from CMake's BOARD"
 #endif
 
 void board_init();

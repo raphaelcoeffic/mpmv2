@@ -75,14 +75,14 @@ To go back to normal operation, flash a normal firmware.
 ### CC2652
 
 ```sh
-cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build-bench -G Ninja -DBOARD=CC2652R1_LAUNCHXL -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
 ninja -C build-bench
 openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
 ```
 
 ### MPM v2
 
-The same bench firmware runs on the MPM v2 board (no `BOARD_CC2652R1_LAUNCHXL`).
+The same bench firmware runs on the MPM v2 board (`BOARD=MPM_V2`, the default).
 Its RGB LED shows the RF activity: orange on TX, green on RX, red on a bad CRC,
 dim blue when idle (LaunchPad: red on TX, green on RX, both on a bad CRC).
 The console is the USB-C port (CH343, UART0 at 921600 baud), flashing goes

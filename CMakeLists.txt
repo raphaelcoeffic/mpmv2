@@ -13,10 +13,14 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
-option(BOARD_CC2652R1_LAUNCHXL
-  "Target board is CC2652R1-LAUNCHXL (otherwise MPM w/ CC2652RB is assumed)"
-  OFF
-)
+# Target board: BOARD_<name> for the sources
+set(BOARDS MPM_V2 CC2652R1_LAUNCHXL)
+list(JOIN BOARDS ", " boards_text)
+set(BOARD MPM_V2 CACHE STRING "Target board (${boards_text})")
+set_property(CACHE BOARD PROPERTY STRINGS ${BOARDS})
+if (NOT BOARD IN_LIST BOARDS)
+  message(FATAL_ERROR "BOARD=${BOARD}: one of ${boards_text}")
+endif()
 
 option(DEBUG "Enable debug output (Segger RTT)" OFF)
 option(USE_CCFG "Include MCU user configuration (CCFG)" ON)

@@ -539,7 +539,7 @@ On the LaunchPad (firmware built without `BENCH`), `tools/bench/radio_sim.py`
 plays the radio over the XDS110 back channel:
 
 ```sh
-cmake -S . -B build -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON
+cmake -S . -B build -G Ninja -DBOARD=CC2652R1_LAUNCHXL
 ninja -C build
 openocd -f board/ti_cc26x2_launchpad.cfg -c "program build/firmware.elf verify reset exit"
 tools/bench/radio_sim.py status        # status frames, every 500 ms

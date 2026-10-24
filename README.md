@@ -111,7 +111,7 @@ Radio bench builds (`src/bench.c` command shell instead of the MPM, see
 cmake -S . -B build-v2 -G Ninja -DBENCH=ON
 ninja -C build-v2 flash
 # LaunchPad: UART0 at 921600 baud
-cmake -S . -B build-bench -G Ninja -DBOARD_CC2652R1_LAUNCHXL=ON -DBENCH=ON
+cmake -S . -B build-bench -G Ninja -DBOARD=CC2652R1_LAUNCHXL -DBENCH=ON
 ninja -C build-bench
 openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
 ```
@@ -123,7 +123,7 @@ Options (`-D<option>=ON|OFF`; the build type is Release unless
 |--------|-------------|---------|
 | `BOOTLOADER` | Boot loader at 0x0 (update from the radio), application at 0x2000 (see [docs/update.md](docs/update.md)). | OFF |
 | `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see [docs/bench.md](docs/bench.md)). | OFF |
-| `BOARD_CC2652R1_LAUNCHXL` | Target the CC2652R1 LaunchPad. If OFF, the MPM v2 board (CC2652RB). | OFF |
+| `BOARD` | Target board: `MPM_V2` (CC2652RB) or `CC2652R1_LAUNCHXL` (the LaunchPad). | `MPM_V2` |
 | `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
 | `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |
