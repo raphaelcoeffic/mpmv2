@@ -375,6 +375,8 @@ the first start, then cleared), the application area `firmware.bin` but for
 the CRC word, the MULTI signature after it; the application running (PC in
 flash), not in the ROM boot's `wfi` as with the system reset of the earlier
 boot loader. EdgeTX then shows the module's status and protocol list.
+Then the `v0.3.0` file the same way (`mpm-v2.bin`, CRC 53b21452): EdgeTX
+shows V2.3.0.3; header CRC 53b21452, `checked` 0, the application running.
 (An openocd `verify_image` on the running board loads its checksum code
 into SRAM and leaves the CPU there: a reset over the J-Link after it.)
 
