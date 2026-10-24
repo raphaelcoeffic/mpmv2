@@ -21,7 +21,7 @@ void delay_us(uint32_t us);
 #define us2ticks(us) (us * 48)
 
 // Comparison macros
-#define _timer_diff(t1, t2) ((int32_t)(t1 - t2))
+#define _timer_diff(t1, t2) ((int32_t)((t1) - (t2)))
 #define _timer_before(t1, t2) (_timer_diff(t1, t2) < 0)
 #define _timer_after(t1, t2) (_timer_diff(t1, t2) >= 0)
 
