@@ -8,7 +8,8 @@ Status: the boot loader (`src/bootloader/`, always built, both applications
 run behind it) works over
 USB with a host tool that does what EdgeTX does; the EdgeTX side is on
 branch `mpm-v2-flash` (not pushed; `mpm-v2-flash-2.12` on EdgeTX 2.12).
-From a radio: one update on a TX15 over the external bay (2026-10-21, see
+From a radio: one update on a TX15 over the external bay (2026-10-21), one
+on a GX15 with the boot loader without system reset (2026-10-24, see
 [Tested on a radio](#tested-on-a-radio)); the rest of
 [To test with a radio](#to-test-with-a-radio) is still open.
 
@@ -364,6 +365,18 @@ EdgeTX's 24 byte MULTI signature (it writes the whole file, past the
 image's length: harmless). The new application then runs (serial at 37 ms,
 EdgeTX's protocol scan, FlySky). Points 1 and 6 for a 126 KB image; not
 yet: an image past 128 KB, a wrong file, a pulled module.
+
+GX15, EdgeTX with the `mpm-v2-flash` patch, the MPM v2 in its external bay
+with the J-Link attached (2026-10-24, `7f133c2`: the boot loader without
+system reset, image header from the linker): "Flash external Multi" with
+`mpm-v2.bin` (85020 bytes) over the bench application. Read back over the
+J-Link: header length 84996, CRC 708a96fd, `checked` 0 (the CRC checked at
+the first start, then cleared), the application area `firmware.bin` but for
+the CRC word, the MULTI signature after it; the application running (PC in
+flash), not in the ROM boot's `wfi` as with the system reset of the earlier
+boot loader. Not looked at: the radio side of the link after the update.
+(An openocd `verify_image` on the running board loads its checksum code
+into SRAM and leaves the CPU there: a reset over the J-Link after it.)
 
 Through the radio's USB (EdgeTX 2.12 with the pass-through patch, branch
 `mpm-v2-passthrough-2.12`, CLI on the USB serial):
