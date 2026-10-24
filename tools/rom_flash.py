@@ -234,7 +234,7 @@ def main():
               file=sys.stderr)
         bl.cmd(RESET)
         bl.leave()
-        print("reset: the MPM v2 boot loader checks the application and starts it", file=sys.stderr)
+        print("reset: the MPM v2 boot loader starts the application", file=sys.stderr)
     except BlError as e:
         sys.exit(f"rom_flash: {e}")
     finally:

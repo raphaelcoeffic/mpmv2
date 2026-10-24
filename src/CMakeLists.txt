@@ -95,11 +95,17 @@ add_custom_command(
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+# The file for the radio needs the image CRC: tools/fw_image.py
+find_package(Python3 COMPONENTS Interpreter)
+if (NOT Python3_Interpreter_FOUND)
+    message("## No Python 3: no files for the radio (mpm-v2.bin)")
+endif()
+
 # An application behind the boot loader. Target <name>: in the build
-# directory, <name>.elf, <name>.bin with the image header (length, CRC) the
-# boot loader checks, <file>.bin for the radio (MULTI signature appended),
-# <file>-full.bin / .hex the whole flash for a first install (boot loader,
-# CCFG, application), all made again when the boot loader changes.
+# directory, <name>.elf, <name>.bin with the image header from app.ld (no
+# CRC, already checked), <file>-full.bin / .hex the whole flash for a first
+# install (boot loader, CCFG, application), made again when the boot loader
+# changes, and with Python <file>.bin for the radio (CRC, MULTI signature).
 # flash-<name>: boot loader and application through the board's debug probe.
 function(add_application name file)
     set(elf ${name}_elf)
@@ -122,17 +128,33 @@ function(add_application name file)
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
-    set(images ${name}.bin ${file}.bin ${file}-full.bin ${file}-full.hex)
+    # The whole flash: the application added to the boot loader at 0x2000
+    set(app_section
+        --add-section .app=${name}.bin
+        --set-section-flags .app=alloc,load,readonly,contents
+        --change-section-address .app=0x2000)
+    set(images ${name}.bin ${file}-full.bin ${file}-full.hex)
     list(TRANSFORM images PREPEND ${CMAKE_BINARY_DIR}/)
     add_custom_command(
         OUTPUT ${images}
         COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
-        COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
-                --version ${PROJECT_VERSION} --out ${file}.bin
-                --full bootloader.bin ${file}-full
-        DEPENDS ${elf} bootloader ${CMAKE_SOURCE_DIR}/tools/fw_image.py
+        COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill 0xff ${app_section}
+                bootloader.elf ${file}-full.bin
+        COMMAND ${CMAKE_OBJCOPY} -O ihex ${app_section}
+                bootloader.elf ${file}-full.hex
+        DEPENDS ${elf} bootloader
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
+    if (Python3_Interpreter_FOUND)
+        add_custom_command(
+            OUTPUT ${CMAKE_BINARY_DIR}/${file}.bin
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
+                    --version ${PROJECT_VERSION} --out ${file}.bin
+            DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin ${CMAKE_SOURCE_DIR}/tools/fw_image.py
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+        list(APPEND images ${CMAKE_BINARY_DIR}/${file}.bin)
+    endif()
     add_custom_target(${name} ALL DEPENDS ${images})
 
     if (BOARD STREQUAL "CC2652R1_LAUNCHXL")

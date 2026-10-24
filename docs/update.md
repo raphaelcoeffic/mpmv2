@@ -92,10 +92,15 @@ backdoor on DIO19, so USB recovery through the ROM boot loader always works.
 
 **Image header.** The reserved vector table entries 7 to 10 (0x201C) hold
 magic `MPV2`, length, CRC32 (zlib, header read as zeros) and a `checked`
-word. `tools/fw_image.py` fills them in after `objcopy` (`firmware.bin`, the
-file the J-Link flashes) and writes `mpm-v2.bin`, the file for the radio:
-the image followed by the MULTI signature `multi-x00000983-<version>`
-(board type 3, boot loader support and check, MULTI telemetry).
+word. The linker writes magic and length (`src/linker/app.ld`, through the
+startup vector table), no CRC and `checked` already 0: `firmware.bin` (the
+file the J-Link flashes) and `mpm-v2-full.bin` / `.hex` (objcopy: the
+application added to `bootloader.elf` at 0x2000) start without a CRC check.
+Python only makes the file for the radio, `tools/fw_image.py`:
+`mpm-v2.bin`, the image with its CRC and `checked` 0xFFFFFFFF, followed by
+the MULTI signature `multi-x00000983-<version>` (board type 3, boot loader
+support and check, MULTI telemetry). Without Python 3 the build leaves it
+out.
 
 **Size.** `STK_LOAD_ADDRESS` carries a 16 bit word address: 128 KB, a limit
 of STK500v1 itself (made for AVRs; avrdude reaches the ATmega2560's 256 KB

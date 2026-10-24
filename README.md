@@ -85,7 +85,8 @@ they come. What the module does, its settings files (`ppm.txt`,
 Prerequisites: the [Arm GNU
 Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 (`arm-none-eabi-gcc` in `PATH`, 14.2 used), CMake 3.21 or later, Ninja,
-Python 3.
+and Python 3 for the files for the radio (`mpm-v2.bin`: the image CRC; left
+out without it).
 
 One build directory per board, with the boot loader and two applications
 behind it (at 0x2000, see [docs/update.md](docs/update.md)):
@@ -100,7 +101,7 @@ ninja -C build flash-bench        # J-Link on J10: boot loader and radio bench
 | Target | Files (in the build directory) |
 |---|---|
 | `bootloader` | `bootloader.elf`, `bootloader.bin` |
-| `firmware` | the MULTI-Module core: `firmware.elf`, `firmware.bin` (with the image header), `mpm-v2.bin` (for the radio), `mpm-v2-full.bin` / `.hex` (the whole flash) |
+| `firmware` | the MULTI-Module core: `firmware.elf`, `firmware.bin` (with the image header), `mpm-v2-full.bin` / `.hex` (the whole flash), `mpm-v2.bin` (for the radio, needs Python) |
 | `bench` | the radio bench (`src/bench.c` command shell instead of the MPM, see [docs/bench.md](docs/bench.md)): `bench.elf`, `bench.bin`, `mpm-v2-bench.bin`, `mpm-v2-bench-full.bin` / `.hex` |
 | `flash-firmware`, `flash-bench` | boot loader and application through the board's probe: J-Link on the MPM v2, XDS110 (OpenOCD) on the LaunchPad |
 
