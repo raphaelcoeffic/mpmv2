@@ -20,7 +20,6 @@ option(BOARD_CC2652R1_LAUNCHXL
 
 option(DEBUG "Enable debug output (Segger RTT)" OFF)
 option(USE_CCFG "Include MCU user configuration (CCFG)" ON)
-option(USE_XOSC "Use external oscillator (or HPOSC on CC2652RB)" ON)
 option(BENCH "Radio bench mode: test shell on UART0 instead of the MPM" OFF)
 option(BOOTLOADER "Boot loader at 0x0 (update from the radio), application at 0x2000" OFF)
 

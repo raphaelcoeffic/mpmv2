@@ -51,12 +51,10 @@ void board_init()
 {
   CPUcpsid();
 
-#if defined(USE_XOSC)
-  // Turn XOSC ON
+  // XOSC_HF (48 MHz xtal or HPOSC) for the RF core
   OSCHF_TurnOnXosc();
   while (!OSCHF_AttemptToSwitchToXosc()) {
   }
-#endif
 
   // Power ON periph and serial
   PRCMPowerDomainOn(POWER_DOMAINS);

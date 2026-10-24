@@ -2,6 +2,8 @@
 #if defined(MCU_CC2652RB)
   // HF source is HPOSC (BAW) (only valid for CC2652RB)
   #define SET_CCFG_MODE_CONF_XOSC_FREQ 0x1
+  // No 32 kHz xtal on the MPM v2: LF RCOSC
+  #define SET_CCFG_MODE_CONF_SCLK_LF_OPTION 0x3
 #else
   // HF source is a 48 MHz xtal
   #define SET_CCFG_MODE_CONF_XOSC_FREQ 0x2

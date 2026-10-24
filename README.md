@@ -126,5 +126,4 @@ Options (`-D<option>=ON|OFF`; the build type is Release unless
 | `BOARD_CC2652R1_LAUNCHXL` | Target the CC2652R1 LaunchPad. If OFF, the MPM v2 board (CC2652RB). | OFF |
 | `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
-| `USE_XOSC` | External crystal (HPOSC on the CC2652RB). | ON |
 | `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |
