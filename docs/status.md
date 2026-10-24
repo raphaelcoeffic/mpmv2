@@ -188,7 +188,7 @@ packets 102.4 ms apart.
   (V8 and D8) and X8R (X2 LBT; with UNI-RX firmware X and X2, FCC and
   EU), FlySky FS-iA6B (AFHDS2A, telemetry),
   Spektrum AR610C (DSM2 and DSMX, 22 and 11 ms, Auto), Lemon-RX DSMP
-  (DSM telemetry) and a WLtoys K989 car (V2x2); signal loss and 10 to 42 minute runs on the V8R4-II and
+  (DSM telemetry) a WLtoys K989 car (V2x2) and a WLtoys 284131 car (XK Cars, on the MPM v2); signal loss and 10 to 42 minute runs on the V8R4-II and
   the AR610C, see [mpm-core.md](mpm-core.md#real-receivers). On a real
   radio (TX15, EdgeTX 2.12, 2026-10-21): MULTI frames, status, the
   protocol scan, FlySky and AFHDS2A (FS-iA6B telemetry in EdgeTX), PPM
