@@ -374,7 +374,7 @@ J-Link: header length 84996, CRC 708a96fd, `checked` 0 (the CRC checked at
 the first start, then cleared), the application area `firmware.bin` but for
 the CRC word, the MULTI signature after it; the application running (PC in
 flash), not in the ROM boot's `wfi` as with the system reset of the earlier
-boot loader. Not looked at: the radio side of the link after the update.
+boot loader. EdgeTX then shows the module's status and protocol list.
 (An openocd `verify_image` on the running board loads its checksum code
 into SRAM and leaves the CPU there: a reset over the J-Link after it.)
 
