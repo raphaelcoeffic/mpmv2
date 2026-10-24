@@ -238,6 +238,9 @@ static uint8_t _hs6200_scr(const frame_t* f, uint8_t idx)
   return f->type == FRAME_HS6200 && f->scramble ? _hs6200_scramble[idx] : 0;
 }
 
+// CYRF6936 frame, if supported: the CYRF6936 code is left out otherwise
+static inline bool _is_cyrf(const frame_t* f) { return FRAME_CYRF_SUPPORT && f->type == FRAME_CYRF; }
+
 // CYRF6936 data symbol length: TX_CFG.DATA_CODE_LENGTH
 static uint8_t _cyrf_n(const frame_t* f) { return f->data32 ? 32 : 64; }
 
@@ -386,7 +389,7 @@ static uint8_t _a7105_air_len(const frame_t* f, uint8_t n)
 static uint16_t _frame_len(const frame_t* f, uint8_t len)
 {
   if (f->type == FRAME_A7105) return f->hdr_len + _a7105_air_len(f, len + f->crc_len);
-  if (f->type == FRAME_CYRF) return f->hdr_len + _cyrf_air_len(f, f->var_len + len + f->crc_len);
+  if (_is_cyrf(f)) return f->hdr_len + _cyrf_air_len(f, f->var_len + len + f->crc_len);
   if (f->type == FRAME_CC2500 && f->fec) return f->hdr_len + 2 * _fec_data_len(len + f->crc_len);
   if (f->type == FRAME_XN297 && f->enhanced)
     return f->hdr_len + len + (f->crc_len ? 4 : 2);  // 10 bit pcf, CRC shifted by 2 bits
@@ -404,7 +407,7 @@ bool frame_len_ok(const frame_t* f, uint8_t len)
   if (f->type == FRAME_CC2500 && f->fec)
     return _fec_data_len(len + f->crc_len) <= FRAME_FEC_DATA_MAX;
   if (f->type == FRAME_A7105) return _frame_len(f, len) <= FRAME_BUF_LEN - FRAME_PREFIX_MAX;
-  if (f->type == FRAME_CYRF) return _frame_len(f, len) <= FRAME_AIR_MAX;
+  if (_is_cyrf(f)) return _frame_len(f, len) <= FRAME_AIR_MAX;
   if (f->type == FRAME_HS6200)
     return len <= (f->scramble ? sizeof(_hs6200_scramble) : FRAME_NRF_PAYLOAD_MAX);
   if (f->type == FRAME_RF2500) return !f->scramble || len == 16 || len == 19;
@@ -741,7 +744,7 @@ static uint16_t _encode(const frame_t* f, const uint8_t* payload, uint8_t len, u
     case FRAME_A7105:
       return _encode_a7105(f, payload, len, buf);
     case FRAME_CYRF:
-      return _encode_cyrf(f, payload, len, buf);
+      return FRAME_CYRF_SUPPORT ? _encode_cyrf(f, payload, len, buf) : 0;
     case FRAME_HS6200:
       return _encode_esb(f, payload, len, buf);
     case FRAME_RF2500:
@@ -1145,6 +1148,7 @@ bool frame_init(frame_t* f)
 
     case FRAME_CYRF: {
       // 8DR needs the SOP code, SDR 64 chip codes (as the MULTI-Module protocols)
+      if (!FRAME_CYRF_SUPPORT) return false;
       if ((f->crc_len && f->crc_len != 2) || (f->var_len && f->prefix_len) ||
           (!f->sop && !f->sdr) || (f->sdr && f->data32))
         return false;
@@ -1208,7 +1212,7 @@ bool frame_init(frame_t* f)
     uint8_t buf[FRAME_AIR_MAX];
     _encode(f, f->prefix, f->prefix_len, buf);
     uint16_t known = f->prefix_len;
-    if (f->type == FRAME_CYRF) known = (CYRF_GAP_CHIPS + _cyrf_chips(f, f->prefix_len)) / 8;
+    if (_is_cyrf(f)) known = (CYRF_GAP_CHIPS + _cyrf_chips(f, f->prefix_len)) / 8;
     if (f->type == FRAME_FRSKYL) known = f->prefix_len * FRSKYL_CHIPS;
     if (n + known > sizeof(f->known)) known = sizeof(f->known) - n;
     memcpy(f->known + n, buf + n, known);
@@ -1217,7 +1221,7 @@ bool frame_init(frame_t* f)
   f->known_len = n;
   _choose_rx_sync(f);
   f->rx_sync_alt = 0;
-  if (f->type == FRAME_CYRF && !f->sop && !f->prefix_len) {
+  if (_is_cyrf(f) && !f->sop && !f->prefix_len) {
     // Only the repeated preamble is known: the CC2652 misses most packets with
     // a sync word on it (measured). Sync on the preamble end, the gap and the
     // first chips of the first data bit instead: one sync word per bit value.
@@ -1239,7 +1243,7 @@ bool frame_init(frame_t* f)
 
 bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt)
 {
-  if (f->type != FRAME_CYRF || f->sdr || !f->sop || f->prefix_len) return false;
+  if (!_is_cyrf(f) || f->sdr || !f->sop || f->prefix_len) return false;
   *alt = *f;
   alt->data32 = !f->data32;
   if (!frame_init(alt)) return false;
@@ -1309,7 +1313,7 @@ uint16_t frame_rx_len(const frame_t* f, uint8_t len)
 // symbol)
 static uint8_t _len_field_end(const frame_t* f)
 {
-  if (f->type == FRAME_CYRF)
+  if (_is_cyrf(f))
     return f->var_len && !f->sdr && f->sop ? (8 * f->hdr_len + CYRF_GAP_CHIPS + _cyrf_n(f) + 7) / 8 : 0;
   if ((f->type == FRAME_NRF && f->esb && f->dpl) || f->type == FRAME_HS6200 ||
       (f->type == FRAME_XN297 && f->enhanced))
@@ -1321,7 +1325,7 @@ static uint8_t _len_field_end(const frame_t* f)
 // Payload size from the length field of a frame
 static uint16_t _var_size(const frame_t* f, const uint8_t* buf)
 {
-  if (f->type == FRAME_CYRF) {
+  if (_is_cyrf(f)) {
     uint16_t pos = 8 * f->hdr_len + CYRF_GAP_CHIPS;
     return _cyrf_decode_byte(f, buf, &pos);
   }
@@ -1367,7 +1371,7 @@ uint16_t frame_rx_var_len(const frame_t* f, uint8_t len, const uint8_t* data, ui
 uint8_t frame_cyrf_rx_count(const frame_t* f, const uint8_t* data, uint16_t rx_len,
                             uint8_t threshold, uint8_t eop)
 {
-  if (f->type != FRAME_CYRF) return 0;
+  if (!_is_cyrf(f)) return 0;
   uint8_t buf[FRAME_AIR_MAX];
   uint16_t avail = f->rx_start + rx_len;
   if (avail > sizeof(buf)) avail = sizeof(buf);
@@ -1413,7 +1417,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
     else res = _decode_esb(f, buf, avail, len, payload, payload_len, pcf);
   } else if (f->type == FRAME_CC2500) {
     res = _decode_cc2500(f, buf, avail, len, payload, payload_len);
-  } else if (f->type == FRAME_CYRF) {
+  } else if (_is_cyrf(f)) {
     // Synced with either polarity of the first data bit: the known chips must
     // match the received ones
     uint16_t sym = 8 * f->hdr_len + CYRF_GAP_CHIPS;
@@ -1438,7 +1442,7 @@ static frame_result_t _decode_at(const frame_t* f, uint8_t start, const uint8_t*
   }
 
   // The received known bytes must be right too (CYRF6936: decoded instead)
-  if (res == FRAME_OK && f->type != FRAME_CYRF && start < f->known_len &&
+  if (res == FRAME_OK && !_is_cyrf(f) && start < f->known_len &&
       memcmp(buf + start, f->known + start, f->known_len - start))
     res = FRAME_BAD;
   return res;

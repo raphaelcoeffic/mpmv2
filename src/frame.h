@@ -21,10 +21,13 @@
 #define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
 #define FRAME_FEC_DATA_MAX 64     // CC2500 FEC: payload + CRC + padding, 2 air bytes each
 #define FRAME_HDR_MAX 66  // FrSky L: 6 header bytes, 11 chips per bit
-// Longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR. CC26x0: no CYRF6936
+// Longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR. CC26x0 (20 KB of
+// RAM): no CYRF6936 frames (FRAME_CYRF), their symbol tables take 2 KB
 #if defined(MCU_CC26X0)
+#define FRAME_CYRF_SUPPORT 0
 #define FRAME_AIR_MAX 255
 #else
+#define FRAME_CYRF_SUPPORT 1
 #define FRAME_AIR_MAX 1100
 #endif
 
