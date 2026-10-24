@@ -19,6 +19,7 @@ set(firmware_sources
     mpm/upstream/Bayang_nrf24l01.c
     mpm/upstream/nrf24l01.c
     mpm/upstream/V2X2_nrf24l01.c
+    mpm/upstream/XK_ccnrf.c
     mpm/upstream/cc2500.c
     mpm/upstream/frsky.c
     mpm/upstream/a7105.c

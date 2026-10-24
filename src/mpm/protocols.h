@@ -18,6 +18,10 @@ uint16_t BAYANG_callback();
 void V2X2_init();
 uint16_t V2X2_callback();
 #endif
+#ifdef XK_CCNRF_INO
+void XK_init();
+uint16_t XK_callback();
+#endif
 #ifdef DSM_CYRF6936_INO
 void DSM_init();
 uint16_t DSM_callback();

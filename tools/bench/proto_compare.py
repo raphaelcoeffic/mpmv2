@@ -13,6 +13,7 @@ and after; the payloads and packet intervals are compared.
   proto_compare.py dsm --sub 3
   proto_compare.py flysky --sub 1
   proto_compare.py v2x2
+  proto_compare.py xk --sub 2
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
@@ -219,6 +220,31 @@ def v2x2_capture(addr: bytes, sub: int) -> list[Capture]:
     return [Capture("bind", nrf, 16, bind=True), Capture("data", nrf, 16)]
 
 
+XK_TX_ADDR = bytes([  # XK_tx_addr[] of XK_ccnrf.ino
+    0xB3, 0x67, 0xE9, 0x98, 0x3A, 0xEC, 0xA6, 0x59, 0xB2, 0x94, 0x2B, 0xA5, 0x37, 0xC5, 0x4A, 0xD3,
+    0x49, 0xA6, 0x83, 0xEB, 0x4B, 0xC9, 0x59, 0xD2, 0x65, 0x34, 0x6A, 0xD3, 0x2C, 0x96, 0x2A, 0xA9,
+    0x32, 0xB2, 0xB4, 0x49, 0xD3, 0x37, 0xE9])
+XK_HOP = bytes([  # XK_hop[]
+    0x47, 0x3A, 0x4C, 0x39, 0x4D, 0x34, 0x4A, 0x3F, 0x45, 0x3E, 0x4B, 0x3D, 0x3B, 0x48, 0x40, 0x49,
+    0x46, 0x3C, 0x43, 0x38, 0x35, 0x42, 0x33, 0x44, 0x4E, 0x37, 0x44, 0x35, 0x37, 0x4E, 0x36, 0x41])
+
+
+def xk_ok(p: bytes) -> bool:
+    return len(p) == 16 and sum(p[:15]) & 0xFF == p[15]
+
+
+def xk_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind (address 68 94 a6 d5 c3, XK_bind_hop[0], flag c0) and data on
+    hopping_frequency[8], both from XK_initialize_txid(): sum of addr[1..3]
+    picks the 4 data channels and the address. X450 is 250 kbps"""
+    s = sum(addr[1:4]) & 0xFF
+    start = (s & 0x1F) + ((s >> 5) & 3)
+    xn = f"xn 1 1 {int(sub == 0)}"
+    return [Capture("bind", f"{xn};xaddr 6894a6d5c3;ch 7", 16, bind=True, valid=xk_ok),
+            Capture("data", f"{xn};xaddr {XK_TX_ADDR[start:start + 5].hex()};ch {XK_HOP[(s & 7) << 2]}", 16,
+                    valid=xk_ok)]
+
+
 def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> list[Capture]:
     """DSMX: bind on channel 13 (SDR), data on hopping_frequency[0] with its
     SOP / data codes and the CH2 CRC seed (the first packet there; it
@@ -245,7 +271,8 @@ def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> l
 CASES = {"flysky": (1, flysky_capture), "bayang": (14, bayang_capture), "frskyd": (3, frskyd_capture),
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
          "frskyx2": (64, frskyx2_capture),
-         "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture), "v2x2": (5, v2x2_capture)}
+         "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture), "v2x2": (5, v2x2_capture),
+         "xk": (62, xk_capture)}
 
 
 def masked(p: str, mask: tuple) -> str:

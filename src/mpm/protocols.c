@@ -39,9 +39,16 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_AFHDS2A, "FlSky2A", "\x08" "PWM,IBUS" "PPM,IBUS" "PWM,SBUS" "PPM,SBUS" "Gyro_Off" "Gyro_On\0" "G_On_Rev", 7,
    MPM_OPTION_SRVFREQ, true, true, AFHDS2A_init, AFHDS2A_callback, 0},
 #endif
+#ifdef XK_CCNRF_INO
+  {PROTO_XK, "XK", "\x05" "X450\0" "X420\0" "Cars\0", 3, MPM_OPTION_RFTUNE, false, false, XK_init, XK_callback,
+   end_bind_counter},
+#endif
 #ifdef FRSKYX_CC2500_INO
   {PROTO_FRSKYX2, "FrSkyX2", STR_SUBTYPE_FRSKYX, 6, MPM_OPTION_RFTUNE, true, false, FRSKYX_init,
    FRSKYX_callback, 0},
+#endif
+#ifdef XK_CCNRF_INO
+  {PROTO_MOFLY, "MoFly", 0, 0, MPM_OPTION_RFTUNE, false, false, XK_init, XK_callback, end_bind_counter},
 #endif
   {PROTO_TEST, "Test", "\x04" "1M  250k", 2, MPM_OPTION_RFCHAN, false, false, TEST_init, TEST_callback, 0},
 };

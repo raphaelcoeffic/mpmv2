@@ -14,6 +14,7 @@
 
 #define BAYANG_NRF24L01_INO
 #define V2X2_NRF24L01_INO
+#define XK_CCNRF_INO
 #define BAYANG_HUB_TELEMETRY
 
 // CC2500 family: CC2500 emulation on the CC2652 (cc2500.c)

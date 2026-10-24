@@ -129,6 +129,7 @@ functions are built as one file, as the MPM builds its `.ino` files.
 | `Bayang_nrf24l01.c` | Bayang |
 | `iface_nrf24l01.h`, `nrf24l01.c` | NRF24L01 emulation (`NRF24l01_SPI.ino`): the registers become `frame.c`'s NRF framing (ShockBurst, or Enhanced ShockBurst with EN_AA / DYNPD) and the RF core PHY (1 Mbps, 2 Mbps, 250 kbps); a payload goes on air when written in TX mode, pipe 0 RX into a 3 payload FIFO. Not emulated: acks and retransmissions (TX_DS once sent, MAX_RT never), ack payloads, pipes 1 to 5 |
 | `V2X2_nrf24l01.c` | V2x2: Std, JXD506, MR101 |
+| `XK_ccnrf.c` | XK (X450, X420, Cars) and MoFly, on the XN297 emulation |
 | `iface_cc2500.h`, `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
 | `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`) |
 | `iface_a7105.h`, `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
@@ -240,6 +241,13 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | AFHDS2A (28) | same payloads, 7701 µs | same, 61.6 ms between visits of the channel |
 | DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
 | V2x2 (5, Std) | same payload, 4000 µs, both packets of a channel visit (port at -72 dBm: a few lost, bind power) | same payload, 4005 µs (MPM 4002) |
+| XK (62, X450 / X420 / Cars) | same payload, 4000 µs | same payload, 4000 µs (MPM 4002) |
+
+XK: also the other way round, the port on the MPM v2 (driven by
+`radio_sim.py -p v2` over its USB) received by the 4-in-1's nRF24L01 (X420,
+Cars: 1 Mbps) or CC2500 (X450: 250 kbps), the 4-in-1 then given the port's
+GID (`id 0x00f3be8e`): same bind and data payloads on all three. X450 and
+X420 autobind for 3 s, Cars binds only when asked.
 
 FlySky, not yet against the MPM's own FlySky: the MPM v2 in a TX15's bay
 (EdgeTX 2.12) received by the 4-in-1's A7105 (bench, 1 m) on each of its 16
