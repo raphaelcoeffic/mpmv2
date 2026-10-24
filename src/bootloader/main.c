@@ -25,7 +25,6 @@
 #include <driverlib/gpio.h>
 #include <driverlib/ioc.h>
 #include <driverlib/prcm.h>
-#include <driverlib/sys_ctrl.h>
 #include <driverlib/uart.h>
 #include <driverlib/vims.h>
 #include <inc/hw_nvic.h>
@@ -362,7 +361,8 @@ static uint8_t prog_page(uint8_t* page, uint32_t size)
   }
 
   if (!_erased) {
-    // The cache doesn't see flash writes: off for the session (reset after)
+    // The cache doesn't see flash writes: off for the session (main() puts
+    // it back)
     VIMSModeSafeSet(VIMS_BASE, VIMS_MODE_DISABLED, true);
     VIMSLineBufDisable(VIMS_BASE);
   }
@@ -488,13 +488,21 @@ static void serve()
   }
 }
 
-// Bits only go from 1 to 0: no erase. A reset follows (cache).
+// Bits only go from 1 to 0: no erase. The cache doesn't see flash writes:
+// off for the write, back through OFF (invalidated, VIMSModeSafeSet()). No
+// system reset: the ROM boot after one waits in a wfi when a debugger is
+// attached (first start after a J-Link flash).
 static void app_mark_checked()
 {
   uint32_t checked = APP_HDR_CHECKED;
+  uint32_t mode = VIMSModeGet(VIMS_BASE);
   CPUcpsid();
+  VIMSModeSafeSet(VIMS_BASE, VIMS_MODE_DISABLED, true);
+  VIMSLineBufDisable(VIMS_BASE);
   FlashProgram((uint8_t*)&checked, (uint32_t)&APP_HEADER->checked,
                sizeof(checked));
+  VIMSLineBufEnable(VIMS_BASE);
+  VIMSModeSafeSet(VIMS_BASE, mode, true);
   CPUcpsie();
 }
 
@@ -507,7 +515,7 @@ int main()
   bool valid = app_checked();
   if (!valid && app_valid()) {
     app_mark_checked();
-    SysCtrlSystemReset();
+    valid = true;
   }
 
   ports_open();
@@ -515,10 +523,15 @@ int main()
   if (!_port) app_start();
 
   if (_port->radio) radio_tx_on();
+  uint32_t vims = VIMSModeGet(VIMS_BASE);
   reply(0, 0);  // the sync
   serve();
 
-  // New application written: start it from a clean reset
-  ports_close();
-  SysCtrlSystemReset();
+  // New application written, its CRC matched: cache back on (invalidated),
+  // then marked and started as at power up. No system reset (see
+  // app_mark_checked())
+  VIMSModeSafeSet(VIMS_BASE, vims, true);
+  VIMSLineBufEnable(VIMS_BASE);
+  if (!app_checked()) app_mark_checked();
+  app_start();
 }

@@ -113,7 +113,11 @@ page back right after writing it works.
    vector in the application). The CRC takes about 0.3 ms per KB (110 ms for
    336 KB), too slow for every start: it is checked once, at the first start
    after an update, then the boot loader clears `checked` (bits only go from
-   1 to 0: no erase) and resets.
+   1 to 0: no erase; flash cache off for the write, then invalidated) and
+   goes on. No system reset there: with a debugger attached, the ROM boot
+   after one waits in a `wfi` for a debug halt (FWFLAG bit 2, what sets it is
+   not known), which left the module stuck at its first start after a
+   J-Link flash.
 2. **Sync window.** STK500 on the radio link (UART1, idle high) and on the
    console (UART0, the CH343 on USB-C), 57600 8N1. The application starts:
    - after `BL_CONSOLE_MS` (20 ms) when the radio line is at the "no radio"
@@ -153,7 +157,8 @@ reset to the application answering on USB.
   to 0xFFFFFFFF.
 - Each page is programmed and compared; a sector is erased when its first
   page arrives. Writes outside 0x2000 - 0x55FFF are refused.
-- `LEAVE_PROGMODE`: the boot loader resets when the image CRC matches, else
+- `LEAVE_PROGMODE`: the boot loader starts the application when the image
+  CRC matches (cache back on, `checked` cleared, no system reset), else
   keeps serving: an interrupted update leaves it in charge at every power
   up, the user flashes again (tested with half an image).
 - `READ_PAGE` reads back (for host tools), `GET_SIGN_ON`, `GET_PARAMETER`,
