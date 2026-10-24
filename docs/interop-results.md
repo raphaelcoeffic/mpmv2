@@ -1,6 +1,6 @@
 # Interoperability results
 
-Over-the-air tests between the CC2652 (mpm-v2 `BENCH=ON`) and the chips of a
+Over-the-air tests between the CC2652 (the mpm-v2 bench) and the chips of a
 4-in-1 MULTI-Module (iRangeX IRX4 Lite with the bench firmware), side by side
 on a desk, measured in October 2026. Setup and tools: [bench.md](bench.md).
 What it means for the chip choice:

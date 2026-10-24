@@ -4,14 +4,14 @@
 # dependencies = ["pyserial>=3.5"]
 # ///
 """First install of the MPM v2 over USB-C: the CC2652's ROM boot loader,
-no debugger. Writes the whole flash (build-mpm/mpm-v2-full.bin: boot loader,
+no debugger. Writes the whole flash (build/mpm-v2-full.bin: boot loader,
 application, CCFG); later updates go through the MPM v2 boot loader instead
 (the radio, or tools/stk500_flash.py).
 
   rom_flash.py [FILE]          erase, write, verify by CRC, reset
   rom_flash.py --info          the chip and the boot loader, nothing written
 
-FILE: a binary of the whole flash from 0x0 (default: build-mpm/mpm-v2-full.bin).
+FILE: a binary of the whole flash from 0x0 (default: build/mpm-v2-full.bin).
 The 0xFF (erased) ranges are not sent; the CCFG sector goes last, so an
 interrupted write never leaves a CCFG pointing at a missing boot loader.
 
@@ -183,7 +183,7 @@ def ranges(img: bytes, flash_size: int) -> list[tuple[int, bytes]]:
 
 
 def main():
-    default = Path(__file__).resolve().parent.parent / "build-mpm" / "mpm-v2-full.bin"
+    default = Path(__file__).resolve().parent.parent / "build" / "mpm-v2-full.bin"
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file", nargs="?", default=str(default))
     ap.add_argument("-p", "--port")

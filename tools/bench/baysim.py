@@ -218,7 +218,7 @@ def main():
     p.add_argument("--pulse", type=int, default=300, help="pulse length, us")
     p.add_argument("--pol", choices=["-", "+"], default="-", help="-: pulses low (EdgeTX's default)")
     p = sub.add_parser("flash")
-    p.add_argument("file", nargs="?", default=str(ROOT / "build-bl/mpm-v2.bin"))
+    p.add_argument("file", nargs="?", default=str(ROOT / "build/mpm-v2-bench.bin"))
     p.add_argument("--delay", type=float, default=0.2, help="s from the sync start to power on")
     p.add_argument("--no-verify", action="store_true")
     p = sub.add_parser("window")

@@ -11,7 +11,7 @@ and the status and next steps in [status.md](status.md).
 ```
  host (macOS / Linux)
    tools/bench/*.py ──USB── 4-in-1 MULTI-Module, bench firmware    (MPM)
-                    ──USB── CC2652R1 LaunchPad, mpm-v2 BENCH=ON    (CC2652)
+                    ──USB── CC2652R1 LaunchPad, mpm-v2 bench      (CC2652)
                               ↑ side by side, PCB antennas, about -20 to -30 dBm
 ```
 
@@ -75,9 +75,8 @@ To go back to normal operation, flash a normal firmware.
 ### CC2652
 
 ```sh
-cmake -S . -B build-bench -G Ninja -DBOARD=CC2652R1_LAUNCHXL -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
-ninja -C build-bench
-openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
+cmake -S . -B build-lp -G Ninja -DBOARD=CC2652R1_LAUNCHXL
+ninja -C build-lp flash-bench           # XDS110 (OpenOCD): boot loader and bench
 ```
 
 ### MPM v2
@@ -89,8 +88,8 @@ The console is the USB-C port (CH343, UART0 at 921600 baud), flashing goes
 through the J-Link on J10:
 
 ```sh
-cmake -S . -B build-v2 -G Ninja -DBENCH=ON -DCMAKE_BUILD_TYPE=Release
-ninja -C build-v2 flash                 # tools/flash_jlink.sh build-v2/firmware.elf
+cmake -S . -B build -G Ninja
+ninja -C build flash-bench              # tools/flash_jlink.sh build/bootloader.elf build/bench.bin@0x2000
 tools/bench/mpm_bench.py -p v2 shell
 ```
 

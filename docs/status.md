@@ -127,7 +127,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 
 | Repository, branch | Content |
 |---|---|
-| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (`-DBENCH=ON`), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
+| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (the `bench` target), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
 | [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`), plus the two fixes below |
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix alone |
 | same, `e010r5-hop-fix` | The E010R5 fix alone, PR #1197 |
@@ -262,8 +262,7 @@ packets 102.4 ms apart.
    (A7105) off, which the MPM `option` corrects per model today. The CC2652
    measures it on each packet received (`autotrim`): protocols with telemetry
    or a bind reply could tune themselves.
-7. **Update from the radio.** Boot loader in flash sector 0
-   (`-DBOOTLOADER=ON`) speaking the STK500 subset EdgeTX uses for the
+7. **Update from the radio.** Boot loader in flash sector 0 speaking the STK500 subset EdgeTX uses for the
    MULTI-Module, works over USB and over the module bay (radio simulator
    on an RP2040-Zero: EdgeTX's sequence, the window with and without a
    radio, serial frames ending it, the application's frames and telemetry);

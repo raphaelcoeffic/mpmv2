@@ -29,7 +29,7 @@ with [uv](https://docs.astral.sh/uv/) (the tools declare their packages,
 board's CH343 as a standard USB serial port; on Windows, if no COM port
 appears, install WCH's CH343 driver.
 
-The firmware files (from a release, or [built](#building) in `build-mpm/`):
+The firmware files (from a release, or [built](#building) in `build/`):
 
 | File | What | For |
 |---|---|---|
@@ -87,12 +87,28 @@ Toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 (`arm-none-eabi-gcc` in `PATH`, 14.2 used), CMake 3.21 or later, Ninja,
 Python 3.
 
-The MPM v2 firmware (MULTI-Module core and boot loader):
+One build directory per board, with the boot loader and two applications
+behind it (at 0x2000, see [docs/update.md](docs/update.md)):
 
 ```bash
-cmake -S . -B build-mpm -G Ninja -DBOOTLOADER=ON
-ninja -C build-mpm                # mpm-v2-full.bin / .hex, mpm-v2.bin
-ninja -C build-mpm flash          # J-Link on J10: boot loader and application
+cmake -S . -B build -G Ninja      # MPM v2 board
+ninja -C build                    # boot loader, firmware and bench
+ninja -C build flash-firmware     # J-Link on J10: boot loader and MPM firmware
+ninja -C build flash-bench        # J-Link on J10: boot loader and radio bench
+```
+
+| Target | Files (in the build directory) |
+|---|---|
+| `bootloader` | `bootloader.elf`, `bootloader.bin` |
+| `firmware` | the MULTI-Module core: `firmware.elf`, `firmware.bin` (with the image header), `mpm-v2.bin` (for the radio), `mpm-v2-full.bin` / `.hex` (the whole flash) |
+| `bench` | the radio bench (`src/bench.c` command shell instead of the MPM, see [docs/bench.md](docs/bench.md)): `bench.elf`, `bench.bin`, `mpm-v2-bench.bin`, `mpm-v2-bench-full.bin` / `.hex` |
+| `flash-firmware`, `flash-bench` | boot loader and application through the board's probe: J-Link on the MPM v2, XDS110 (OpenOCD) on the LaunchPad |
+
+The CC2652R1 LaunchPad (bench console on UART0 at 921600 baud):
+
+```bash
+cmake -S . -B build-lp -G Ninja -DBOARD=CC2652R1_LAUNCHXL
+ninja -C build-lp flash-bench
 ```
 
 Host unit tests (a C compiler):
@@ -103,26 +119,11 @@ make -C tests/mpm                 # the MPM core, the log
 make -C tests/storage             # littlefs on a simulated NOR flash, EEPROM, file server, settings
 ```
 
-Radio bench builds (`src/bench.c` command shell instead of the MPM, see
-[docs/bench.md](docs/bench.md)):
-
-```bash
-# MPM v2 board: console on USB-C, J-Link on J10
-cmake -S . -B build-v2 -G Ninja -DBENCH=ON
-ninja -C build-v2 flash
-# LaunchPad: UART0 at 921600 baud
-cmake -S . -B build-bench -G Ninja -DBOARD=CC2652R1_LAUNCHXL -DBENCH=ON
-ninja -C build-bench
-openocd -f board/ti_cc26x2_launchpad.cfg -c "program build-bench/firmware.elf verify reset exit"
-```
-
-Options (`-D<option>=ON|OFF`; the build type is Release unless
+Options (`-D<option>=<value>`; the build type is Release unless
 `CMAKE_BUILD_TYPE` says otherwise):
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `BOOTLOADER` | Boot loader at 0x0 (update from the radio), application at 0x2000 (see [docs/update.md](docs/update.md)). | OFF |
-| `BENCH` | Radio bench mode: test shell on UART0 instead of the MPM (see [docs/bench.md](docs/bench.md)). | OFF |
 | `BOARD` | Target board: `MPM_V2` (CC2652RB) or `CC2652R1_LAUNCHXL` (the LaunchPad). | `MPM_V2` |
 | `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |

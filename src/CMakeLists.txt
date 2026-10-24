@@ -40,11 +40,6 @@ set(firmware_sources
     uart.c
 )
 
-add_executable(firmware
-    ${firmware_sources}
-)
-target_include_directories(firmware PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
 # Release builds are -Os; the code on the radio's time-critical paths gets
 # -O2: RF core commands and interrupts, the frame encoders and decoders
 # (CYRF6936 sync search, DSM telemetry decoded between callbacks), the
@@ -57,48 +52,17 @@ set_source_files_properties(radio.c frame.c timer.c bench.c
 set(board_definitions BOARD_${BOARD})
 if (BOARD STREQUAL "CC2652R1_LAUNCHXL")
     message("## Target is CC2652R1-LAUNCHXL: 48 MHz xtal")
+    # XDS110 on the LaunchPad
+    set(flash_tool openocd -f board/ti_cc26x2_launchpad.cfg)
 elseif (BOARD STREQUAL "MPM_V2")
     message("## Target is MPM v2 (CC2652RB): HPOSC (BAW)")
     list(APPEND board_definitions MCU_CC2652RB)
-endif()
-target_compile_definitions(firmware PRIVATE ${board_definitions}
-    MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
-
-if (BOOTLOADER)
-    # Boot loader in sector 0 with CCFG, application at 0x2000 (docs/update.md)
-    message("## Boot loader: application at 0x2000")
-    add_executable(bootloader bootloader/main.c board.c)
-    target_compile_definitions(bootloader PRIVATE ${board_definitions})
-    target_compile_options(bootloader PRIVATE -Os)
-    target_include_directories(bootloader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_link_libraries(bootloader driverlib_cc13x2_cc26x2)
-    target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-    set_target_properties(bootloader PROPERTIES
-        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/bootloader.ld
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-    if (USE_CCFG)
-        target_sources(bootloader PRIVATE ccfg.c)
-    endif()
-    add_custom_command(
-        TARGET bootloader POST_BUILD
-        COMMAND ${CMAKE_OBJCOPY} -O binary bootloader.elf bootloader.bin
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-elseif (USE_CCFG)
-    message("## Include CCFG")
-    target_sources(firmware PRIVATE ccfg.c)
-endif()
-
-if (BENCH)
-    message("## Radio bench mode")
-    target_sources(firmware PRIVATE bench.c sx1281.c)
-    target_compile_definitions(firmware PRIVATE BENCH)
+    # J-Link on J10
+    set(flash_tool ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh)
 endif()
 
 if (DEBUG)
     message("## Debug output enabled (Segger RTT)")
-    target_compile_definitions(firmware PRIVATE DEBUG)
 else()
     message("## Debug output disabled")
     target_compile_definitions(littlefs
@@ -110,63 +74,86 @@ else()
     )
 endif()
 
-target_link_libraries(firmware
-    driverlib_cc13x2_cc26x2
-    segger_rtt
-    littlefs
+# Boot loader in sector 0 with CCFG, applications at 0x2000 (docs/update.md)
+add_executable(bootloader bootloader/main.c board.c)
+target_compile_definitions(bootloader PRIVATE ${board_definitions})
+target_compile_options(bootloader PRIVATE -Os)
+target_include_directories(bootloader PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(bootloader driverlib_cc13x2_cc26x2)
+target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
+set_target_properties(bootloader PROPERTIES
+    LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/bootloader.ld
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
-
-if (BOOTLOADER)
-    target_link_options(firmware PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-    set_target_properties(firmware
-        PROPERTIES
-        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/app.ld
-    )
-else()
-    set_target_properties(firmware
-        PROPERTIES
-        LINKER_FILE ${TI_DEVICE_DIR}/cc13x2_cc26x2/linker_files/cc26x2r1f.lds
-    )
+if (USE_CCFG)
+    message("## Include CCFG")
+    target_sources(bootloader PRIVATE ccfg.c)
 endif()
-
-# firmware.bin and firmware.elf directly in build directory
-set_property(
-    TARGET firmware
-    PROPERTY RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-)
-
 add_custom_command(
-  TARGET firmware POST_BUILD
-  COMMAND ${CMAKE_OBJCOPY} -O binary ${OBJCOPY_ARGS} firmware.elf firmware.bin
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    TARGET bootloader POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill 0xff bootloader.elf bootloader.bin
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-if (BOOTLOADER)
-  # firmware.bin gets the image header (length, CRC) the boot loader checks,
-  # mpm-v2.bin is the file for the radio (MULTI signature appended),
-  # mpm-v2-full.bin / .hex the whole flash for a first install (boot loader,
-  # CCFG, application)
-  add_custom_command(
-    TARGET firmware POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill 0xff bootloader.elf bootloader.bin
-    COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fw_image.py firmware.bin
-            --version ${PROJECT_VERSION} --out mpm-v2.bin
-            --full bootloader.bin mpm-v2-full
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-  )
-  add_dependencies(firmware bootloader)
-  # J-Link: ninja -C <build dir> flash (boot loader and application)
-  add_custom_target(flash
-    COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh
-            ${CMAKE_BINARY_DIR}/bootloader.elf ${CMAKE_BINARY_DIR}/firmware.bin@0x2000
-    DEPENDS firmware bootloader
-    USES_TERMINAL
-  )
-else()
-  # J-Link: ninja -C <build dir> flash
-  add_custom_target(flash
-    COMMAND ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh ${CMAKE_BINARY_DIR}/firmware.elf
-    DEPENDS firmware
-    USES_TERMINAL
-  )
-endif()
+# An application behind the boot loader. Target <name>: in the build
+# directory, <name>.elf, <name>.bin with the image header (length, CRC) the
+# boot loader checks, <file>.bin for the radio (MULTI signature appended),
+# <file>-full.bin / .hex the whole flash for a first install (boot loader,
+# CCFG, application), all made again when the boot loader changes.
+# flash-<name>: boot loader and application through the board's debug probe.
+function(add_application name file)
+    set(elf ${name}_elf)
+    add_executable(${elf} ${firmware_sources} ${ARGN})
+    target_include_directories(${elf} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(${elf} PRIVATE ${board_definitions}
+        MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
+    if (DEBUG)
+        target_compile_definitions(${elf} PRIVATE DEBUG)
+    endif()
+    target_link_libraries(${elf}
+        driverlib_cc13x2_cc26x2
+        segger_rtt
+        littlefs
+    )
+    target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
+    set_target_properties(${elf} PROPERTIES
+        OUTPUT_NAME ${name}
+        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/app.ld
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+
+    set(images ${name}.bin ${file}.bin ${file}-full.bin ${file}-full.hex)
+    list(TRANSFORM images PREPEND ${CMAKE_BINARY_DIR}/)
+    add_custom_command(
+        OUTPUT ${images}
+        COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
+        COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
+                --version ${PROJECT_VERSION} --out ${file}.bin
+                --full bootloader.bin ${file}-full
+        DEPENDS ${elf} bootloader ${CMAKE_SOURCE_DIR}/tools/fw_image.py
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    add_custom_target(${name} ALL DEPENDS ${images})
+
+    if (BOARD STREQUAL "CC2652R1_LAUNCHXL")
+        set(flash_args
+            -c "program ${CMAKE_BINARY_DIR}/bootloader.elf verify"
+            -c "program ${CMAKE_BINARY_DIR}/${name}.bin 0x2000 verify reset exit")
+    else()
+        set(flash_args
+            ${CMAKE_BINARY_DIR}/bootloader.elf ${CMAKE_BINARY_DIR}/${name}.bin@0x2000)
+    endif()
+    add_custom_target(flash-${name}
+        COMMAND ${flash_tool} ${flash_args}
+        DEPENDS ${name}
+        USES_TERMINAL
+        VERBATIM
+    )
+endfunction()
+
+# The MPM port (the module EdgeTX drives)
+add_application(firmware mpm-v2)
+
+# Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
+add_application(bench mpm-v2-bench bench.c sx1281.c)
+target_compile_definitions(bench_elf PRIVATE BENCH)

@@ -535,13 +535,12 @@ and out of order uploads (the old file kept), rename / remove / errors, an
 EEPROM write during an upload, a listing over 6 replies, a power cut at each
 program and erase of an upload (the old file, no `.upload` left).
 
-On the LaunchPad (firmware built without `BENCH`), `tools/bench/radio_sim.py`
-plays the radio over the XDS110 back channel:
+On the LaunchPad (the `firmware` application, not the bench),
+`tools/bench/radio_sim.py` plays the radio over the XDS110 back channel:
 
 ```sh
-cmake -S . -B build -G Ninja -DBOARD=CC2652R1_LAUNCHXL
-ninja -C build
-openocd -f board/ti_cc26x2_launchpad.cfg -c "program build/firmware.elf verify reset exit"
+cmake -S . -B build-lp -G Ninja -DBOARD=CC2652R1_LAUNCHXL
+ninja -C build-lp flash-firmware
 tools/bench/radio_sim.py status        # status frames, every 500 ms
 tools/bench/radio_sim.py scan          # protocol list
 tools/bench/radio_sim.py bind          # binding flag set, then cleared

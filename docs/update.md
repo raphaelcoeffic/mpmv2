@@ -4,7 +4,8 @@ The update the STM32 MULTI-Module has: the user picks a `.bin` on the SD
 card ("Flash External Multi" or "Flash Internal Multi" in the SD manager)
 and EdgeTX writes it through the module bay, no USB and no tools.
 
-Status: the boot loader (`src/bootloader/`, `-DBOOTLOADER=ON`) works over
+Status: the boot loader (`src/bootloader/`, always built, both applications
+run behind it) works over
 USB with a host tool that does what EdgeTX does; the EdgeTX side is on
 branch `mpm-v2-flash` (not pushed; `mpm-v2-flash-2.12` on EdgeTX 2.12).
 From a radio: one update on a TX15 over the external bay (2026-10-21, see
@@ -76,7 +77,7 @@ MPM v2 has its own boot loader in flash.
 ## Flash layout
 
 The CC2652R1 / RB flash is 352 KB in 8 KB sectors, CCFG in the last 88
-bytes (0x57FA8, last sector at 0x56000). With `-DBOOTLOADER=ON`
+bytes (0x57FA8, last sector at 0x56000). With the boot loader
 (`src/linker/`, `src/bootloader/layout.h`):
 
 | Range | Content |
@@ -230,10 +231,10 @@ pass-through ends when the script exits.
 ## Tools
 
 ```sh
-cmake -S . -B build-bl -G Ninja -DCMAKE_BUILD_TYPE=Release -DBENCH=ON -DBOOTLOADER=ON
-ninja -C build-bl                     # bootloader.elf, firmware.bin (with header), mpm-v2.bin
-ninja -C build-bl flash               # J-Link: boot loader + application
-tools/stk500_flash.py build-bl/mpm-v2.bin --verify   # USB-C: as EdgeTX does it
+cmake -S . -B build -G Ninja
+ninja -C build                        # bootloader.elf, firmware.bin (with header), mpm-v2.bin, ...
+ninja -C build flash-firmware         # J-Link: boot loader + application (flash-bench: the bench)
+tools/stk500_flash.py build/mpm-v2.bin --verify   # USB-C: as EdgeTX does it
 ```
 
 `mpm-v2-full.bin` / `.hex` (also built) hold the whole flash: boot
@@ -436,7 +437,5 @@ and the radios' own line levels.
 ## Next
 
 1. A real radio.
-2. Make `-DBOOTLOADER=ON` the default for the MPM v2 once the module bay
-   path works.
-3. Generalise the radio port (UART0 or UART1, polarity) for internal
+2. Generalise the radio port (UART0 or UART1, polarity) for internal
    module boards.

@@ -8,8 +8,8 @@ it (radio/src/io/multi_firmware_update.cpp): STK500v1 at 57600 8N1, 256 byte
 pages from word address 0x1000, low 16 bits of the address only, last page
 padded with zeros, LEAVE_PROGMODE at the end or on error.
 
-  stk500_flash.py build-bl/mpm-v2.bin               USB-C (CH343): reset, sync
-  stk500_flash.py build-bl/mpm-v2.bin --verify      read every page back
+  stk500_flash.py build/mpm-v2.bin                  USB-C (CH343): reset, sync
+  stk500_flash.py build/mpm-v2.bin --verify         read every page back
   stk500_flash.py any.bin --no-check                send a file EdgeTX would refuse
   stk500_flash.py --port /dev/cu.usbserial-X --no-reset --invert ...
                                                     radio bay through a USB

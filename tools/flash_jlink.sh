@@ -1,9 +1,9 @@
 #!/bin/sh
 # Flash a firmware with a J-Link (MPM v2 J10, or a LaunchPad), then reset and run.
 #
-#   tools/flash_jlink.sh [firmware.elf]     default: build/firmware.elf
-#   tools/flash_jlink.sh build-bl/bootloader.elf build-bl/firmware.bin@0x2000
-#                                           several files, .bin at an address
+#   tools/flash_jlink.sh [files]    default: build/bootloader.elf build/firmware.bin@0x2000
+#   tools/flash_jlink.sh build/bench.bin@0x2000     the bench alone (boot loader there)
+#                                   several files, .bin at an address
 #
 # Uses OpenOCD (libjaylink, no SEGGER DLL: no J-Link EDU terms of use pop-up),
 # or J-Link Commander with JLINK_TOOL=segger.
@@ -16,7 +16,7 @@
 
 set -eu
 
-[ $# -gt 0 ] || set -- build/firmware.elf
+[ $# -gt 0 ] || set -- build/bootloader.elf build/firmware.bin@0x2000
 
 for f in "$@"; do
   if [ ! -f "${f%@*}" ]; then
