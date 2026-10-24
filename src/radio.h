@@ -8,8 +8,13 @@
 // Protocol framing (address bytes, CRC, scrambling) is left to the caller.
 
 // Packets of up to 255 bytes use the basic RF core commands, longer ones the
-// advanced ones (CYRF6936 SDR emulation: 1 KB for 16 bytes)
+// advanced ones (CYRF6936 SDR emulation: 1 KB for 16 bytes). CC26x0 (20 KB of
+// RAM): no CYRF6936 emulation, 255 bytes
+#if defined(MCU_CC26X0)
+#define RADIO_MAX_PKT_LEN 255
+#else
 #define RADIO_MAX_PKT_LEN 1100
+#endif
 
 typedef struct {
   uint32_t symbol_rate;   // bps

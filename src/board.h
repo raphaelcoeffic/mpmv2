@@ -101,6 +101,53 @@
   #define BL_RADIO_TX       MODULE_TX
   #define BL_RADIO_INVERTED 0
   //
+#elif defined(BOARD_XJT_LITE)
+  // *******************************
+  // * FrSky XJT-Lite (CC2650F128) *
+  // *******************************
+  //
+  // No schematic: reverse engineered (stock firmware, OpenOCD, SDR)
+  //
+  // DIO_26 <-  module serial in: the bay's data pin (the MT12's PPM pin,
+  //            EdgeTX's USART6 TX) through an inverter (RX test pad).
+  //            MULTI idles high on the pin: low on DIO_26
+  // DIO_25  -> the bay's other pin (radio RX, PXX2) through an inverter
+  //            (TX test pad). Unused
+  //
+  // DIO_29  -> S.Port out: "C40R" inverting 3-state buffer, 68 ohm
+  // DIO_24  -> its output enable, active low (10k pull-up)
+  // DIO_30 <-  S.Port in
+  //
+  // DIO_6   -> SE2431L CSD: 1 = on (0 = sleep)
+  // DIO_5   -> SE2431L CPS: 1 = LNA (RX)
+  // DIO_4   -> SE2431L CTX: 1 = TX (PA, about 23 dB of gain)
+  //            ANT_SEL is strapped (one antenna). See doc/SE2431L_202410L.pdf
+  //
+  // DIO_11  -> red LED, DIO_13 -> green LED (1 = on). DIO_12: driven
+  //            with them by the stock app, no visible LED
+  //
+  // ST M95160-W SPI EEPROM: pins not mapped yet
+  //
+  #define MODULE_RX     IOID_26
+  #define SPORT_TX      IOID_29
+  #define SPORT_TX_EN_N IOID_24
+  #define SPORT_RX      IOID_30
+  //
+  #define FEM_CSD       IOID_6
+  #define FEM_CPS       IOID_5
+  #define FEM_CTX       IOID_4
+  //
+  #define LED_RED       IOID_11
+  #define LED_GREEN     IOID_13
+  #define LED_UNKNOWN   IOID_12
+  //
+  // RF core TX power word (CC2650 table), out of the antenna port through
+  // the PA (FrSky's table): 0x0CC7 9 dBm, 0x0CC9 12, 0x0CCB 14, 0x144B 15,
+  // 0x194E 16, 0x1D52 17, 0x2558 19, 0x3161 21. The stock default: 19 dBm
+  #define RF_TX_POWER_DEFAULT 0x2558
+  // Bind and range check: the lowest, 9 dBm
+  #define RF_TX_POWER_LOW     0x0CC7
+  //
 #else
   #error "No board: BOARD_<name> from CMake's BOARD"
 #endif

@@ -60,6 +60,8 @@ elseif (BOARD STREQUAL "MPM_V2")
     list(APPEND board_definitions MCU_CC2652RB)
     # J-Link on J10
     set(flash_tool ${CMAKE_SOURCE_DIR}/tools/flash_jlink.sh)
+elseif (BOARD STREQUAL "XJT_LITE")
+    message("## Target is FrSky XJT-Lite (CC2650F128): reduced MPM")
 endif()
 
 if (DEBUG)
@@ -73,6 +75,12 @@ else()
         LFS_NO_ERROR
         LFS_NO_ASSERT
     )
+endif()
+
+# XJT-Lite: CC26x0 driverlib, its own applications (xjt_lite.cmake)
+if (BOARD STREQUAL "XJT_LITE")
+    include(xjt_lite.cmake)
+    return()
 endif()
 
 # Boot loader in sector 0 with CCFG, applications at 0x2000 (docs/update.md)

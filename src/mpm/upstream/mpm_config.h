@@ -8,6 +8,18 @@
 #define SPORT_TELEMETRY
 #define FAILSAFE_ENABLE
 
+#if defined(MCU_CC26X0)
+// FrSky XJT-Lite (CC2650, 20 KB of RAM): FrSky D and X, and the WLtoys
+// cars' V2x2 and XK
+#define NRF24L01_INSTALLED
+#define V2X2_NRF24L01_INO
+#define XK_CCNRF_INO
+
+#define CC2500_INSTALLED
+#define CC2500_ENABLE_LOW_POWER
+#define FRSKYD_CC2500_INO
+#define FRSKYX_CC2500_INO
+#else
 // NRF24L01 / XN297 family: NRF24L01 and XN297 emulations on the CC2652
 // (nrf24l01.c, xn297.c)
 #define NRF24L01_INSTALLED
@@ -42,3 +54,4 @@
 #define DSM_TELEMETRY
 #define DSM_X_PLUS               // _Config.h defaults
 #define DSM_THROTTLE_KILL_CH 14
+#endif

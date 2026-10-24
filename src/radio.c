@@ -1,24 +1,42 @@
 #include <driverlib/aon_batmon.h>
+#include <driverlib/gpio.h>
 #include <driverlib/interrupt.h>
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include <driverlib/rfc.h>
 #include <inc/hw_rfc_rat.h>
-#include <driverlib/rf_ble_cmd.h>
-#include <driverlib/rf_ble_mailbox.h>
 #include <driverlib/rf_data_entry.h>
 #include <driverlib/rf_mailbox.h>
 #include <driverlib/rf_prop_cmd.h>
 #include <driverlib/rf_prop_mailbox.h>
+#if defined(MCU_CC26X0)
+// CC26x0 (CC2650): proprietary mode from TI's generic FSK patches, for the
+// command processor, the modem and the RF engine
+#include <rf_patches/rf_patch_cpe_genfsk.h>
+#include <rf_patches/rf_patch_mce_genfsk.h>
+#include <rf_patches/rf_patch_rfe_genfsk.h>
+#else
+#include <driverlib/rf_ble_cmd.h>
+#include <driverlib/rf_ble_mailbox.h>
 #include <rf_patches/rf_patch_cpe_bt5.h>
 #include <rf_patches/rf_patch_cpe_prop.h>
+#endif
 
 #include <string.h>
 
+#include "board.h"
 #include "radio.h"
 #include "timer.h"
 
 #define CMD_TIMEOUT_US 20000
+
+#if defined(MCU_CC26X0)
+// Not in the CC26x0 driverlib: as in the CC26x2 one
+static inline void RFCCpe0IntSelect(uint32_t mask)
+{
+  HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEISL) &= ~mask;
+}
+#endif
 
 // RF core symbol rate: rate = 24 MHz * rateWord / (preScale * 2^20)
 #define SYMBOL_RATE_PRESCALE 15
@@ -43,6 +61,53 @@
 #define FOFF_COUNTS_PER_DEVIATION 61
 #define FOFF_NONE INT16_MIN
 
+#if defined(MCU_CC26X0)
+// The overrides of FrSky's XJT-Lite firmware (read from its RAM, the same for
+// all its PHYs), TI's for the generic FSK patches. The synth's clock and loop
+// filter come after the first one, by symbol rate
+static const uint32_t _base_overrides[] = {
+    // Modem and RF engine from their RAM patches
+    MCE_RFE_OVERRIDE(1, 0, 0, 1, 0, 0),
+    // Synth: calibration, programming time-out (TI's values)
+    HW32_ARRAY_OVERRIDE(0x4004, 1),
+    0x1C0C0618,
+    0xC00401A1,
+    0x21010101,
+    0xC0040141,
+    0x00214AD3,
+    0x03000243,
+    0x00008883,
+    // ADI0 register 4, low nibble 0xF
+    ADI_HALFREG_OVERRIDE(0, 4, 0xF, 0xF),
+    0x000188A3,
+    // Rx: AGC
+    HW_REG_OVERRIDE(0x6088, 0x3F22),
+    HW_REG_OVERRIDE(0x608C, 0x0213),
+};
+
+// Synth, FrSky's PHYs: FREF 4 MHz (24 MHz / 6), the 24 MHz XOSC as synth
+// clock with extra PLL filtering (TI's values)
+static const uint32_t _synth_overrides[] = {0x000684A3, 0x02010403};
+
+// Synth, 500 kbps and up (the nRF24L01's 1 Mbps), as TI's CC2650 Bluetooth LE
+// settings. With FrSky's, no TX below about 2440 MHz at 1 Mbps (0 packets
+// received at any offset, 750 kbps: 10%, 500 kbps: 80 to 100%), the synth
+// failing to follow the modulation: without the extra PLL filtering and with
+// the wider loop, 88 to 100% from 2402 to 2480 MHz (LaunchPad receiving)
+#define FAST_PHY_RATE 500000
+static const uint32_t _synth_fast_overrides[] = {
+    HW_REG_OVERRIDE(0x4038, 0x0036),  // RTRIM (POTAILRESTRIM) 6
+    0x000784A3,                       // FREF 3.43 MHz (24 MHz / 7)
+    0xA47E0583,                       // Loop bandwidth after lock: 80 kHz (K2)
+    0xEAE00603,                       // (K3, LSB)
+    0x00010623,                       // (K3, MSB)
+};
+// Its deviation, Bluetooth LE's: from 2402 to 2480 MHz, 88 to 100% at 250
+// kHz, 56 to 100% at 200 kHz (the high channels), 54 to 82% at 160 kHz, and
+// worse above 250 kHz. nRF24L01 receivers take 250 kHz (Bluetooth LE's
+// advertising packets are received with them)
+#define FAST_PHY_DEVIATION 250000
+#else
 // Overrides from the TI radio configuration database
 // (cc2652r_prop_pg21, setting tc901: 250 kbps 2-GFSK, 2.4 GHz)
 static const uint32_t _base_overrides[] = {
@@ -53,14 +118,21 @@ static const uint32_t _base_overrides[] = {
     // Rx: Set AGC reference level to 0x22 (default: 0x2E)
     HW_REG_OVERRIDE(0x609C, 0x0022),
 };
+#endif
 #define BASE_OVERRIDES (sizeof(_base_overrides) / sizeof(_base_overrides[0]))
 
 static uint32_t _extra_overrides[RADIO_EXTRA_OVERRIDES];
 static uint8_t _n_extra_overrides;
 
+#if defined(MCU_CC26X0)
+// Base + synth + extra + end marker
+static uint32_t _overrides[BASE_OVERRIDES + 5 + RADIO_EXTRA_OVERRIDES + 1];
+#else
 // Base + anti-aliasing filter + sync threshold + HPOSC + extra + end marker
 static uint32_t _overrides[BASE_OVERRIDES + 4 + RADIO_EXTRA_OVERRIDES];
+#endif
 
+#if !defined(MCU_CC26X0)
 // Bluetooth LE 2M PHY under the proprietary packet commands, as TI's wBMS
 // setting (cc2652r_ble_pg21, setting_wbms_2m: CMD_BLE5_RADIO_SETUP, then
 // CMD_PROP_TX_ADV / CMD_PROP_RX_ADV). Its CRC overrides are left out
@@ -129,18 +201,27 @@ static uint32_t _ble_2m_overrides[] = {
 // BLE_ERROR_PAR)
 static uint32_t _ble_overrides[BLE_BASE_OVERRIDES + 3 + RADIO_EXTRA_OVERRIDES];
 static uint32_t _ble_no_overrides[] = {0xFFFFFFFF};
+#endif
 
 // HPOSC (BAW oscillator of the CC2652RB): the RF core is told the HF clock
 // offset, from the factory calibration and the chip temperature, as the TI
 // RF driver does (HPOSC_OVERRIDE at setup, CMD_UPDATE_HPOSC_FREQ afterwards)
+#if !defined(MCU_CC26X0)
 #define HPOSC_CHECK_MS 1000
 static bool _hposc;
 static int16_t _hposc_offset;  // 2^-22 relative
 static uint32_t _hposc_check;
+#endif
 
+#if defined(MCU_CC26X0)
+// CC26x0: no CMD_PROP_RADIO_DIV_SETUP (sub-GHz), no Bluetooth LE 5 setup
+static rfc_CMD_PROP_RADIO_SETUP_t _setup;
+#define _ble false
+#else
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_BLE5_RADIO_SETUP_t _ble_setup;
 static bool _ble;  // _ble_setup: Bluetooth LE 2M PHY
+#endif
 
 static rfc_CMD_FS_t _fs;
 static rfc_CMD_PROP_TX_t _tx;
@@ -203,7 +284,11 @@ static bool _cmd_done(uint16_t status) { return status >= DONE_OK; }
 
 static bool _cmd_ok(uint16_t status)
 {
+#if defined(MCU_CC26X0)
+  return status == DONE_OK || status == PROP_DONE_OK;
+#else
   return status == DONE_OK || status == PROP_DONE_OK || status == BLE_DONE_OK;
+#endif
 }
 
 // Submit a radio operation
@@ -243,7 +328,11 @@ static radio_status_t _run_op(rfc_radioOp_t* op)
 // RF core registers may only be accessed while its power domain is on
 static bool _domain_on()
 {
+#if defined(MCU_CC26X0)
+  return PRCMPowerDomainStatus(PRCM_DOMAIN_RFCORE) == PRCM_DOMAIN_POWER_ON;
+#else
   return PRCMPowerDomainsAllOn(PRCM_DOMAIN_RFCORE) == PRCM_DOMAIN_POWER_ON;
+#endif
 }
 
 static void _power_down()
@@ -258,8 +347,17 @@ static void _power_down()
   }
 
   PRCMPowerDomainOff(PRCM_DOMAIN_RFCORE);
+#if defined(MCU_CC26X0)
+  while (PRCMPowerDomainStatus(PRCM_DOMAIN_RFCORE) != PRCM_DOMAIN_POWER_OFF) {
+  }
+#else
   while (PRCMPowerDomainsAllOff(PRCM_DOMAIN_RFCORE) != PRCM_DOMAIN_POWER_OFF) {
   }
+#endif
+#if defined(FEM_CSD)
+  // Front end asleep (its CPS and CTX low with the RF core off)
+  GPIO_clearDio(FEM_CSD);
+#endif
   _powered = false;
   _rx_running = false;
   _tx_running = false;
@@ -270,6 +368,10 @@ static void _power_down()
 // until a reset: call only while the command goes on
 static int16_t _read_foff()
 {
+#if defined(MCU_CC26X0)
+  // Not known on the CC26x0 modem
+  return FOFF_NONE;
+#endif
   if (!(HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) & RFC_PWR_PWMCLKEN_MDM))
     return FOFF_NONE;
   return (int8_t)HWREG(MDM_DEMMAFC0);
@@ -396,14 +498,19 @@ static void _cpe0_isr()
 
 static radio_status_t _power_up(bool ble)
 {
+#if defined(MCU_CC26X0)
+  // CC26x0: the RF core firmware of the proprietary mode
+  HWREG(PRCM_BASE + PRCM_O_RFCMODESEL) = RF_MODE_PROPRIETARY_2_4;
+#else
   // All RF modes are 0 on CC13x2/CC26x2: the PHY is chosen by patches and setup
   HWREG(PRCM_BASE + PRCM_O_RFCMODESEL) = RF_MODE_AUTO;
+#endif
 
   // Start from a powered off RF core: it survives a CPU only reset (debugger)
   _power_down();
 
   PRCMPowerDomainOn(PRCM_DOMAIN_RFCORE);
-  while (PRCMPowerDomainsAllOn(PRCM_DOMAIN_RFCORE) != PRCM_DOMAIN_POWER_ON) {
+  while (!_domain_on()) {
   }
   PRCMDomainEnable(PRCM_DOMAIN_RFCORE);
   PRCMLoadSet();
@@ -432,6 +539,20 @@ static radio_status_t _power_up(bool ble)
   IntPendClear(INT_RFC_CPE_0);
   IntEnable(INT_RFC_CPE_0);
 
+#if defined(MCU_CC26X0)
+  (void)ble;
+  rf_patch_cpe_genfsk();
+
+  // Allow the RF core to access the system bus (RX queue in RAM)
+  RFCDoorbellSendTo(CMDR_DIR_CMD_1BYTE(CMD_BUS_REQUEST, 1));
+
+  // Modem and RF engine RAM clocks on while their patches are written (RF
+  // core direct command 0x0607, as TI's RF driver), then back off
+  RFCDoorbellSendTo(CMDR_DIR_CMD_2BYTE(0x0607, RFC_PWR_PWMCLKEN_MDMRAM | RFC_PWR_PWMCLKEN_RFERAM));
+  rf_patch_mce_genfsk();
+  rf_patch_rfe_genfsk();
+  RFCDoorbellSendTo(CMDR_DIR_CMD_2BYTE(0x0607, 0));
+#else
   // The patches copy their image once and count on the retained RF core RAM:
   // with two of them, load the whole image every time
   cleanBt5Patch();
@@ -441,6 +562,7 @@ static radio_status_t _power_up(bool ble)
 
   // Allow the RF core to access the system bus (RX queue in RAM)
   RFCDoorbellSendTo(CMDR_DIR_CMD_1BYTE(CMD_BUS_REQUEST, 1));
+#endif
 
   if ((RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_PING)) & 0xFF) != CMDSTA_Done)
     return RADIO_ERR_BOOT;
@@ -448,10 +570,22 @@ static radio_status_t _power_up(bool ble)
   if ((RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_START_RAT)) & 0xFF) != CMDSTA_Done)
     return RADIO_ERR_BOOT;
 
+#if defined(FEM_CSD)
+  // Front end on: LNA during RX (CPS), PA during TX (CTX), both from the RF
+  // core (board.c), bypass in between
+  GPIO_setDio(FEM_CSD);
+#endif
   _powered = true;
   return RADIO_OK;
 }
 
+#if defined(MCU_CC26X0)
+// No HPOSC on CC26x0
+#define _hposc false
+static const int16_t _hposc_offset = 0;
+static void _hposc_init() {}
+static void _hposc_update() {}
+#else
 static void _hposc_init()
 {
   static bool done;
@@ -483,7 +617,51 @@ static void _hposc_update()
   _hposc_offset = offset;
   RFCDoorbellSendTo(CMDR_DIR_CMD_2BYTE(CMD_UPDATE_HPOSC_FREQ, (uint16_t)offset));
 }
+#endif
 
+#if defined(MCU_CC26X0)
+// CC26x0 RX bandwidth codes: the CC26x2 ones minus 82 (FrSky's PHYs, 70 and
+// 31 kbps GFSK: 5 and 3, the CC26x2 codes 87 and 85 that cc2500.c gives them)
+#define RX_BW_CC26X2_TO_CC26X0 82
+
+static void _init_setup(const radio_phy_t* phy)
+{
+  memset(&_setup, 0, sizeof(_setup));
+  _setup.commandNo = CMD_PROP_RADIO_SETUP;
+  _setup.startTrigger.triggerType = TRIG_NOW;
+  _setup.condition.rule = COND_NEVER;
+
+  bool fast = phy->symbol_rate >= FAST_PHY_RATE;
+  _setup.modulation.modType = phy->fsk ? 0 : 1;  // 2-FSK or 2-GFSK
+  _setup.modulation.deviation = (fast ? FAST_PHY_DEVIATION : phy->deviation) / 250;
+
+  _setup.symbolRate.preScale = SYMBOL_RATE_PRESCALE;
+  _setup.symbolRate.rateWord =
+      (uint32_t)(((uint64_t)phy->symbol_rate * SYMBOL_RATE_PRESCALE << 20) / 24000000);
+
+  _setup.rxBw = phy->rx_bw - RX_BW_CC26X2_TO_CC26X0;
+  _setup.preamConf.nPreamBytes = phy->preamble_bytes;
+  _setup.preamConf.preamMode = 2;  // first preamble bit = first sync word bit
+  _setup.formatConf.nSwBits = phy->sync_bits;
+  _setup.formatConf.bMsbFirst = 1;
+  _setup.formatConf.whitenMode = 0;
+
+  _setup.config.frontEndMode = 0;  // differential
+  _setup.config.biasMode = 0;      // internal bias
+  _setup.txPower = phy->tx_power;
+
+  const uint32_t* synth = fast ? _synth_fast_overrides : _synth_overrides;
+  uint32_t n_synth = fast ? sizeof(_synth_fast_overrides) / sizeof(uint32_t)
+                          : sizeof(_synth_overrides) / sizeof(uint32_t);
+  uint32_t n = 0;
+  _overrides[n++] = _base_overrides[0];
+  for (uint32_t i = 0; i < n_synth; i++) _overrides[n++] = synth[i];
+  for (uint32_t i = 1; i < BASE_OVERRIDES; i++) _overrides[n++] = _base_overrides[i];
+  for (uint8_t i = 0; i < _n_extra_overrides; i++) _overrides[n++] = _extra_overrides[i];
+  _overrides[n] = 0xFFFFFFFF;
+  _setup.pRegOverride = _overrides;
+}
+#else
 static void _init_setup(const radio_phy_t* phy)
 {
   memset(&_setup, 0, sizeof(_setup));
@@ -558,6 +736,7 @@ static void _init_ble_setup(const radio_phy_t* phy)
   _ble_setup.pRegOverride2Mbps = _ble_2m_overrides;
   _ble_setup.pRegOverrideCoded = _ble_no_overrides;
 }
+#endif
 
 static radio_status_t _run_fs()
 {
@@ -572,6 +751,9 @@ static radio_status_t _run_fs()
 
 radio_status_t radio_init(const radio_phy_t* phy)
 {
+#if defined(MCU_CC26X0)
+  if (phy->ble_2m) return RADIO_ERR_PARAM;
+#endif
   if (phy->ble_2m && phy->sync_bits != 32) return RADIO_ERR_PARAM;
   if (phy->deviation > 511750 || phy->sync_bits < 8 || phy->sync_bits > 32 ||
       phy->preamble_bytes == 0 || phy->preamble_bytes > 32 ||
@@ -581,7 +763,9 @@ radio_status_t radio_init(const radio_phy_t* phy)
   if (_powered) radio_off();
   _hposc_init();
 
+#if !defined(MCU_CC26X0)
   _ble = phy->ble_2m;
+#endif
   // Bluetooth LE 2M PHY (500 kHz deviation): measured as 326 kHz
   _foff_deviation = _ble ? 326000 : phy->deviation;
   // Bluetooth LE 2M: its own 2 byte preamble and 32 bit access address
@@ -590,6 +774,10 @@ radio_status_t radio_init(const radio_phy_t* phy)
   radio_status_t st = _power_up(_ble);
   if (st != RADIO_OK) return st;
 
+#if defined(MCU_CC26X0)
+  _init_setup(phy);
+  st = _run_op((rfc_radioOp_t*)&_setup);
+#else
   if (_ble) {
     _init_ble_setup(phy);
     st = _run_op((rfc_radioOp_t*)&_ble_setup);
@@ -597,6 +785,7 @@ radio_status_t radio_init(const radio_phy_t* phy)
     _init_setup(phy);
     st = _run_op((rfc_radioOp_t*)&_setup);
   }
+#endif
   if (st == RADIO_OK && _freq_khz) st = _run_fs();
   return st;
 }

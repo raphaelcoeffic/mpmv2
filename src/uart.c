@@ -8,9 +8,15 @@
 #include <string.h>
 
 #include "uart.h"
-#include "dma.h"
 
+// CC26x0: one UART, no TX DMA (its 1 KB control table: 20 KB of RAM)
+#if defined(MCU_CC26X0)
+#define MAX_UART 1
+#else
+#define UART_DMA
 #define MAX_UART 2
+#include "dma.h"
+#endif
 
 // FIFO levels:
 // - TX: 32 * 1/2 = 16 bytes
@@ -53,24 +59,32 @@ static uart_state_t _uart_state[MAX_UART];
 // Lookup tables
 static const uint32_t _uart_pwr_domain[MAX_UART] = {
     PRCM_PERIPH_UART0,
+#if MAX_UART > 1
     PRCM_PERIPH_UART1,
+#endif
 };
 
 static const uint32_t _uart_base[MAX_UART] = {
     UART0_BASE,
+#if MAX_UART > 1
     UART1_BASE,
+#endif
 };
 
 // IOC ports: RX, TX, CTS, RTS (IOCPinTypeUart() only knows UART0)
 static const uint32_t _uart_ioc_port[MAX_UART][4] = {
     {IOC_PORT_MCU_UART0_RX, IOC_PORT_MCU_UART0_TX, IOC_PORT_MCU_UART0_CTS, IOC_PORT_MCU_UART0_RTS},
+#if MAX_UART > 1
     {IOC_PORT_MCU_UART1_RX, IOC_PORT_MCU_UART1_TX, IOC_PORT_MCU_UART1_CTS, IOC_PORT_MCU_UART1_RTS},
+#endif
 };
 
+#if defined(UART_DMA)
 static const uint8_t _uart_tx_dma_channel[MAX_UART] = {
   UDMA_CHAN_UART0_TX,
   UDMA_CHAN_UART1_TX,
 };
+#endif
 
 static void _init_pwr_domain(uart_t uart) {
   uint32_t pwr_domain = _uart_pwr_domain[uart];
@@ -94,7 +108,9 @@ void uart_init(uart_t uart, const uart_device_t* dev)
 
   _init_pwr_domain(uart);
   _init_state(uart);
+#if defined(UART_DMA)
   dma_init();
+#endif
 
   uint32_t base = _uart_base[uart];
   const uint32_t pins[4] = {dev->rx, dev->tx, dev->cts, dev->rts};
@@ -222,7 +238,9 @@ static inline bool _tx_buffer_read(uart_tx_buffer_t* buf, uint8_t* data)
   return true; 
 }
 
+#if defined(UART_DMA)
 static void _dma_done_irq(uart_t uart);
+#endif
 
 static void _uart_irq(uart_t uart)
 {
@@ -262,6 +280,7 @@ static void _uart_irq(uart_t uart)
     }
   }
 
+#if defined(UART_DMA)
   if (uDMAIntStatus(UDMA0_BASE) & st->tx_dma_channel) {
     _dma_done_irq(uart);
   }
@@ -270,14 +289,19 @@ static void _uart_irq(uart_t uart)
     UARTIntDisable(base, UART_INT_EOT);
     st->tx_dma_channel = 0;
   }
+#endif
 }
 
 static void _uart0_irq() { _uart_irq(UART0); }
+#if MAX_UART > 1
 static void _uart1_irq() { _uart_irq(UART1); }
+#endif
 
 static void (*const _uart_irq_handler[MAX_UART])() = {
     _uart0_irq,
+#if MAX_UART > 1
     _uart1_irq,
+#endif
 };
 
 void uart_enable_irqs(uart_t uart, const uart_callbacks_t* callbacks)
@@ -387,6 +411,7 @@ bool uart_print_irq(uart_t uart, const char* str)
   return uart_tx_irq(uart, (const uint8_t*)str, len);
 }
 
+#if defined(UART_DMA)
 // TX DMA methods
 //
 
@@ -470,3 +495,4 @@ static void _dma_done_irq(uart_t uart)
     UARTIntEnable(base, UART_INT_EOT);
   }
 }
+#endif

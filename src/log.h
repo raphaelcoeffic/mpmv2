@@ -13,7 +13,11 @@
 // out of the busy paths), sent from power up with debug.txt ("usb = on",
 // settings.c) or while a host asks for it, from the oldest line kept: the
 // lines before a problem too. From the main loop only, not from interrupts.
+#if defined(MCU_CC26X0)
+#define LOG_SIZE 1024  // power of 2; 20 KB of RAM
+#else
 #define LOG_SIZE 4096  // power of 2
+#endif
 
 #define LOG_FILE 0x01  // debug.txt
 #define LOG_HOST 0x02  // a host's request

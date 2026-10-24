@@ -21,7 +21,12 @@
 #define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
 #define FRAME_FEC_DATA_MAX 64     // CC2500 FEC: payload + CRC + padding, 2 air bytes each
 #define FRAME_HDR_MAX 66  // FrSky L: 6 header bytes, 11 chips per bit
-#define FRAME_AIR_MAX 1100  // longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR
+// Longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR. CC26x0: no CYRF6936
+#if defined(MCU_CC26X0)
+#define FRAME_AIR_MAX 255
+#else
+#define FRAME_AIR_MAX 1100
+#endif
 
 typedef enum {
   FRAME_RAW,    // sync word + payload

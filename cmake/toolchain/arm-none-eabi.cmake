@@ -85,6 +85,12 @@ if(NOT TARGET toolchain_gcc)
     target_compile_options(toolchain_gcc_m4f INTERFACE -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16)
     target_link_options(toolchain_gcc_m4f INTERFACE -mcpu=cortex-m4 -mfloat-abi=hard -mfpu=fpv4-sp-d16)
     target_link_libraries(toolchain_gcc_m4f INTERFACE toolchain_gcc)
+
+    # CC26x0 (XJT-Lite's CC2650): no FPU
+    add_library(toolchain_gcc_m3 INTERFACE)
+    target_compile_options(toolchain_gcc_m3 INTERFACE -mcpu=cortex-m3 -mfloat-abi=soft)
+    target_link_options(toolchain_gcc_m3 INTERFACE -mcpu=cortex-m3 -mfloat-abi=soft)
+    target_link_libraries(toolchain_gcc_m3 INTERFACE toolchain_gcc)
 endif()
 
 

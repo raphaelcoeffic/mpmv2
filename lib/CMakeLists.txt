@@ -1,8 +1,13 @@
 # Set devices directory for linker scripts
 set(TI_DEVICE_DIR "${CMAKE_CURRENT_LIST_DIR}/ti/devices" PARENT_SCOPE)
 
-# Import TI devices
-add_subdirectory(ti/devices/cc13x2_cc26x2)
+# Import TI devices: CC26x0 for the XJT-Lite (CC2650), CC13x2/CC26x2 for the
+# others
+if (BOARD STREQUAL "XJT_LITE")
+  add_subdirectory(ti/devices/cc26x0)
+else()
+  add_subdirectory(ti/devices/cc13x2_cc26x2)
+endif()
 
 # Segger RTT
 add_subdirectory(SeggerRTT)
