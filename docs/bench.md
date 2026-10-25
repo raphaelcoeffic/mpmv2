@@ -25,11 +25,14 @@ and the status and next steps in [status.md](status.md).
   is about -20 to -30 dBm, far above sensitivity. Sensitivity and range are
   not covered by this bench.
 
-**Module power:** some modules (the IRX4 Lite) stay in the bootloader (USB
-`1eaf:0003`, "Maple 003") on USB power alone. Power the module with 5V first
-(TX bay or external supply), then connect USB. The bench firmware then shows
-up as a serial port (`1eaf:0004`, "Maple"). After flashing, the module resets
-into the bootloader again: unplug and replug USB, with the 5V still connected.
+**Module power and start:** USB power alone is enough, RF at full power
+included (the IRX4 Lite takes nothing from an external 5V while USB is
+plugged in). But at every power up its boot loader stays in DFU (USB
+`1eaf:0003`, "Maple 003"), external 5V or not: it sees the USB host (D-,
+PA11, low) and waits to be flashed. `tools/bench/mpm_start.py` starts the
+firmware without writing anything (a DFU download request, then a USB reset
+before the data reaches flash); a flash starts it too. The bench firmware
+then shows up as a serial port (`1eaf:0004`, "Maple").
 
 ## Firmware
 
@@ -135,6 +138,7 @@ setup, setups as `;`-separated commands or example files
 
 | Script | What it does |
 |---|---|
+| `mpm_start.py` | The 4-in-1 waiting in its USB boot loader after power up ("Maple 003") starts its firmware, nothing written (libusb: DFU download request, USB reset before the data reaches flash) |
 | `link.py` | Two-way link test with any pair of setups: numbered packets (the counter is at byte 2), all bytes compared, CRC flags checked |
 | `suite_nrf.py` | NRF24L01 at 250 kbps / 1 Mbps / 2 Mbps with 6 addresses (2 Mbps: `nrf2mble` both ways, `nrf2m` CC2652 -> MPM), XN297 standard and enhanced modes |
 | `esb.py` | Enhanced ShockBurst: CC2652 PTX with auto-ack and retransmissions, MPM NRF PRX, ack payloads. `--rate 2mble`: 2 Mbps on the Bluetooth LE 2M PHY |
