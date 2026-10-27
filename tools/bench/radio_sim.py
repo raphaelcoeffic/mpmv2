@@ -419,6 +419,7 @@ def sport_frame(phys: int, prim: int, app: int, value: int) -> bytes:
 # physical id 0x17, prim 0x30 (0x31 writes), app id 0x0C20, the field in the
 # value; replies prim 0x32, the field then its value (0xFF, n, value: status n)
 UNI_PHYS, UNI_APP = 0x17, 0x0C20
+FIRST_TIMEOUT = 1.5  # s, the first request of a session
 UNI_FIELDS = [(0x7FF, "version"), (0x8FF, "mode"), (0x9FF, "rx type"), (0xE0, "channels 9-16"),
               (0xE1, "SBUS on C8"), (0xE2, "servo on SBUS"), (0xE3, "CPPM"), (0xE4, "tune offset"),
               (0xE5, "auto tuning"), (0xEA, "invert SBUS"), (0xEC, "FBUS")]
@@ -461,7 +462,14 @@ def cmd_sport(r: Radio, a):
         return 1
     print(f"{time.monotonic() - t0:5.2f} s telemetry link up")
 
+    # The first request waits longer: the S.Port link to the receiver starts
+    # with its sequence handshake (FrSkyX_seq_sport(), 0x08: init), 150 to
+    # 450 ms before a first reply, more right after a bind
+    first = [True]
+
     def exchange(frame: bytes, match) -> tuple[float, bytes] | None:
+        timeout = max(a.timeout, FIRST_TIMEOUT) if first[0] else a.timeout
+        first[0] = False
         for _ in range(3):
             end = time.monotonic() + 1.0
             while not r.push(frame):
@@ -470,7 +478,7 @@ def cmd_sport(r: Radio, a):
                     return None
                 time.sleep(0.005)
             sent = time.monotonic()
-            end = sent + a.timeout
+            end = sent + timeout
             while (left := end - time.monotonic()) > 0:
                 s = r.wait(0x02, left)
                 if not s:
