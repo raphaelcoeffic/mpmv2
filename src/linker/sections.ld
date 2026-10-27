@@ -36,7 +36,7 @@ SECTIONS
         *(.ARM.extab* .gnu.linkonce.armextab.*)
     } > FLASH
 
-    .init_array (READONLY) :
+    .init_array :
     {
         _init_array = .;
         KEEP(*(SORT(.init_array.*)))
