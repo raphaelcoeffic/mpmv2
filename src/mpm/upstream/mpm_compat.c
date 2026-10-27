@@ -116,6 +116,7 @@ void mpm_protocol_frame_data()
 #if defined(FRSKYX_CC2500_INO)
   if ((protocol == PROTO_FRSKYX || protocol == PROTO_FRSKYX2) && n == 1) {
     // Bind options: telemetry off, channels 9-16
+    if (binding_idx != d[0]) debugln("bind options %d", d[0]);
     binding_idx = d[0];
   }
 #endif
