@@ -13,6 +13,10 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
   radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10]] [--option 0] [--time 0]
                                          a real receiver: CH1-4 sweep (--sweep-ch), status and telemetry each second
+  radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
+                                         S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
+                                         (sportTelemetryPush/Pop): the UNI firmware's setup fields
+                                         (UNI-Setup7.lua), or the --push frames; the replies decoded
 """
 
 from __future__ import annotations
@@ -138,6 +142,8 @@ class Radio:
         self.telem: queue.Queue = queue.Queue()
         self.sending = True
         self.frames_sent = 0
+        self.buf_low = False
+        self._push: bytes = b""
         self._stop = False
         self._threads = [threading.Thread(target=f, daemon=True) for f in (self._tx_loop, self._rx_loop)]
         for t in self._threads:
@@ -146,11 +152,21 @@ class Radio:
     def set(self, **kw):
         self.frame = {**self.frame, **kw}
 
+    def push(self, data: bytes) -> bool:
+        """Protocol data in the next frame only, as EdgeTX's outputTelemetryBuffer
+        (pulses/multi.cpp): False while the previous one waits or the module
+        reports its buffer low (status flag 0x80)"""
+        if self._push or self.buf_low:
+            return False
+        self._push = data
+        return True
+
     def _tx_loop(self):
         next_t = time.monotonic()
         while not self._stop:
             if self.sending:
-                self.ser.write(encode(**self.frame))
+                data, self._push = self._push, b""
+                self.ser.write(encode(**self.frame, data=data) if data else encode(**self.frame))
                 self.frames_sent += 1
             next_t += FRAME_PERIOD
             time.sleep(max(0.0, next_t - time.monotonic()))
@@ -167,6 +183,8 @@ class Radio:
                 del buf[:i]
                 if len(buf) < 4 or len(buf) < 4 + buf[3]:
                     break
+                if buf[2] == 0x01 and buf[3]:
+                    self.buf_low = bool(buf[4] & 0x80)
                 self.telem.put((time.monotonic(), buf[2], bytes(buf[4:4 + buf[3]])))
                 del buf[:4 + buf[3]]
 
@@ -378,9 +396,113 @@ def cmd_drive(r: Radio, a):
     return 0
 
 
+def sport_phys_id(i: int) -> int:
+    """The physical id with its check bits (EdgeTX getDataId())"""
+    b = [i >> n & 1 for n in range(5)]
+    return i | (b[0] ^ b[1] ^ b[2]) << 5 | (b[2] ^ b[3] ^ b[4]) << 6 | (b[0] ^ b[2] ^ b[4]) << 7
+
+
+def sport_frame(phys: int, prim: int, app: int, value: int) -> bytes:
+    """sportTelemetryPush() as EdgeTX sends it in a MULTI frame (sendSport()):
+    the 8 bytes of the S.Port frame, no stuffing, no CRC"""
+    return bytes([sport_phys_id(phys), prim]) + struct.pack("<HI", app, value & 0xFFFFFFFF)
+
+
+# UNI receiver firmware setup (Mike Blandford, UNI-Setup7.lua): reads on
+# physical id 0x17, prim 0x30 (0x31 writes), app id 0x0C20, the field in the
+# value; replies prim 0x32, the field then its value (0xFF, n, value: status n)
+UNI_PHYS, UNI_APP = 0x17, 0x0C20
+UNI_FIELDS = [(0x7FF, "version"), (0x8FF, "mode"), (0x9FF, "rx type"), (0xE0, "channels 9-16"),
+              (0xE1, "SBUS on C8"), (0xE2, "servo on SBUS"), (0xE3, "CPPM"), (0xE4, "tune offset"),
+              (0xE5, "auto tuning"), (0xEA, "invert SBUS"), (0xEC, "FBUS")]
+UNI_MODES = ["V1FCC", "V1-EU", "V2FCC", "V2-EU"]
+UNI_RX_TYPES = ["D8R/D4R", "X8R/X6R", "X4R/X4R-SB", "RX8R-PRO", "RX8R", "RX4R/6 G-RX6/8", "XSR", "R-XSR",
+                "S8R/S6R"]
+
+
+def uni_reply_key(value: int) -> tuple[int, int]:
+    """The field of a UNI reply (as its read code) and its value"""
+    if value & 0xFF == 0xFF:
+        return (value >> 8 & 0xFF) << 8 | 0xFF, value >> 16
+    return value & 0xFF, value >> 8 & 0xFF
+
+
+def uni_text(code: int, v: int) -> str:
+    if code == 0x8FF and v < len(UNI_MODES):
+        return f"{v} {UNI_MODES[v]}"
+    if code == 0x9FF and 0 <= v - 1 < len(UNI_RX_TYPES):
+        return f"{v} {UNI_RX_TYPES[v - 1]}"
+    if code == 0xE4:
+        return f"{v - 256 if v > 128 else v}"
+    return f"{v}"
+
+
+def cmd_sport(r: Radio, a):
+    """The receiver must be bound, telemetry on. Waits for its telemetry
+    (S.Port link frames), then each request: pushed as soon as the module takes
+    it, again after --timeout, up to 3 times"""
+    r.set(protocol=a.proto, sub=a.sub, option=a.option, rx_num=a.rx_num)
+    # A FrSky X receiver takes about 5 s to find the module again after a
+    # protocol start
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 15.0:
+        s = r.wait(0x02, 0.5)
+        if s and telem_decode(0x02, s[1]):
+            break
+    else:
+        print("no telemetry from the receiver")
+        return 1
+    print(f"{time.monotonic() - t0:5.2f} s telemetry link up")
+
+    def exchange(frame: bytes, match) -> tuple[float, bytes] | None:
+        for _ in range(3):
+            end = time.monotonic() + 1.0
+            while not r.push(frame):
+                if time.monotonic() > end:
+                    print("  module buffer low, not taken")
+                    return None
+                time.sleep(0.005)
+            sent = time.monotonic()
+            end = sent + a.timeout
+            while (left := end - time.monotonic()) > 0:
+                s = r.wait(0x02, left)
+                if not s:
+                    break
+                d = s[1]
+                if len(d) >= 8 and d[1] != 0x10 and match(d):
+                    return s[0] - sent, d
+        return None
+
+    fails = 0
+    if a.push:
+        for p in a.push:
+            phys, prim, app, value = (int(v, 16) for v in p.split(":"))
+            frame = sport_frame(phys, prim, app, value)
+            print(f"push {frame.hex(' ')}")
+            got = exchange(frame, lambda d: d[2] | d[3] << 8 == app)
+            if got:
+                print(f"  {got[0] * 1000:4.0f} ms reply {got[1].hex(' ')}")
+            else:
+                print("  no reply")
+                fails += 1
+        return 1 if fails else 0
+
+    for code, name in UNI_FIELDS:
+        frame = sport_frame(UNI_PHYS, 0x30, UNI_APP, code)
+        got = exchange(frame, lambda d: d[1] == 0x32 and d[2] | d[3] << 8 == UNI_APP and
+                       uni_reply_key(struct.unpack("<I", d[4:8])[0])[0] == code)
+        if got:
+            v = uni_reply_key(struct.unpack("<I", got[1][4:8])[0])[1]
+            print(f"{name:14s} {uni_text(code, v):18s} {got[0] * 1000:4.0f} ms  {got[1].hex(' ')}")
+        else:
+            print(f"{name:14s} no reply")
+            fails += 1
+    return 1 if fails else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["status", "scan", "bind", "link", "drive"])
+    ap.add_argument("command", choices=["status", "scan", "bind", "link", "drive", "sport"])
     ap.add_argument("-p", "--port", default="cc", help="serial port (default: the LaunchPad)")
     ap.add_argument("--proto", type=int, default=PROTO_TEST)
     ap.add_argument("--sub", type=int, default=0)
@@ -394,12 +516,14 @@ def main():
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
+    ap.add_argument("--push", action="append", help="sport: PHYS:PRIM:APP:VALUE (hex), as sportTelemetryPush()")
+    ap.add_argument("--timeout", type=float, default=0.5, help="sport: seconds for a reply")
     a = ap.parse_args()
     if a.option is None:
         a.option = 40 if a.proto == PROTO_TEST else 0
     with Radio(find_port(a.port)) as r:
         rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link,
-              "drive": cmd_drive}[a.command](r, a)
+              "drive": cmd_drive, "sport": cmd_sport}[a.command](r, a)
         print(f"frames sent {r.frames_sent}")
     sys.exit(rc)
 

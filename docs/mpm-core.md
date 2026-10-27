@@ -288,6 +288,19 @@ on it from the port or the 4-in-1 (`bind --sub N`) and cuts the signal
 (`loss`). `frsky_receiver.py` drives a bound FrSky receiver from either
 (`rate`, `loss`, `cold`), on SBUS or a servo output.
 
+`radio_sim.py sport --proto 64 --sub <s>` plays a Lua script talking to a
+bound FrSky X receiver (`sportTelemetryPush()`/`Pop()`): each request goes
+in one frame's 8 extra bytes, as EdgeTX's `sendSport()` (no stuffing, no
+CRC, held while the status reports the buffer low), and the replies come
+back as S.Port telemetry. By default it reads the setup fields of Mike
+Blandford's UNI receiver firmware (UNI-Setup7.lua: physical id 0x17, app id
+0x0C20: version, mode, receiver type, tune offset...); `--push
+PHYS:PRIM:APP:VALUE` (hex, repeatable) sends other frames, e.g.
+`17:30:0c30:80` for the S6R/S8R stabilisation script. Over the bay:
+`-p <baysim link port>`. The MULTI-Module has no S.Port polling any more
+(only FrSky's own modules poll the radio as a sensor): the radio's frames
+carry the data, the module's buffer-low flag holds them back.
+
 | Receiver | Protocol | Result |
 |---|---|---|
 | FrSky V8R4-II (V8 mode) | FrSky V (25), option 0 | binds (F/S button held at power up), CH3 56 pulses/s, period 17.6 to 18.4 ms, as with the 4-in-1. Signal off: holds the last position (no failsafe set); back on, the new position after 0.14 to 0.56 s. Powered up with the port sending: the first pulse after 0.05 to 0.87 s (9 times); with the 4-in-1 (bench firmware) 0.05 to 39 s, whatever its option. 10 minutes (CH1-4 swept): no gap, 50 to 58 pulses each second. Right after the bind, no output for the first 90 s of tries (port and 4-in-1), not explained. No telemetry (receive only) |
