@@ -61,6 +61,10 @@ uint8_t RX_RSSI, TX_RSSI, RX_LQI, TX_LQI;
 uint8_t telemetry_link;
 uint8_t telemetry_counter;
 uint8_t telemetry_lost;
+#ifdef SPORT_SEND
+uint8_t SportData[MAX_SPORT_BUFFER];
+uint8_t SportHead, SportTail;
+#endif
 
 uint8_t eeprom_read_byte(EE_ADDR address) { return eeprom_read(address); }
 
@@ -100,6 +104,59 @@ void mpm_protocol_idle()
 
 // The core's telemetry hook: Telemetry.ino's TelemetryUpdate() (Update_Telem())
 void mpm_protocol_telemetry() { TelemetryUpdate(); }
+
+// The core's frame hook: the protocol data of a radio frame (mpm.data), as
+// update_serial_data() of Multiprotocol.ino (rx_len > 27)
+void mpm_protocol_frame_data()
+{
+  const uint8_t* d = mpm.data;
+  uint8_t n = mpm.data_len;
+  (void)d;
+  if (!n) return;
+#if defined(FRSKYX_CC2500_INO)
+  if ((protocol == PROTO_FRSKYX || protocol == PROTO_FRSKYX2) && n == 1) {
+    // Bind options: telemetry off, channels 9-16
+    binding_idx = d[0];
+  }
+#endif
+#ifdef SPORT_SEND
+#define BYTE_STUFF 0x7D
+#define STUFF_MASK 0x20
+  if ((protocol == PROTO_FRSKYX || protocol == PROTO_FRSKYX2) && n == 8) {
+    // An S.Port frame for the receiver: physical id, then 7 bytes
+    bool sport_valid = false;
+    for (uint8_t i = 1; i < 8; i++)
+      if (d[i] != 0) sport_valid = true;  // not a payload full of 0
+    if ((d[0] & 0x1F) > 0x1B) sport_valid = false;
+    if (sport_valid) {
+      SportData[SportTail] = 0x7E;
+      SportTail = (SportTail + 1) & (MAX_SPORT_BUFFER - 1);
+      SportData[SportTail] = d[0] & 0x1F;
+      SportTail = (SportTail + 1) & (MAX_SPORT_BUFFER - 1);
+      for (uint8_t i = 1; i < 8; i++) {
+        if (d[i] == BYTE_STUFF || d[i] == 0x7E) {
+          SportData[SportTail] = BYTE_STUFF;
+          SportTail = (SportTail + 1) & (MAX_SPORT_BUFFER - 1);
+          SportData[SportTail] = d[i] ^ STUFF_MASK;
+        } else
+          SportData[SportTail] = d[i];
+        SportTail = (SportTail + 1) & (MAX_SPORT_BUFFER - 1);
+      }
+      uint8_t used = SportTail;
+      if (SportHead > SportTail)
+        used += MAX_SPORT_BUFFER - SportHead;
+      else
+        used -= SportHead;
+      if (used >= MAX_SPORT_BUFFER - (MAX_SPORT_BUFFER >> 2)) {
+        // The status at once: the radio holds its frames
+        DATA_BUFFER_LOW_on;
+        SEND_MULTI_STATUS_on;
+        debugln("Low buf=%d,h=%d,t=%d", used, SportHead, SportTail);
+      }
+    }
+  }
+#endif
+}
 
 // End_Bind() of the MPM for the protocols that count their bind packets
 void end_bind_counter()

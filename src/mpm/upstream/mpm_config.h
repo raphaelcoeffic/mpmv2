@@ -6,6 +6,7 @@
 #define MULTI_TELEMETRY
 #define HUB_TELEMETRY
 #define SPORT_TELEMETRY
+#define SPORT_SEND  // Validate.h: with SPORT_TELEMETRY
 #define FAILSAFE_ENABLE
 
 #if defined(MCU_CC26X0)

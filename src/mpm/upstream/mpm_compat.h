@@ -109,6 +109,10 @@ extern bool lbt_power;
 #define LBT_POWER_off (lbt_power = false)
 #define IS_LBT_POWER_on (lbt_power)
 #define IS_LBT_POWER_off (!lbt_power)
+// S.Port to the receiver: buffer filling up, in the status (protocol_flags3)
+#define DATA_BUFFER_LOW_on (mpm.data_buffer_low = true)
+#define DATA_BUFFER_LOW_off (mpm.data_buffer_low = false)
+#define SEND_MULTI_STATUS_on mpm_send_status()
 
 #define GET_FLAG(ch, mask) (ch ? mask : 0)
 #define CH5_SW (Channel_AUX & _BV(0))
@@ -249,6 +253,12 @@ extern uint8_t RX_RSSI, TX_RSSI, RX_LQI, TX_LQI;
 extern uint8_t telemetry_link;
 extern uint8_t telemetry_counter;
 extern uint8_t telemetry_lost;
+#ifdef SPORT_SEND
+// S.Port frames of the radio for the receiver (FrSky X), stuffed
+#define MAX_SPORT_BUFFER 64
+extern uint8_t SportData[MAX_SPORT_BUFFER];
+extern uint8_t SportHead, SportTail;
+#endif
 
 enum MultiPacketTypes {
   MULTI_TELEMETRY_STATUS = 1,

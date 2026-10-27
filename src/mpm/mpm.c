@@ -83,6 +83,8 @@ void mpm_sub_invalid() { _sub_valid = false; }
 
 bool mpm_sub_valid() { return _sub_valid; }
 
+void mpm_send_status() { _send_status = true; }
+
 static void _send_status_frame()
 {
   uint8_t d[STATUS_LEN] = {0};
@@ -93,6 +95,7 @@ static void _send_status_frame()
     if (mpm.bind_in_progress) flags |= MPM_STATUS_BINDING;
     if (_proto && _proto->ch_map) flags |= MPM_STATUS_CH_MAP;
     if (_proto && _proto->failsafe) flags |= MPM_STATUS_FAILSAFE;
+    if (mpm.data_buffer_low) flags |= MPM_STATUS_BUFFER_LOW;
   }
   d[0] = flags;
   d[1] = MPM_VERSION_MAJOR;
@@ -166,6 +169,10 @@ static void _update_telem(uint32_t ms)
   if (_callback && mpm.protocol != MPM_PROTO_LIST) mpm_protocol_telemetry();
 }
 
+// Protocol layer hook (upstream/mpm_compat.c): the protocol data of a radio
+// frame (mpm.data: S.Port for the receiver, bind options...)
+__attribute__((weak)) void mpm_protocol_frame_data() {}
+
 // Protocol layer hook (upstream/mpm_compat.c): what the MPM's protocol_init()
 // resets before a protocol starts
 __attribute__((weak)) void mpm_protocol_prepare() {}
@@ -206,6 +213,7 @@ static void _protocol_init()
   _sub_valid = false;
   mpm.failsafe_valid = false;
   mpm.option_override = 0xFF;
+  mpm.data_buffer_low = false;
   mpm_port_reset_rf();
 
   mpm.id_master = _module_id;
@@ -294,6 +302,8 @@ static void _process_frame(const mpm_frame_t* f)
   mpm.channel_aux = 0;
   for (uint8_t i = 0; i < 8; i++)
     if (mpm.channels[4 + i] > MPM_CHANNEL_SWITCH) mpm.channel_aux |= 1 << i;
+
+  mpm_protocol_frame_data();
 }
 
 // A PPM frame as a serial one, as the MPM's PPM mode: the model of the

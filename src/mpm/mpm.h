@@ -116,6 +116,8 @@ typedef struct {
   // Option type shown by the radio instead of the protocol's (0..15),
   // 0xFF = the protocol's. Reset at each protocol start
   uint8_t option_override;
+  // Protocol data for the receiver (S.Port) filling up: the radio holds it
+  bool data_buffer_low;
 } mpm_state_t;
 
 extern mpm_state_t mpm;
@@ -139,5 +141,7 @@ void mpm_run();
 void mpm_bind_done();
 void mpm_sub_invalid();
 bool mpm_sub_valid();
+// The status telemetry at once (the next update), not at its period
+void mpm_send_status();
 // Telemetry frame of the given type: header + data
 void mpm_telem_send(uint8_t type, const uint8_t* data, uint8_t len);
