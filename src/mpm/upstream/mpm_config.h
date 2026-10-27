@@ -8,6 +8,9 @@
 #define SPORT_TELEMETRY
 #define SPORT_SEND  // Validate.h: with SPORT_TELEMETRY
 #define FAILSAFE_ENABLE
+// The DSM bind details in the log (DSM_cyrf6936: bind started, the
+// receiver's response or its timeout, clone ID): a few lines a bind
+#define DEBUG_BIND 1
 
 #if defined(MCU_CC26X0)
 // FrSky XJT-Lite (CC2650, 20 KB of RAM): FrSky D and X, and the WLtoys
