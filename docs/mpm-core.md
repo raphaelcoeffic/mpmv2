@@ -281,7 +281,11 @@ telemetry (S.Port RSSI and battery, hub link frame, AFHDS2A sensors, DSM
 telemetry and bind response) each second. DSM Auto (sub 4): the bind
 response sets the sub protocol and channel count, as EdgeTX does.
 FrSky X: `--telem-off` and `--ch9-16` send EdgeTX's bind options byte
-(receiver telemetry off, outputs CH9-16) in the frames while binding.
+(receiver telemetry off, outputs CH9-16) in the frames while binding;
+`--sweep-from 9 --sweep-ch 1` then sweeps CH9 alone, to see which
+outputs a receiver gives. An X8R with FrSky's firmware honours both
+options, V1 (2018 LBT, FrSky X) and V2 (2.1.0 LBT, FrSky X2); an S8R with
+UNI v85 ignores them.
 `servo_mon.py` (an RP2040-Zero with MicroPython, `rp2040/main.py`) switches
 the receiver supply (GP11) and measures a servo output (GP12): pulses,
 width and period each second, gaps; or SBUS (`watch --in2 sbus`): frames
