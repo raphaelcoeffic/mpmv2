@@ -11,7 +11,7 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py scan                      protocol list, as EdgeTX reads it
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
-  radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10]] [--option 0] [--time 0]
+  radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10] [--telem-off] [--ch9-16]] [--option 0] [--time 0]
                                          a real receiver: CH1-4 sweep (--sweep-ch), status and telemetry each second
   radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
                                          S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
@@ -143,6 +143,9 @@ class Radio:
         self.sending = True
         self.frames_sent = 0
         self.buf_low = False
+        # FrSky X bind options sent while binding (EdgeTX sendD16BindOption()):
+        # bit 0 receiver telemetry off, bit 1 receiver outputs CH9-16. None: not sent
+        self.bind_opt: int | None = None
         self._push: bytes = b""
         self._stop = False
         self._threads = [threading.Thread(target=f, daemon=True) for f in (self._tx_loop, self._rx_loop)]
@@ -166,6 +169,8 @@ class Radio:
         while not self._stop:
             if self.sending:
                 data, self._push = self._push, b""
+                if not data and self.bind_opt is not None and self.frame.get("bind") and not self.buf_low:
+                    data = bytes([self.bind_opt])
                 self.ser.write(encode(**self.frame, data=data) if data else encode(**self.frame))
                 self.frames_sent += 1
             next_t += FRAME_PERIOD
@@ -340,6 +345,8 @@ def cmd_drive(r: Radio, a):
         lo, hi, st = (int(v) for v in a.options.split(":"))
         options = list(range(lo, hi + 1, st))
     r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind)
+    if a.telem_off or a.ch9_16:
+        r.bind_opt = (1 if a.telem_off else 0) | (2 if a.ch9_16 else 0)
     t0 = time.monotonic()
     binding = a.bind
     bind_start, opt_idx = 0.0, 0
@@ -516,6 +523,8 @@ def main():
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
+    ap.add_argument("--telem-off", action="store_true", help="drive: FrSky X bind option, receiver telemetry off")
+    ap.add_argument("--ch9-16", action="store_true", help="drive: FrSky X bind option, receiver outputs CH9-16")
     ap.add_argument("--push", action="append", help="sport: PHYS:PRIM:APP:VALUE (hex), as sportTelemetryPush()")
     ap.add_argument("--timeout", type=float, default=0.5, help="sport: seconds for a reply")
     a = ap.parse_args()
