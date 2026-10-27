@@ -423,7 +423,7 @@ void Frsky_init_clone(void)
 					packet[start] |= FrSkyX_TX_IN_Seq&0x03;
 					packet[start+1]  = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq&0x03].count;
 					for (uint8_t i=start+2;i<start+2+FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq&0x03].count;i++)
-						packet[i] = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq&0x03].payload[i];
+						packet[i] = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq&0x03].payload[i-start-2];  // mpm-v2: was payload[i], beyond the frame
 				}
 				else if ( FrSkyX_TX_Seq != 0x08 )
 				{
@@ -437,7 +437,7 @@ void Frsky_init_clone(void)
 							if(SportHead==SportTail)
 								break; //buffer empty
 							packet[i]=SportData[SportHead];
-							FrSkyX_TX_Frames[FrSkyX_TX_Seq].payload[i-start+2]=SportData[SportHead];
+							FrSkyX_TX_Frames[FrSkyX_TX_Seq].payload[i-start-2]=SportData[SportHead];  // mpm-v2: was i-start+2, past payload[8]
 							SportHead=(SportHead+1) & (MAX_SPORT_BUFFER-1);
 							nbr_bytes++;
 						}
@@ -464,7 +464,7 @@ void Frsky_init_clone(void)
 						packet[start] |= FrSkyX_TX_IN_Seq;
 						packet[start+1] = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq].count;
 						for (uint8_t i=start+2;i<start+2+FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq].count;i++)
-							packet[i] = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq].payload[i-start+2];
+							packet[i] = FrSkyX_TX_Frames[FrSkyX_TX_IN_Seq].payload[i-start-2];  // mpm-v2: was i-start+2
 					}
 				}
 				else
