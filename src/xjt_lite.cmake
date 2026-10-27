@@ -19,6 +19,8 @@ function(add_xjt_application name)
     set_target_properties(${elf} PROPERTIES
         OUTPUT_NAME ${name}
         LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/xjt_lite.ld
+        # Relinked when a script changes
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/xjt_lite.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 

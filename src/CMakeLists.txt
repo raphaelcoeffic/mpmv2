@@ -92,6 +92,8 @@ target_link_libraries(bootloader driverlib_cc13x2_cc26x2)
 target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
 set_target_properties(bootloader PROPERTIES
     LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/bootloader.ld
+    # Relinked when a script changes
+    LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/bootloader.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 if (USE_CCFG)
@@ -134,6 +136,8 @@ function(add_application name file)
     set_target_properties(${elf} PROPERTIES
         OUTPUT_NAME ${name}
         LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/app.ld
+        # Relinked when a script changes
+        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/app.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
