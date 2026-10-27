@@ -345,6 +345,8 @@ def cmd_drive(r: Radio, a):
         lo, hi, st = (int(v) for v in a.options.split(":"))
         options = list(range(lo, hi + 1, st))
     r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind)
+    # --set 9=204,10=204: channels held at these values (the swept ones aside)
+    fixed = {int(k): int(v) for k, v in (kv.split("=") for kv in a.set.split(","))} if a.set else {}
     if a.telem_off or a.ch9_16:
         r.bind_opt = (1 if a.telem_off else 0) | (2 if a.ch9_16 else 0)
     t0 = time.monotonic()
@@ -360,6 +362,8 @@ def cmd_drive(r: Radio, a):
         while not a.time or time.monotonic() - t0 < a.time:
             t = time.monotonic() - t0
             chans = [CH_CENTER] * 16
+            for ch, v in fixed.items():
+                chans[ch - 1] = v
             if not binding:
                 for i in range(a.sweep_ch):
                     chans[a.sweep_from - 1 + i] = round(CH_CENTER + (CH_MAX - CH_CENTER) *
@@ -529,6 +533,7 @@ def main():
     ap.add_argument("--period", type=float, default=4.0, help="drive: sweep period, s")
     ap.add_argument("--sweep-ch", type=int, default=4, help="drive: channels swept")
     ap.add_argument("--sweep-from", type=int, default=1, help="drive: first channel swept")
+    ap.add_argument("--set", help="drive: channels held at a value, CH=VALUE[,CH=VALUE...] (204..1844)")
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
