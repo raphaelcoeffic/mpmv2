@@ -109,6 +109,9 @@ typedef enum { FRAME_SHORT, FRAME_BAD, FRAME_OK } frame_result_t;
 
 // Checks the configuration and computes the known bytes
 bool frame_init(frame_t* f);
+// The same for TX only, without the RX sync word choice (CYRF6936 codes:
+// 2 ms less on the CC2652); frame_rx_sync() is the TX one
+bool frame_init_tx(frame_t* f);
 
 // Sync word size in bits and values (MSB first)
 uint8_t frame_sync_bits(const frame_t* f);

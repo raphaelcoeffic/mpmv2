@@ -60,6 +60,7 @@ static enum { S_IDLE, S_TX, S_RX } _state;
 static bool _rx_held;                 // RX ended for the protocol, the RF core still in it
 static volatile bool _rx_busy;        // a packet's sync came, not the packet yet
 static volatile uint32_t _rx_end_us;  // its expected end
+static uint32_t _tx_end_us;           // TX: the chip's end (TX GO and the air time)
 static uint16_t _rx_air_max;          // fixed length RX: air bytes
 static bool _rx_var;                  // RX length from the first bytes
 
@@ -112,9 +113,11 @@ static uint16_t _power_word(uint8_t pa)
 }
 
 // frame_init() takes about 2 ms here (its RX sync word choice), too long at
-// TX GO: the results for the last codes (DSM: 5 rows, for TX and RX), CRC
-// seed aside. The key holds the frame_init() inputs (newlib's byte memcmp()
-// on frame_t: 100 us).
+// TX GO: frame_init_tx() for TX (50 us), one choice for RX (8.4 ms with
+// frame_init() and frame_cyrf_rx_alt(), the CH1 packet after it late: DSM's
+// first frames after power up), and the results for the last codes (DSM: 5
+// rows, for TX and RX), CRC seed aside. The key holds the frame_init() inputs
+// (newlib's byte memcmp() on frame_t: 100 us).
 // RX (alt not NULL): with a length field, the 8DR chip takes 32 and 64 chip
 // codes (frame_cyrf_rx_alt(), DSM telemetry of a Lemon-RX DSMP: 32 chips)
 #define FRAME_CACHE 16
@@ -148,8 +151,10 @@ static bool _frame_init(frame_t* f, frame_t* alt, bool* has_alt)
       return true;
     }
   }
-  if (!frame_init(f)) return false;
+  // RX with the alternative: its RX sync word choice only (on the shared header)
+  if (!frame_init_tx(f)) return false;
   bool a = alt && f->var_len && frame_cyrf_rx_alt(f, alt);
+  if (alt && !a && !frame_init(f)) return false;
   if (alt) *has_alt = a;
   _frames_last = (_frames_last + 1) % FRAME_CACHE;
   _frames[_frames_last].key = k;
@@ -269,6 +274,7 @@ static bool _release(const radio_phy_t* phy, const frame_t* f)
 
 static void _tx()
 {
+  uint32_t go_us = micros();
   _stop();
   _release(NULL, NULL);
   uint16_t power = _power_word(_reg[CYRF_03_TX_CFG] & 7);
@@ -285,6 +291,7 @@ static void _tx()
     return;
   }
   radio_tx_start(_air, n);
+  _tx_end_us = go_us + (uint32_t)n * 8000000 / _phy.symbol_rate;
   _state = S_TX;
 }
 
@@ -371,8 +378,27 @@ static void _poll()
   }
 }
 
-// Between protocol callbacks: the transaction goes on as on the chip
-void CYRF_Idle() { _poll(); }
+// TX_CTRL, TX_IRQ_STATUS reads: past the chip's end of TX, the RF core's
+// (about 430 us later) waited for. DSM checks its packet 1.95 ms after TX GO
+// for at most 100 us: the chip ends it after 1.39 ms, the RF core after 1.99
+// (DSM took the chip for frozen and reset it, in the first frames after power
+// up). Measured: 0.12 ms at most, twice a frame
+static void _tx_poll()
+{
+  if (_state == S_TX && (int32_t)(micros() - _tx_end_us) >= 0) radio_tx_wait();
+  _poll();
+}
+
+// Between protocol callbacks: the transaction goes on as on the chip. After
+// a reset, the RF core set up for the registers before the first TX GO
+// (radio_init() 0.5 to 1.7 ms: the first packet after a protocol start was
+// sent that much late, still going out at DSM's TX check)
+#define PREPARE_MIN_US 5000
+void CYRF_Idle()
+{
+  _poll();
+  if (!_phy_on && _state == S_IDLE && mpm_time_left() > PREPARE_MIN_US) _prepare(true);
+}
 
 void CYRF_WriteRegister(uint8_t address, uint8_t data)
 {
@@ -431,10 +457,10 @@ static uint8_t _read(uint8_t address, uint8_t i)
 {
   switch (address) {
     case CYRF_02_TX_CTRL:
-      _poll();
+      _tx_poll();
       return _reg[address] | (_state == S_TX ? 0x80 : 0);
     case CYRF_04_TX_IRQ_STATUS: {
-      _poll();
+      _tx_poll();
       uint8_t v = _tx_irq | (_tx_len ? 0 : TXB_EMPTY);
       _tx_irq = 0;  // TXC, TXE cleared on read
       return v;

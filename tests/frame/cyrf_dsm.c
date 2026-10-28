@@ -1,5 +1,6 @@
-// CYRF6936 (DSM data packets) framing vs captures of the MPM CYRF6936: SOP and
-// data codes of PN row 0, SOP column 0, CRC seed 0 and 0x1234. The captures
+// CYRF6936 (DSM data packets) framing vs captures of the MPM CYRF6936 (and
+// frame_init_tx() vs frame_init() at TX): SOP and data codes of PN row 0, SOP
+// column 0, CRC seed 0 and 0x1234. The captures
 // are the CC2652 bytes after the sync word 3fc289ae (first 32 chips of the
 // second, inverted, SOP code: header bytes 17 to 20).
 #include <stdio.h>
@@ -26,6 +27,13 @@ static void check(const char* name, uint16_t seed, const char* payload_hex, cons
   uint16_t n = frame_tx_data(&f, p, len, tx);
   // all chips up to the CRC (the last byte holds idle chips)
   bool enc = n - 17 <= clen && !memcmp(tx + 17, cap, n - 17 - 1);
+  // TX only (frame_init_tx(), no RX sync word choice): the same air bytes
+  frame_t t = {.type = FRAME_CYRF, .crc_len = 2, .var_len = true, .crc_seed = seed, .sop = true};
+  memcpy(t.sop_code, sop, 8);
+  memcpy(t.data_code, data, 16);
+  uint8_t tx_only[256];
+  CHECK(frame_init_tx(&t) && frame_tx_sync(&t) == frame_tx_sync(&f));
+  CHECK(frame_tx_data(&t, p, len, tx_only) == n && !memcmp(tx_only, tx, n));
   // RX: the stream after the chosen RX sync word
   uint8_t stream[300];
   memcpy(stream, f.known, 21);
@@ -55,6 +63,15 @@ static void check_alt(void)
   memcpy(f.data_code, data, 16);
   CHECK(frame_init(&f) && frame_cyrf_rx_alt(&f, &alt));
   CHECK(alt.data32 && f.rx_sync == alt.rx_sync && f.rx_start == alt.rx_start);
+  // From frame_init_tx() (the CYRF6936 emulation's RX): the same RX setup
+  frame_t g = {.type = FRAME_CYRF, .crc_len = 2, .var_len = true, .crc_seed = 0x1234, .sop = true}, galt;
+  memcpy(g.sop_code, sop, 8);
+  memcpy(g.data_code, data, 16);
+  CHECK(frame_init_tx(&g) && frame_cyrf_rx_alt(&g, &galt));
+  CHECK(g.rx_sync == f.rx_sync && g.rx_sync_errors == f.rx_sync_errors && g.rx_start == f.rx_start &&
+        g.rx_first_start == f.rx_first_start && g.known_len == f.known_len && !memcmp(g.known, f.known, f.known_len));
+  CHECK(galt.rx_sync == alt.rx_sync && galt.rx_start == alt.rx_start && galt.known_len == alt.known_len &&
+        !memcmp(galt.known, alt.known, alt.known_len));
   for (int d32 = 0; d32 < 2; d32++) {
     frame_t t = f;
     t.data32 = d32;

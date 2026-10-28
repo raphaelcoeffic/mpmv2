@@ -1092,7 +1092,16 @@ static void _choose_rx_sync(frame_t* f)
   }
 }
 
-bool frame_init(frame_t* f)
+// TX only (rx false): no RX sync word choice, the RX fields at the TX sync
+// word, not weak
+static void _tx_rx_sync(frame_t* f)
+{
+  f->rx_sync = _sync_word(f->known, f->sync_len);
+  f->rx_sync_errors = SYNC_SCORE_GOOD / 2;
+  f->rx_start = f->rx_first_start = f->sync_len;
+}
+
+static bool _init(frame_t* f, bool rx)
 {
   uint8_t n = 0;
 
@@ -1219,7 +1228,8 @@ bool frame_init(frame_t* f)
     n += known;
   }
   f->known_len = n;
-  _choose_rx_sync(f);
+  if (rx) _choose_rx_sync(f);
+  else _tx_rx_sync(f);
   f->rx_sync_alt = 0;
   if (_is_cyrf(f) && !f->sop && !f->prefix_len) {
     // Only the repeated preamble is known: the CC2652 misses most packets with
@@ -1241,12 +1251,16 @@ bool frame_init(frame_t* f)
   return true;
 }
 
+bool frame_init(frame_t* f) { return _init(f, true); }
+
+bool frame_init_tx(frame_t* f) { return _init(f, false); }
+
 bool frame_cyrf_rx_alt(frame_t* f, frame_t* alt)
 {
   if (!_is_cyrf(f) || f->sdr || !f->sop || f->prefix_len) return false;
   *alt = *f;
   alt->data32 = !f->data32;
-  if (!frame_init(alt)) return false;
+  if (!_init(alt, false)) return false;  // its RX sync word: f's, below
   // The headers differ from the second SOP copy on (inverted with 64 chips)
   uint8_t common = 0;
   while (common < f->known_len && common < alt->known_len && f->known[common] == alt->known[common]) common++;
