@@ -6,7 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ARM GCC toolchain
 include(${CMAKE_SOURCE_DIR}/cmake/toolchain/arm-none-eabi.cmake)
 
-project(MPMv2 VERSION 0.3.0.0)
+project(MPMv2 VERSION 0.4.0.0)
 
 # Optimized unless asked otherwise (radio timing)
 if (NOT CMAKE_BUILD_TYPE)
