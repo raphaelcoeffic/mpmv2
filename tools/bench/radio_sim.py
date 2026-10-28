@@ -12,6 +12,7 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
   radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10] [--telem-off] [--ch9-16]] [--option 0] [--time 0]
+                     [--run-options -60:60:5,60:-60:-5 [--step 4] [--settle 1.5] [--run-wait 120]]
                                          a real receiver: CH1-4 sweep (--sweep-ch, --sweep-from), status and telemetry each second
   radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
                                          S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
@@ -339,12 +340,18 @@ def cmd_drive(r: Radio, a):
     the bind (the flag cleared for a few frames) every --step seconds or when
     the protocol ends it, with the next of --options if given. Then the first
     --sweep-ch channels from --sweep-from sweep (spread over the period), the others centred.
-    Status flags, telemetry frame counts and link statistics each second, until --time (0: Ctrl-C)."""
+    Status flags, telemetry frame counts and link statistics each second, until --time (0: Ctrl-C).
+    --run-options: after the bind, the option (the frequency offset of the FrSky
+    protocols) through these values, --step seconds each, then a table per
+    option of the link statistics after --settle seconds (the receiver's window)."""
     options = [a.option]
     if a.options:
-        lo, hi, st = (int(v) for v in a.options.split(":"))
-        options = list(range(lo, hi + 1, st))
-    r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind)
+        options = option_list(a.options)
+    run_options = option_list(a.run_options) if a.run_options else []
+    run_idx, run_start = -1, 0.0
+    run_stats: dict[int, dict[str, list[int]]] = {}
+    r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind,
+          range_check=a.range)
     # --set 9=204,10=204: channels held at these values (the swept ones aside)
     fixed = {int(k): int(v) for k, v in (kv.split("=") for kv in a.set.split(","))} if a.set else {}
     if a.telem_off or a.ch9_16:
@@ -355,6 +362,7 @@ def cmd_drive(r: Radio, a):
     if binding:
         print(f"{0.0:6.1f} s bind, option {options[0]}")
     next_print = t0 + 1.0
+    run_last: dict[str, int] = {}
     counts: Counter = Counter()
     flags: list[str] = []
     link: dict[str, int] = {}
@@ -374,7 +382,9 @@ def cmd_drive(r: Radio, a):
                 counts[ty] += 1
                 if ty == 0x01:
                     flags = status_decode(d)["flags"]
-                link.update(telem_decode(ty, d))
+                decoded = telem_decode(ty, d)
+                link.update(decoded)
+                run_last.update(decoded)
                 if ty == 0x05 and a.proto == 6 and a.sub == 4 and len(d) >= 7:
                     # As EdgeTX (DSM Auto): the receiver's mode and channel count
                     # once the bind is over (a model change restarts the protocol)
@@ -394,6 +404,20 @@ def cmd_drive(r: Radio, a):
                     r.set(bind=False, option=a.option, sub=a.sub)
                     binding = False
                     print(f"{t:6.1f} s bind done, option {a.option}")
+            if run_options and not binding:
+                if run_idx < 0 or t - run_start >= (a.run_wait if run_idx == 0 and a.run_wait else a.step):
+                    run_idx += 1
+                    if run_idx == len(run_options):
+                        break
+                    a.option = run_options[run_idx]
+                    r.set(option=a.option)
+                    run_start = t
+                    print(f"{t:6.1f} s option {a.option}")
+                elif t - run_start >= a.settle:
+                    st = run_stats.setdefault(a.option, {})
+                    for k, v in run_last.items():
+                        st.setdefault(k, []).append(v)
+                run_last = {}
             if time.monotonic() >= next_print:
                 next_print += 1.0
                 telem = " ".join(f"{ty:02x}:{n}" for ty, n in sorted(counts.items()))
@@ -404,7 +428,32 @@ def cmd_drive(r: Radio, a):
             time.sleep(0.02)
     except KeyboardInterrupt:
         pass
+    if run_stats or run_options:
+        print_option_table(run_options, run_stats)
     return 0
+
+
+def option_list(spec: str) -> list[int]:
+    """lo:hi:step[,lo:hi:step...], each range with both ends (step < 0: down)"""
+    out = []
+    for part in spec.split(","):
+        lo, hi, st = (int(v) for v in part.split(":"))
+        out += list(range(lo, hi + (1 if st > 0 else -1), st))
+    return out
+
+
+def print_option_table(options: list[int], stats: dict[int, dict[str, list[int]]]):
+    """Per option, in the order run (once each): the telemetry readings after
+    the settle time, TX_LQI and RX_RSSI mean and min (none: no telemetry)"""
+    print("option  readings  tx_lqi mean/min  rx_rssi mean/min")
+    for opt in dict.fromkeys(options):
+        st = stats.get(opt, {})
+        n = max((len(v) for v in st.values()), default=0)
+        cols = []
+        for k in ("tx_lqi", "rx_rssi"):
+            v = st.get(k)
+            cols.append(f"{sum(v) / len(v):6.1f} {min(v):4d}" if v else f"{'-':>6} {'-':>4}")
+        print(f"{opt:6d}  {n:8d}  {cols[0]:>15}  {cols[1]:>16}")
 
 
 def sport_phys_id(i: int) -> int:
@@ -536,7 +585,11 @@ def main():
     ap.add_argument("--set", help="drive: channels held at a value, CH=VALUE[,CH=VALUE...] (204..1844)")
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
-    ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options value")
+    ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options / --run-options value")
+    ap.add_argument("--run-options", help="drive: option sweep after the bind, lo:hi:step[,lo:hi:step...]")
+    ap.add_argument("--range", action="store_true", help="drive: range check flag (the protocol's range power)")
+    ap.add_argument("--run-wait", type=float, default=0.0, help="drive: --run-options, seconds on the first value before the sweep")
+    ap.add_argument("--settle", type=float, default=1.5, help="drive: --run-options, seconds before the readings count")
     ap.add_argument("--telem-off", action="store_true", help="drive: FrSky X bind option, receiver telemetry off")
     ap.add_argument("--ch9-16", action="store_true", help="drive: FrSky X bind option, receiver outputs CH9-16")
     ap.add_argument("--push", action="append", help="sport: PHYS:PRIM:APP:VALUE (hex), as sportTelemetryPush()")
