@@ -70,11 +70,14 @@ static uint16_t _air_len;
 
 uint8_t rf_setup;
 
-// TX power word for RF_SETUP RF_PWR: the MPM's high and low power (0 and
-// -12 dBm on the NRF24L01) at the board default, bind and range (-18 dBm) low
+// TX power word for RF_SETUP RF_PWR: the MPM's high power (0 dBm on the
+// NRF24L01) at the board default, low power (-12 dBm) reduced, bind and range
+// (-18 dBm) low
 static uint16_t _power_word()
 {
-  return (_reg[NRF24L01_06_RF_SETUP] >> 1) & 3 ? RF_TX_POWER_DEFAULT : RF_TX_POWER_LOW;
+  static const uint16_t words[] = {RF_TX_POWER_LOW, RF_TX_POWER_REDUCED, RF_TX_POWER_DEFAULT,
+                                   RF_TX_POWER_DEFAULT};
+  return words[(_reg[NRF24L01_06_RF_SETUP] >> 1) & 3];
 }
 
 static uint8_t _addr_len()

@@ -69,14 +69,16 @@ static uint8_t _air[FRAME_AIR_MAX];
 
 static uint32_t _pow2(uint8_t e) { return 1UL << e; }
 
-// TX power word for a PATABLE value: the MPM's high, low and LBT power (0 to
-// -6 dBm on the CC2500) at the board default, bind and range (-30 dBm) low
+// TX power word for a PATABLE value: the MPM's high and LBT power (+1 and
+// -4 dBm on the CC2500) at the board default, low power (-6 dBm) reduced,
+// bind and range (-30 dBm) low
 static uint16_t _power_word(uint8_t pa)
 {
   switch (pa) {
     case CC2500_POWER_17: case CC2500_POWER_16: case CC2500_POWER_15: case CC2500_POWER_14:
-    case CC2500_POWER_13: case CC2500_POWER_12: case CC2500_POWER_11:
       return RF_TX_POWER_DEFAULT;
+    case CC2500_POWER_13: case CC2500_POWER_12: case CC2500_POWER_11:
+      return RF_TX_POWER_REDUCED;
     default:
       return RF_TX_POWER_LOW;
   }

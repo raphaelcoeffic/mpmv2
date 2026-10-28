@@ -12,9 +12,10 @@
 #define NRF_FREQ_BASE_KHZ 2400000
 #define SYNC_THRESHOLD_STRICT 0x32  // as the bench: repeated address patterns
 
-// TX power words for the NRF power levels: high = the board default, the
-// bind and range check levels (-18 dBm on the NRF24L01) 25 dB lower
+// TX power words for the NRF power levels: high = the board default, low
+// power reduced, the bind and range check levels (-18 dBm on the NRF24L01) low
 #define POWER_HIGH RF_TX_POWER_DEFAULT
+#define POWER_REDUCED RF_TX_POWER_REDUCED
 #define POWER_LOW RF_TX_POWER_LOW
 
 static radio_phy_t _phy;
@@ -201,6 +202,9 @@ void XN297_RFChannel(uint8_t number)
 void XN297_SetPower()
 {
   uint16_t power = IS_BIND_DONE ? POWER_HIGH : POWER_LOW;
+#ifdef NRF24L01_ENABLE_LOW_POWER
+  if (IS_BIND_DONE && !IS_POWER_FLAG_on) power = POWER_REDUCED;
+#endif
   if (IS_RANGE_FLAG_on) power = POWER_LOW;
   if (power == _power) return;
   _power = power;

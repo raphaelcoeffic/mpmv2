@@ -24,6 +24,8 @@
   #define RF_TX_POWER_DEFAULT 0x7217
   // Bind and range check (the NRF24L01's -18 dBm): 25 dB lower
   #define RF_TX_POWER_LOW     0x04C6
+  // The MPM's low power flag: -5 dBm, 10 dB lower (TI table)
+  #define RF_TX_POWER_REDUCED 0x12D6
   // FrSky: option 0 at stock FrSky gear's frequency, 25 FSCTRL0 steps
   // (40 kHz) below the crystal's nominal one (mpm/upstream/cc2500.c)
   #define BOARD_FRSKY_FREQ_STEPS -25
@@ -92,6 +94,9 @@
   #define RF_TX_POWER_DEFAULT 0x2853
   // Bind and range check (the NRF24L01's -18 dBm): about 20 dB lower
   #define RF_TX_POWER_LOW     0x04C6
+  // The MPM's low power flag: -10 dBm into the PA, 10 to 13 dB lower (a
+  // stock X8R's RSSI 10.5 below the default's, docs/interop-results.md)
+  #define RF_TX_POWER_REDUCED 0x0ACF
   // FrSky: option 0 at stock FrSky gear's frequency, 25 FSCTRL0 steps
   // (40 kHz) below the HPOSC's corrected one (mpm/upstream/cc2500.c)
   #define BOARD_FRSKY_FREQ_STEPS -25
@@ -158,6 +163,8 @@
   #define RF_TX_POWER_DEFAULT 0x2558
   // Bind and range check: the lowest, 9 dBm
   #define RF_TX_POWER_LOW     0x0CC7
+  // The MPM's low power flag: the lowest too, 10 dB lower
+  #define RF_TX_POWER_REDUCED 0x0CC7
   //
 #else
   #error "No board: BOARD_<name> from CMake's BOARD"

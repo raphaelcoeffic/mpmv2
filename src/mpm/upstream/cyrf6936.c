@@ -103,8 +103,13 @@ static void _reset()
 }
 
 // TX power word for TX_CFG.PA_SETTING: the MPM's high power (+4 dBm on the
-// CYRF6936) at the board default, low (-18 dBm), bind and range low
-static uint16_t _power_word(uint8_t pa) { return pa >= CYRF_POWER_5 ? RF_TX_POWER_DEFAULT : RF_TX_POWER_LOW; }
+// CYRF6936) at the board default, low power (-18 dBm) reduced, bind and range
+// (-35 and -30 dBm) low
+static uint16_t _power_word(uint8_t pa)
+{
+  if (pa >= CYRF_POWER_5) return RF_TX_POWER_DEFAULT;
+  return pa >= CYRF_POWER_3 ? RF_TX_POWER_REDUCED : RF_TX_POWER_LOW;
+}
 
 // frame_init() takes about 2 ms here (its RX sync word choice), too long at
 // TX GO: the results for the last codes (DSM: 5 rows, for TX and RX), CRC

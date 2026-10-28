@@ -786,6 +786,33 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
   after a bind or a lost link, sometimes minutes; at range power 4 s. The
   binds themselves run at low power.
 
+### Low power
+
+The MPM's low power flag (EdgeTX's low power mode; its range check only
+shows RSSI) did nothing on the MPM v2: CC2500, NRF24L01, XN297 and A7105
+at the default, DSM at the bind and range level. `RF_TX_POWER_REDUCED`
+(`board.h`) is now used for the chips' low power levels. Its word on the
+MPM v2 from a stock X8R (FrSky X2 LBT, in another room;
+at 1 m its RSSI didn't move from 86 over 20 dB), each word 20 s, the RSSI
+mean after 3 s, October 2026:
+
+| Word | TI table (into the PA) | X8R RSSI | Below the default |
+|---|---|---|---|
+| `0x2853` (default) | 0 dBm | 70.3, 71.0 at the end | 0 |
+| `0x12D6` | -5 dBm | 67.7 | 3 |
+| `0x0ACF` | -10 dBm | 60.2 | 10.5 |
+| `0x06CA` | -15 dBm | 56.0 | 15 |
+| `0x04C6` (bind, range) | -20 dBm | 54.3 | 16.5 |
+
+- FrSky's RSSI scale isn't documented: 1 unit a dB and a PA compressing a
+  little at the top, or a linear PA (TI's 20 dB) and 0.8 unit a dB. Either
+  way `0x0ACF` is 10 to 13 dB below the default (the CC2500's raw 0.5 dB a
+  count would have given 40 units).
+- With the flag (radio_sim.py `drive --low-power`): RSSI 63 and 69 against
+  72 and 78 without, in turns (the room's spread about 6); range 52.
+- Each chip's power word read over J-Link, default / low power / range:
+  `0x2853` / `0x0ACF` / `0x04C6` for FrSky X2, AFHDS2A, V2x2, Bayang and XK.
+
 ## Automatic frequency trim
 
 The CC2652 modem estimates the frequency offset of each packet it receives

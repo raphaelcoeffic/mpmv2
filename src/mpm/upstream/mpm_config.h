@@ -16,6 +16,7 @@
 // FrSky XJT-Lite (CC2650, 20 KB of RAM): FrSky D and X, and the WLtoys
 // cars' V2x2 and XK
 #define NRF24L01_INSTALLED
+#define NRF24L01_ENABLE_LOW_POWER
 #define V2X2_NRF24L01_INO
 #define XK_CCNRF_INO
 
@@ -27,6 +28,7 @@
 // NRF24L01 / XN297 family: NRF24L01 and XN297 emulations on the CC2652
 // (nrf24l01.c, xn297.c)
 #define NRF24L01_INSTALLED
+#define NRF24L01_ENABLE_LOW_POWER
 
 #define BAYANG_NRF24L01_INO
 #define V2X2_NRF24L01_INO

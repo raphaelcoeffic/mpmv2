@@ -12,7 +12,7 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
   radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10] [--telem-off] [--ch9-16]] [--option 0] [--time 0]
-                     [--run-options -60:60:5,60:-60:-5 [--step 4] [--settle 1.5] [--run-wait 120]]
+                     [--run-options -60:60:5,60:-60:-5 [--step 4] [--settle 1.5] [--run-wait 120]] [--range] [--low-power]
                                          a real receiver: CH1-4 sweep (--sweep-ch, --sweep-from), status and telemetry each second
   radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
                                          S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
@@ -351,7 +351,7 @@ def cmd_drive(r: Radio, a):
     run_idx, run_start = -1, 0.0
     run_stats: dict[int, dict[str, list[int]]] = {}
     r.set(protocol=a.proto, sub=a.sub, option=options[0], rx_num=a.rx_num, bind=a.bind,
-          range_check=a.range)
+          range_check=a.range, low_power=a.low_power)
     # --set 9=204,10=204: channels held at these values (the swept ones aside)
     fixed = {int(k): int(v) for k, v in (kv.split("=") for kv in a.set.split(","))} if a.set else {}
     if a.telem_off or a.ch9_16:
@@ -588,6 +588,7 @@ def main():
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options / --run-options value")
     ap.add_argument("--run-options", help="drive: option sweep after the bind, lo:hi:step[,lo:hi:step...]")
     ap.add_argument("--range", action="store_true", help="drive: range check flag (the protocol's range power)")
+    ap.add_argument("--low-power", action="store_true", help="drive: low power flag (EdgeTX's low power mode)")
     ap.add_argument("--run-wait", type=float, default=0.0, help="drive: --run-options, seconds on the first value before the sweep")
     ap.add_argument("--settle", type=float, default=1.5, help="drive: --run-options, seconds before the readings count")
     ap.add_argument("--telem-off", action="store_true", help="drive: FrSky X bind option, receiver telemetry off")

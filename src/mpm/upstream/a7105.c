@@ -53,11 +53,13 @@ static void _reset()
   memset(_id, 0, sizeof(_id));
 }
 
-// TX power word for TX_TEST (PAC, TBG): the MPM's high and low power at the
-// board default, bind and range (-23 dBm on the A7105) low
+// TX power word for TX_TEST (PAC, TBG): the MPM's high power (+1 dBm on the
+// A7105) at the board default, low power (-11 dBm) reduced, bind and range
+// (-23 dBm) low
 static uint16_t _power_word(uint8_t tx_test)
 {
-  return tx_test >= A7105_POWER_3 ? RF_TX_POWER_DEFAULT : RF_TX_POWER_LOW;
+  if (tx_test >= A7105_POWER_4) return RF_TX_POWER_DEFAULT;
+  return tx_test >= A7105_POWER_3 ? RF_TX_POWER_REDUCED : RF_TX_POWER_LOW;
 }
 
 static uint8_t _len() { return _reg[A7105_03_FIFOI] + 1 > FIFO_SIZE ? FIFO_SIZE : _reg[A7105_03_FIFOI] + 1; }

@@ -157,8 +157,9 @@ The XN297 emulation, as the NRF24L01 in the MPM:
 - Channel n: 2400 + n MHz. At 250 kbps the PHY of the CC2500 emulation
   (127 kHz deviation) and the option as its frequency offset
   (1.587 kHz a step).
-- Power: the board default when bound, `RF_TX_POWER_LOW` (`0x04C6`, about
-  25 dB lower) for bind and range check. `XN297_HoppingCalib()` does nothing.
+- Power: the board default when bound, `RF_TX_POWER_REDUCED` with the low
+  power flag, `RF_TX_POWER_LOW` (`0x04C6`, about 25 dB lower) for bind and
+  range check. `XN297_HoppingCalib()` does nothing.
 - Weak RX addresses get the stricter sync threshold, as on the bench.
 
 ### Chip emulations
@@ -175,8 +176,8 @@ the protocols read them.
   whitening, FEC; FREQ / CHANNR / CHANSPC / FSCTRL0 to the frequency; RX FIFO
   with address check, CRC autoflush, appended RSSI and LQI; MARCSTATE,
   RXBYTES, TXBYTES. Not done: SYNC_MODE 0 (`CC2500_250K_Init()`), infinite
-  length. PATABLE -10 dBm and up is the board default power, below
-  `RF_TX_POWER_LOW`. Timing: the RF core setup and `frame_init()` (about
+  length. PATABLE -4 dBm and up is the board default power, -10 to
+  -6 dBm (low power) `RF_TX_POWER_REDUCED`, below `RF_TX_POWER_LOW`. Timing: the RF core setup and `frame_init()` (about
   170 µs) run again only after a register change other than the frequency
   ones; the RF core starts sending about 0.2 ms after the call and gives whole
   packets where the CC2500 FIFO fills byte by byte, so an RXBYTES read waits
@@ -185,7 +186,8 @@ the protocols read them.
   wait, 0.3 ms with the setup each time.
 - **A7105**: data rate, ID (2 or 4 bytes), CRC, FEC, preamble length, FIFO
   length; PLL registers to the frequency; MODE (TRER, CRCF), RSSI ADC. Not
-  done: whitening. TX_TEST -11 dBm and up: default power.
+  done: whitening. TX_TEST -6 dBm and up: default power, -11 dBm (low
+  power) reduced.
 - **CYRF6936**: 8DR and SDR, 32 / 64 chip codes, SOP, length field, CRC seed,
   TX_INV; channel n at 2400 + n MHz plus TX_OFFSET (DSM: 2401 + n);
   TX_CTRL / RX_CTRL GO, TX_IRQ_STATUS (TXC cleared on read), RX_IRQ_STATUS,
@@ -197,7 +199,8 @@ the protocols read them.
   (`frame_rx_var_len()`); a length over the 16 byte buffer drops the packet
   and RX goes on. The MFG ID is the module id and 2
   zero bytes (a DSM receiver bound to an MPM v1 must be bound again). Not
-  done: GFSK and DDR modes. PA_SETTING -5 dBm and up: default power.
+  done: GFSK and DDR modes. PA_SETTING -5 dBm and up: default power, -18
+  and -13 dBm (low power) reduced.
   Timing: the chip sends at TX GO, the RF core about 430 µs later, the same
   for every packet: `frame_init()` (2.3 ms, its RX sync word search) cached
   for the last 16 codes (DSM: 5 rows, for TX and RX), the synthesizer tuned
