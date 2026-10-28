@@ -489,7 +489,8 @@ it with PPM off; `rm ppm.txt`: FrSky X2 again; a file with bad values: their
 lines in `ppm.err`, the rest applied.
 
 `debug.txt`: `usb = on` sends the [debug log](#debug-log) on USB from power
-up (default off).
+up (default off). `antenna = 2`: the RF on J3 instead of J2 (SKY66112
+ANT_SEL, default 1), for comparing the two antennas.
 
 ### Debug log
 

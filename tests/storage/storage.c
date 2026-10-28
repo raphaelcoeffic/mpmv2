@@ -44,6 +44,10 @@ static long _erase_n;
 static void (*_yield)();
 static long _yields;
 
+static uint8_t _antenna = 1;
+void board_set_antenna(uint8_t antenna) { _antenna = antenna; }
+uint8_t board_antenna() { return _antenna; }
+
 int flash_init() { return 0; }
 int nor_flash_init(spi_t spi, const spi_device_t* dev) { return 0; }
 void nor_flash_set_yield(void (*yield)()) { _yield = yield; }
@@ -696,8 +700,15 @@ static void test_settings()
   CHECK(_put_text("debug.txt", "usb = maybe\nlevel = 3\n") == 0);
   CHECK(!(log_on & LOG_FILE) && _err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
   CHECK(strcmp(err, "line 1: usb: on or off: maybe\nline 2: unknown key: level\n") == 0);
+  // the antenna: 1 or 2, back to 1 without the setting
+  CHECK(_put_text("debug.txt", "antenna = 2\n") == 0);
+  CHECK(_antenna == 2 && !_err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
+  CHECK(_put_text("debug.txt", "antenna = 3\n") == 0);
+  CHECK(_antenna == 1 && _err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
+  CHECK(strcmp(err, "line 1: antenna: 1 or 2: 3\n") == 0);
+  CHECK(_put_text("debug.txt", "antenna = 2\n") == 0 && _antenna == 2);
   CHECK(_req_path(FILE_SERVER_REMOVE, "debug.txt") == 0);
-  CHECK(!(log_on & LOG_FILE) && !_err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)));
+  CHECK(!(log_on & LOG_FILE) && !_err_file(SETTINGS_DEBUG_ERR, err, sizeof(err)) && _antenna == 1);
 
   // no file system: the defaults
   settings_init(0);

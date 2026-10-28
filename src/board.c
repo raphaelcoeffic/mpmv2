@@ -2,6 +2,7 @@
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include "board.h"
+#include "antenna.h"
 
 #define POWER_DOMAINS (PRCM_DOMAIN_PERIPH | PRCM_DOMAIN_SERIAL)
 
@@ -70,6 +71,20 @@ static void _pins_init()
   _gpio_output(MODULE_RX_INV, 0);
 #endif
 }
+
+static uint8_t _antenna = 1;
+
+void board_set_antenna(uint8_t antenna)
+{
+#if defined(ANT_SEL)
+  _antenna = antenna == 2 ? 2 : 1;
+  GPIO_writeDio(ANT_SEL, _antenna == 2);
+#else
+  (void)antenna;
+#endif
+}
+
+uint8_t board_antenna() { return _antenna; }
 
 void board_init()
 {

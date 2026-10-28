@@ -9,7 +9,7 @@
 //             keep their default
 //   debug.txt "usb = on": the debug log (log.h) on the USB link from power
 //             up (tools/mpm_fs.py log); without it, only while a host asks.
-//             Errors in debug.err
+//             "antenna = 2": RF on J3 (default 1, J2). Errors in debug.err
 //
 // Read at power up and when the file server replaces, removes or renames
 // one (mpm_fs.py put): applied at once

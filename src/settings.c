@@ -3,6 +3,7 @@
 #include "mpm/mpm_settings.h"
 #include "debug.h"
 #include "log.h"
+#include "antenna.h"
 
 #include <string.h>
 
@@ -51,22 +52,36 @@ static int _apply_ppm(const char* text, uint32_t len, char* err, uint32_t err_si
   return errors;
 }
 
+typedef struct {
+  bool usb;
+  int32_t antenna;
+} _debug_t;
+
 static const char* _debug_setting(void* ctx, mpm_tok_t key, mpm_tok_t val, uint32_t line)
 {
-  bool* usb = ctx;
-  if (!mpm_tok_equal(key, "usb")) return MPM_SETTINGS_UNKNOWN_KEY;
-  if (!mpm_tok_bool(val, usb)) return "usb: on or off";
-  return 0;
+  _debug_t* d = ctx;
+  if (mpm_tok_equal(key, "usb")) {
+    if (!mpm_tok_bool(val, &d->usb)) return "usb: on or off";
+    return 0;
+  }
+  if (mpm_tok_equal(key, "antenna")) {
+    int32_t a;
+    if (!mpm_tok_int(val, &a) || (a != 1 && a != 2)) return "antenna: 1 or 2";
+    d->antenna = a;
+    return 0;
+  }
+  return MPM_SETTINGS_UNKNOWN_KEY;
 }
 
 static int _apply_debug(const char* text, uint32_t len, char* err, uint32_t err_size)
 {
   mpm_settings_err_t e = {err, err_size, 0, 0};
   if (err_size) err[0] = 0;
-  bool usb = false;
-  mpm_settings_lines(text, len, _debug_setting, &usb, &e);
-  log_enable(LOG_FILE, usb);
-  debugln("debug.txt: usb %s, %d errors", usb ? "on" : "off", e.count);
+  _debug_t d = {.usb = false, .antenna = 1};
+  mpm_settings_lines(text, len, _debug_setting, &d, &e);
+  log_enable(LOG_FILE, d.usb);
+  board_set_antenna(d.antenna);
+  debugln("debug.txt: usb %s, antenna %d, %d errors", d.usb ? "on" : "off", board_antenna(), e.count);
   return e.count;
 }
 
