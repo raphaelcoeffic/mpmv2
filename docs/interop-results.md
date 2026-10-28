@@ -751,6 +751,41 @@ arrive:
   own). Joysway's losses don't depend on the offset (byte 0 bit 4, above).
 - CYRF6936 (DSSS) and the A7105 at 100 to 250 kbps don't care about 100 kHz.
 
+### Stock FrSky receivers
+
+The reference for the FrSky protocols is FrSky's own gear: stock firmware on
+both sides never needs a frequency option. Each receiver bound to the MPM v2
+at option 0 (one at a time, about 1 m), then `radio_sim.py drive
+--run-options` stepped the option (FSCTRL0 steps, about 1.56 kHz on the
+port) after the bind, up and back down: the edges are the options where the
+link drops (X8R / S8R: TX_LQI at half; V8R4-II, no telemetry: CH3 on
+`servo_mon.py` stops following the swept channel, the receiver holding its
+output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
+
+| Receiver (stock firmware) | Protocol | Window (option) | Middle | At option 0, margin |
+|---|---|---|---|---|
+| X8R, ACCST 2.1.0 LBT | FrSky X2 LBT | -83 .. +42 | -20 | 42 |
+| S8R, ACCST 2.1.0 LBT | FrSky X2 LBT | -83.5 .. +41 | -21 | 41 |
+| V8R4-II | FrSky D8 | -69 .. +5 | -32 | 5 |
+| V8R4-II | FrSky V8 (range power) | -75 .. +15 | -30 | 15 |
+
+- None of them tunes after the bind: the edges are the same up and down.
+- Their telemetry, measured by the MPM v2's frequency estimate (`_rx_foff`
+  read over J-Link): X8R and S8R both about 28 counts low, 32 to 38 kHz
+  below the MPM v2, where their windows' middles put them. The 4-in-1's
+  CC2500 is about 35 kHz below too, and UNI's tune offset on an S8R says
+  the same (+25 in V2; +45 in V1, with its telemetry then 30 kHz above the
+  MPM v2: UNI's V1 tune overshoots).
+- The MPM v2's HPOSC (98 ppm fast, corrected from TI's calibration) lands
+  within about 10 kHz of the LaunchPad's crystal: it is FrSky's CC2500s
+  that sit low, by about 25 steps (40 kHz, 16 ppm), all alike.
+- `BOARD_FRSKY_FREQ_STEPS` (-25 on the MPM v2 and the LaunchPad, `board.h`)
+  is added to the option for FrSky D, V, X and X2 (`mpm/upstream/cc2500.c`).
+  Check on the V8R4-II in V8: -50 .. +38, middle -6.
+- At full power (about +20 dBm, 1 m) the V8R4-II in V8 took 72 s to lock
+  after a bind or a lost link, sometimes minutes; at range power 4 s. The
+  binds themselves run at low power.
+
 ## Automatic frequency trim
 
 The CC2652 modem estimates the frequency offset of each packet it receives

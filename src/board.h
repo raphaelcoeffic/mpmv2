@@ -24,6 +24,9 @@
   #define RF_TX_POWER_DEFAULT 0x7217
   // Bind and range check (the NRF24L01's -18 dBm): 25 dB lower
   #define RF_TX_POWER_LOW     0x04C6
+  // FrSky: option 0 at stock FrSky gear's frequency, 25 FSCTRL0 steps
+  // (40 kHz) below the crystal's nominal one (mpm/upstream/cc2500.c)
+  #define BOARD_FRSKY_FREQ_STEPS -25
   //
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
@@ -89,6 +92,9 @@
   #define RF_TX_POWER_DEFAULT 0x2853
   // Bind and range check (the NRF24L01's -18 dBm): about 20 dB lower
   #define RF_TX_POWER_LOW     0x04C6
+  // FrSky: option 0 at stock FrSky gear's frequency, 25 FSCTRL0 steps
+  // (40 kHz) below the HPOSC's corrected one (mpm/upstream/cc2500.c)
+  #define BOARD_FRSKY_FREQ_STEPS -25
   //
   #define BUTTON        IOID_0
   //

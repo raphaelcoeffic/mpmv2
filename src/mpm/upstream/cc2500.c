@@ -136,6 +136,24 @@ static bool _setup(radio_phy_t* phy, frame_t* f)
   return true;
 }
 
+// FrSky protocols: BOARD_FRSKY_FREQ_STEPS (FSCTRL0 steps) added to the
+// option, so that option 0 lands where stock FrSky receivers listen (their
+// windows are centred 20 to 32 steps below the CC2652's frequency, see
+// docs/interop-results.md)
+#if !defined(BOARD_FRSKY_FREQ_STEPS)
+#define BOARD_FRSKY_FREQ_STEPS 0
+#endif
+static int32_t _freq_steps()
+{
+  int32_t steps = (int8_t)_reg[CC2500_0C_FSCTRL0];
+  switch (protocol) {
+    case PROTO_FRSKYD: case PROTO_FRSKYV: case PROTO_FRSKYX: case PROTO_FRSKYX2:
+      return steps + BOARD_FRSKY_FREQ_STEPS;
+    default:
+      return steps;
+  }
+}
+
 static uint32_t _channel_khz()
 {
   uint32_t freq = (uint32_t)_reg[CC2500_0D_FREQ2] << 16 | _reg[CC2500_0E_FREQ1] << 8 |
@@ -144,7 +162,7 @@ static uint32_t _channel_khz()
   uint8_t chanspc_e = _reg[CC2500_13_MDMCFG1] & 3;
   hz += (uint64_t)_reg[CC2500_0A_CHANNR] *
         (((256 + _reg[CC2500_14_MDMCFG0]) * FXOSC * _pow2(chanspc_e)) >> 18);
-  int64_t offset = (int8_t)_reg[CC2500_0C_FSCTRL0] * (int64_t)FXOSC >> 14;
+  int64_t offset = _freq_steps() * (int64_t)FXOSC >> 14;
   return (uint32_t)((int64_t)hz + offset + 500) / 1000;
 }
 
