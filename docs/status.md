@@ -274,7 +274,7 @@ packets 102.4 ms apart.
    First install without a debugger: `mpm-v2-full.bin` through the ROM boot
    loader over USB-C (`tools/rom_flash.py`, README "Trying it"). Prebuilt
    files: GitHub releases (v0.1.0, 2026-10-20; v0.2.0, 2026-10-21; v0.3.0,
-   2026-10-24).
+   2026-10-24; v0.4.0, 2026-10-28).
 8. **Settings and calibration.** No file is part of the firmware (it runs
    with a blank flash); files customise and trace
    ([mpm-core.md](mpm-core.md#storage), `tools/mpm_fs.py` over USB-C).
