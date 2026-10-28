@@ -200,7 +200,12 @@ the protocols read them.
   and RX goes on. The MFG ID is the module id and 2
   zero bytes (a DSM receiver bound to an MPM v1 must be bound again). Not
   done: GFSK and DDR modes. PA_SETTING -5 dBm and up: default power, -18
-  and -13 dBm (low power) reduced.
+  and -13 dBm (low power) reduced. The first packet after a protocol start
+  also sets the RF core up: still sending at DSM's TX check, it takes the
+  chip for frozen and resets it, once (the packet cut short).
+  `CYRF_Reset()` sets `prev_power` back (upstream doesn't: the TX_CFG
+  written by `DSM_cyrf_config()` at high power stayed, range check and low
+  power too).
   Timing: the chip sends at TX GO, the RF core about 430 µs later, the same
   for every packet: `frame_init()` (2.3 ms, its RX sync word search) cached
   for the last 16 codes (DSM: 5 rows, for TX and RX), the synthesizer tuned

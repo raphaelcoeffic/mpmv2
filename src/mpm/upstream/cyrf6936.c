@@ -490,8 +490,10 @@ void CYRF_WritePreamble(uint32_t preamble)
   (void)preamble;  // frame.c's preamble
 }
 
-// mpm-v2: CYRF6936_SPI.ino from here, verbatim but CYRF_WritePreamble() and
-// CYRF_WriteDataPacketLen() (not static: DSM)
+// mpm-v2: CYRF6936_SPI.ino from here, verbatim but CYRF_WritePreamble(),
+// CYRF_WriteDataPacketLen() (not static: DSM) and prev_power reset in
+// CYRF_Reset() (DSM's reset after a frozen TX left the power high: range
+// check and low power at full power)
 
 uint8_t CYRF_Reset()
 {
@@ -503,6 +505,7 @@ uint8_t CYRF_Reset()
 #endif
 	CYRF_WriteRegister(CYRF_1D_MODE_OVERRIDE, 0x01);	//Software reset
 	delayMicroseconds(200);
+	prev_power=0xFD;									// mpm-v2: TX_CFG at its reset value, CYRF_SetPower() writes it again
 	CYRF_WriteRegister(CYRF_0C_XTAL_CTRL, 0xC0);		//Enable XOUT as GPIO
 	CYRF_WriteRegister(CYRF_0D_IO_CFG, 0x04);			//Enable PACTL as GPIO
 	CYRF_SetTxRxMode(TXRX_OFF);

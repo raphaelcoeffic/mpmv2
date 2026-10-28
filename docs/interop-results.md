@@ -811,7 +811,9 @@ mean after 3 s, October 2026:
 - With the flag (radio_sim.py `drive --low-power`): RSSI 63 and 69 against
   72 and 78 without, in turns (the room's spread about 6); range 52.
 - Each chip's power word read over J-Link, default / low power / range:
-  `0x2853` / `0x0ACF` / `0x04C6` for FrSky X2, AFHDS2A, V2x2, Bayang and XK.
+  `0x2853` / `0x0ACF` / `0x04C6` for FrSky X2, AFHDS2A, V2x2, Bayang, XK and
+  DSM. DSM first stayed at `0x2853` in all three: see `CYRF_Reset()` in
+  [mpm-core.md](mpm-core.md) (CYRF6936).
 
 ## Automatic frequency trim
 
