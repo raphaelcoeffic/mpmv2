@@ -103,6 +103,52 @@ J-Link Commander instead (`$JLINK_DEVICE`, default `CC2652RB`). Both take
 ROM boot loader answers over USB (DTR/RTS drive RESET and BOOT); it doesn't
 flash. The board itself is described in [hardware.md](hardware.md).
 
+### CC2755P10 LaunchPad
+
+No bench build for the LP-EM-CC2755P10 yet. Our OpenOCD branch `cc27xx`
+(`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a
+flash driver for it, through its XDS110:
+
+```sh
+openocd -f board/ti/lp-em-cc2755p10.cfg -c "program app.elf verify reset exit"
+```
+
+On a booted chip the boot ROM's flash functions erase and write single
+sectors (928 KB in 22 s with verify): the HSM firmware and the other sectors
+stay. `reset halt` stops at the application's first instruction, without a
+reset pin (SEC-AP reset, then SACI exit). Sectors the CCFG protects
+(`flashProt`; TI's examples protect the CCFG and SCFG) need a chip erase
+first, which keeps the HSM firmware; the writes then go through SACI:
+
+```sh
+openocd -f board/ti/lp-em-cc2755p10.cfg \
+  -c "init; cc27xx mass_erase; flash write_image app.elf; reset run; shutdown"
+```
+
+(12 s for main + CCFG + SCFG). A blank chip stays in SACI after a reset and
+is written the same way (`catch {reset halt}` or `mass_erase` first). A CCFG
+with `flashProt.writeEraseProt.auxSectors` bit 0 set (CCFG +0x2C) leaves the
+CCFG rewritable without a chip erase; the SCFG stays protected whatever the
+CCFG says.
+
+`tools/flash_dslite.sh` flashes through UniFlash's DSLite instead:
+
+```sh
+tools/flash_dslite.sh app.bin@0x0       # or .elf / .hex; erase, write, verify, reset
+tools/flash_dslite.sh -v app.bin@0x0    # verify only
+```
+
+Only the sectors the files cover are erased; CCFG and SCFG are kept unless
+a file has data there. `$XDS_SERIAL` picks the probe when several XDS110 are
+connected, `$XDS_DEVICE` the UniFlash device (default `cc2755p10`), `$DSLITE`
+the `dslite.sh` (default: the newest UniFlash in `/Applications/ti` or `~/ti`).
+
+TI's OpenOCD fork ([ti-openocd](https://github.com/TexasInstruments/ti-openocd),
+branch `ti-release`, needs `set DAP_SWD_ID 0x6ba02477`) chip-erases for every
+erase without retaining the HSM firmware ("HSM failed to boot" in UniFlash):
+`dslite.sh -s HsmImagePath=<sdk>/bin/hsm/CC2755R10_hsm_fw_v3.5.0.bin -b
+ProgramHsmImage` puts it back without touching the rest.
+
 `src/bench.c` is the command interpreter, `src/radio.c` the RF core driver
 (bare-metal proprietary mode: `rfc.c`/`rfc.h` and the proprietary CPE patch
 are the only TI radio files), `src/frame.c` the framings of the MPM chips.
