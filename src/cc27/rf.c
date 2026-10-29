@@ -29,6 +29,7 @@ static LRF_RadioState _state = RadioState_Down;
 static const LRF_Config *_config;
 static LRF_TxPowerTable_Index _power = {.rawValue = 0};
 static uint16_t _endcause;
+static uint16_t _demmisc3_tx, _demmisc3_rx;
 static uint32_t _events;
 
 void (*rf_debug)(int step, uint32_t events, int8_t rssi, uint16_t endcause);
@@ -78,9 +79,9 @@ static void _raw_framing(void)
 
 int rf_setup(const LRF_Config *config)
 {
-  // Another PHY: its images and every register again
+  // Every register again (the same PHY too: phy_fsk changes some after)
   LRF_RadioState state = _state;
-  if (config != _config && state > RadioState_ImagesLoaded) state = RadioState_ImagesLoaded;
+  if (state > RadioState_ImagesLoaded) state = RadioState_ImagesLoaded;
   LRF_SetupResult res = LRF_setupRadio(config, LRF_PhyFeatures_Default, state);
   if (res != SetupResult_Ok) {
     _state = RadioState_Down;
@@ -89,8 +90,21 @@ int rf_setup(const LRF_Config *config)
   }
   _state = RadioState_Configured;
   _config = config;
+  _demmisc3_tx = _demmisc3_rx = 0;
   _raw_framing();
   return 0;
+}
+
+void rf_set_demmisc3(uint16_t tx, uint16_t rx)
+{
+  _demmisc3_tx = tx;
+  _demmisc3_rx = rx;
+}
+
+// Before LRF_programFrequency(), which takes the decimation from it
+static void _demmisc3(uint16_t value)
+{
+  if (value) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMMISC3) = value;
 }
 
 void rf_set_sync(uint32_t sync, uint8_t bits)
@@ -172,6 +186,7 @@ int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len)
   uint32_t earliest = LRF_enableSynthRefsys();
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = 0;
   LRF_Interface_Generic_configOpTx(1, freq_hz);
+  _demmisc3(_demmisc3_tx);
   LRF_programFrequency(freq_hz, true);
   LRF_programTxPower(_power, freq_hz);
   LRF_enable();
@@ -210,6 +225,7 @@ int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt)
   // One packet, then OPDONE: len - 1 bytes and the CRC byte
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = RX_CRC_BITS;
   LRF_Interface_Generic_configOpRx(1, freq_hz, 0, len - RX_CRC_BITS / 8);
+  _demmisc3(_demmisc3_rx);
   LRF_programFrequency(freq_hz, false);
   LRF_enable();
   LRF_prepareRxFifo();

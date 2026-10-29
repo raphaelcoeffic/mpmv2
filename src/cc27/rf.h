@@ -25,6 +25,11 @@ void rf_init(void);
 // framing on top of it. Returns LRF_SetupResult (0: ok)
 int rf_setup(const LRF_Config *config);
 
+// DEMMISC3 (demodulator decimation) for TX and for RX, when they differ:
+// the PDIF decimation slows the modulator too. 0: the PHY's. rf_setup()
+// clears them
+void rf_set_demmisc3(uint16_t tx, uint16_t rx);
+
 // Sync word, MSB first as on air, bits (8 to 32) right-aligned
 void rf_set_sync(uint32_t sync, uint8_t bits);
 

@@ -30,11 +30,14 @@
 
 #include "board.h"
 #include "phy_ble.h"
+#include "phy_fsk.h"
 #include "phy_fsk250.h"
 #include "phy_nesb.h"
 #include "rf.h"
 
 static uint32_t _khz = 2440000;
+static uint32_t _sync = 0x71764129;
+static uint8_t _sync_bits = 32;
 static uint8_t _pkt[RF_MAX_PAYLOAD];
 static char _line[96];
 static uint8_t _line_len;
@@ -50,7 +53,21 @@ static void _setup(int phy)
   if (phy < 1 || phy > 4) phy = 1;
   _phy = phys[phy - 1];
   int res = rf_setup(_phy);
+  rf_set_sync(_sync, _sync_bits);
   uart_printf("@setup %d res=%d\n", phy, res);
+}
+
+// GFSK at any rate (phy_fsk)
+static void _setup_fsk(uint32_t rate, uint32_t dev, int log2_pdif)
+{
+  phy_fsk_t phy = {.rate = rate, .deviation = dev, .log2_pdif = log2_pdif};
+  phy_fsk_info_t info;
+  int res = phy_fsk_setup(&phy, &info);
+  _phy = rate > 1200000 ? &phy_nesb_2_mbps : &phy_fsk250_common;
+  rf_set_sync(_sync, _sync_bits);
+  uart_printf("@fsk rate=%lu dev=%lu res=%d pre=%u rw=0x%lx bde=%u/%u pdif=%u demmisc3=0x%04x\n",
+              info.rate, dev, res, info.prescaler, info.rate_word, info.bde1, info.bde2, info.pdif,
+              info.demmisc3);
 }
 
 static void _tx(int n, int ms, int len)
@@ -206,8 +223,13 @@ static void _command(char *line)
     case 'i':
       _setup(argc > 1 ? a1 : 1);
       break;
+    case 'g':  // g RATE DEV [LOG2_PDIF]: GFSK at any rate
+      _setup_fsk(a1, a2, argc > 3 ? a3 : -1);
+      break;
     case 's':
-      rf_set_sync(strtoul(argv[1], NULL, 16), argc > 2 ? a2 : 32);
+      _sync = strtoul(argv[1], NULL, 16);
+      _sync_bits = argc > 2 ? a2 : 32;
+      rf_set_sync(_sync, _sync_bits);
       uart_printf("@sync %s\n", argv[1]);
       break;
     case 'f':
@@ -291,7 +313,6 @@ int main(void)
   rf_init();
   uart_printf("\n@cc27 radio hfxt=%d\n", hfxt);
   _setup(1);
-  rf_set_sync(0x71764129, 32);
 
   uint32_t last = board_us();
   for (;;) {

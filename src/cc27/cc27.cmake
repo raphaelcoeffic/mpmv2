@@ -48,5 +48,5 @@ add_cc27_application(cc27-test cc27/test.c)
 # Radio bring-up: a shell on UART0 driving the radio (TI's NESB PHY, raw
 # framing). The PHY files come from tools/cc27_phy.py nesb_1m_2m_cc27xx
 add_cc27_application(cc27-radio cc27/radio_test.c cc27/rf.c cc27/lrf_hal.c cc27/phy_nesb.c cc27/phy_ble.c
-    cc27/phy_fsk250.c)
+    cc27/phy_fsk250.c cc27/phy_fsk.c)
 target_link_libraries(cc27-radio_elf lrf_cc27xxx10)

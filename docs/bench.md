@@ -145,7 +145,41 @@ symbol mapping) is rubbish to FSK receivers (the SDR sees a 1 Mbps-like
 bit clock); `--gfsk` sends GFSK instead (NESB's BT 0.5 shape, SYMSHP 0,
 NESB's MODSYMMAP0): `src/cc27/phy_fsk250.c`, both ways with `hott`
 (196/200, 1000/1000); `nrf250k` and `xn250k` (160 and 127 kHz deviation)
-are received at about 85%.
+are received at about 85% with it as is.
+
+Other rates: `src/cc27/phy_fsk.c` (shell: `g RATE DEV [LOG2_PDIF]`) sets up
+that PHY (above 1.2 Mbps TI's NESB 2 Mbps one: the genfsk images don't
+transmit at 2 Mbps, TI's CC23xx 2 Mbps GFSK uses ble5 too), then changes
+the rate word (BAUD/BAUDPRE, prescaler 12 at least: with 2 nothing is
+received at 2 Mbps), the deviation (swConfig, LRF programs the TX shape) and
+the decimation (DEMMISC3). The demodulator runs at 4 samples per symbol
+whatever the rate: a fractional resampler (DEMFRAC P/Q, which
+`LRF_programFrequency()` computes from BAUD and DEMMISC3) brings the
+decimators' output (f_synth / 288 / BDE2) down to 4 x rate x PDIF
+decimation. On the bench:
+
+- BDE2 above 8, PDIF decimation above 2 and BDE1 decimating receive nothing
+  (digital gains tried too); the resampler takes the rest (P/Q 0.2 at
+  27 kbps is fine);
+- PDIF decimation 2 when the samples' rate is short of twice the Carson
+  bandwidth: it widens the channel (`nrf250k` 85% -> 100%), but with h = 0.5
+  (`hott`) it loses packets;
+- PDIF decimation slows the modulator too: TX runs without it
+  (`rf_set_demmisc3()`).
+
+Against the MPM v2's presets (raw framing, sync 71764129, -60 dBm), both
+ways 99 to 100% (the MPM side's RX counts as with TI's 250 kbps PHY):
+`frskyv`, `frskyd`, `radiolink`, `ares`, `frskyx`, `frskyx2`, `frskyxeu`,
+`corona`, `hubsan` (100 kbps, 250 kHz deviation), `sfhss`, `skyartec`,
+`hitec`, `hott`, `bugs` (250 kbps, 250 kHz), `nrf250k`, `xn250k`, `flysky`
+(500 kbps), `nrf1m`, `nrf2mble`; the MPM's own 2 Mbps PHY (`nrf2m`) receives
+none of the CC27's 2 Mbps packets, TI's NESB 2M ones neither. `redpineslow`
+(10 kbps, 38 kHz deviation, h = 7.6) fails: the deviation is close to the
+PDIF input's Nyquist limit. Received at 4 x the rate (sync bits repeated 4
+times, a majority vote per 4 bits) it decodes. The SDR measures the CC27's
+deviation at 27-28 kHz for 31.75 (FrSky D), the MPM v2's at 30 kHz.
+Sensitivity untested (the MPM's weakest power still gives -73 dBm; the bad
+packets per airtime are about the same for every rate, Wi-Fi at 2440 MHz).
 
 Our OpenOCD branch `cc27xx`
 (`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a
