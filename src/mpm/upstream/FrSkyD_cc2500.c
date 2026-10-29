@@ -203,7 +203,7 @@ uint16_t FRSKYD_callback(void)
 		}
 		CC2500_Strobe(CC2500_SIDLE);
 		CC2500_WriteReg(CC2500_0A_CHANNR, hopping_frequency[counter % 47]);
-		CC2500_SetFreqOffset();
+		FrSky_SetFreqOffset();  // mpm-v2: was CC2500_SetFreqOffset()
 		CC2500_WriteReg(CC2500_23_FSCAL3, 0x89);
 		CC2500_Strobe(CC2500_SFRX);        
 		FRSKYD_data_frame();

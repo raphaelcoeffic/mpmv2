@@ -127,6 +127,9 @@ function(add_application name file)
     if (DEBUG)
         target_compile_definitions(${elf} PRIVATE DEBUG)
     endif()
+    if (FRSKY_CC26XX_PLAN)
+        target_compile_definitions(${elf} PRIVATE FRSKY_CC26XX_PLAN)
+    endif()
     target_link_libraries(${elf}
         driverlib_cc13x2_cc26x2
         segger_rtt

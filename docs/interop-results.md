@@ -784,10 +784,13 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
   non-FrSky firmware; with UNI on the same receiver both landed near 0
   (reported by a tester, October 2026). FrSky's own CC26xx firmware keeps
   the same offset: it is their frequency plan, not the CC2500s' crystals.
-- `BOARD_FRSKY_FREQ_STEPS` (-25 on the MPM v2, the LaunchPad and the
-  XJT-Lite, `board.h`) is added to the option for FrSky D, V, X and X2
-  (`mpm/upstream/cc2500.c`). The XJT-Lite's value comes from the report
-  above, not from a sweep here.
+- FrSky's firmware has the explanation: their CC26xx gear (XJT-Lite,
+  G-RX8) hops 30 kHz below the CC2500 plan at channel 0, with a 300 kHz
+  spacing ([frsky-frequency.md](frsky-frequency.md)). FrSky X and X2 now
+  use that plan (`FRSKY_CC26XX_PLAN`); FrSky D and V stay 25 steps below the
+  CC2500 plan (`FRSKY_FSCTRL0_OFFSET`, `mpm/upstream/mpm_config.h`), as X
+  and X2 did until then. The XJT-Lite's value comes from the report above,
+  not from a sweep here.
   Check on the V8R4-II in V8: -50 .. +38, middle -6.
 - At full power (about +20 dBm, 1 m) the V8R4-II in V8 took 72 s to lock
   after a bind or a lost link, sometimes minutes; at range power 4 s. The

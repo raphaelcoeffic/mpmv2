@@ -128,4 +128,5 @@ Options (`-D<option>=<value>`; the build type is Release unless
 | `BOARD` | Target board: `MPM_V2` (CC2652RB) or `CC2652R1_LAUNCHXL` (the LaunchPad). | `MPM_V2` |
 | `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
+| `FRSKY_CC26XX_PLAN` | FrSky X/X2 on FrSky's own CC26xx frequency plan (30 kHz below the CC2500 plan, 300 kHz spacing); OFF: the CC2500 plan 25 steps lower, as FrSky D/V ([docs/frsky-frequency.md](docs/frsky-frequency.md)). | ON |
 | `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |

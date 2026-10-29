@@ -146,7 +146,7 @@ uint16_t FRSKYX_callback()
 
 		case FRSKY_DATA1:
 			CC2500_Strobe(CC2500_SIDLE);
-			CC2500_SetFreqOffset();
+			FrSky_SetFreqOffset();  // mpm-v2: was CC2500_SetFreqOffset()
 			FrSkyX_set_start(hopping_frequency_no);
 			FrSkyX_build_packet();
 			if(FrSkyFormat & 2)

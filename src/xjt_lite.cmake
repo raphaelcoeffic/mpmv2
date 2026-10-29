@@ -79,6 +79,9 @@ add_xjt_application(firmware
 )
 target_compile_definitions(firmware_elf PRIVATE
     MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
+if (FRSKY_CC26XX_PLAN)
+    target_compile_definitions(firmware_elf PRIVATE FRSKY_CC26XX_PLAN)
+endif()
 set_source_files_properties(radio.c frame.c timer.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )

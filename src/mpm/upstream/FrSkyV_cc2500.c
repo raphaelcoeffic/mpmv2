@@ -123,7 +123,7 @@ uint16_t FRSKYV_callback(void)
 		#endif
 		uint8_t chan = FRSKYV_calc_channel();
 		CC2500_Strobe(CC2500_SIDLE);
-		CC2500_SetFreqOffset();
+		FrSky_SetFreqOffset();  // mpm-v2: was CC2500_SetFreqOffset()
 		CC2500_WriteReg(CC2500_0A_CHANNR, chan * 5 + 6);
 		FRSKYV_build_data_packet();
 
