@@ -52,7 +52,8 @@ int main()
     // MPM side (CC2500 path: no 0x55 inserted in the payload)
     xn297_rf = XN297_CC2500; xn297_scramble_enabled = scr; xn297_crc = crc_en;
     xn297_addr_len = alen; memcpy(xn297_tx_addr, addr, alen);
-    for (int i = 0; i < alen; i++) xn297_rx_addr[i] = addr[i] ^ (scr ? xn297_scramble[alen - i - 1] : 0);
+    XN297_scramble_init();  // as XN297_SetRXAddr()
+    for (int i = alen; i--; ) xn297_rx_addr[i] = addr[i] ^ XN297_scramble_byte();
 
     // mpm-v2 side
     frame_t f = {.type = FRAME_XN297, .addr_len = alen, .crc_len = crc_en ? 2 : 0,

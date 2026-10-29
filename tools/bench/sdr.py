@@ -191,7 +191,7 @@ RATE_CLASSES = (31.25e3, 62.5e3, 125e3, 250e3, 500e3, 1e6, 2e6)  # +-40% each
 SURVEY_MIN_US = 40
 RING = (0.8e6, 6.0e6)  # carrier offsets kept: away from DC and the band edges
 DUMP = 8  # bytes shown after the sync word or the preamble
-XN297_SCRAMBLE = bytes.fromhex("e3b14bea85")  # first bytes of xn297_scramble[] (XN297_EMU.ino)
+XN297_SCRAMBLE = bytes.fromhex("e3b14bea85")  # first bytes of the XN297 whitening (XN297_SCRAMBLE_SEED, iface_xn297.h)
 
 
 def sig_bits(hexs: str, pre: bool, lsb: bool) -> list[int]:
