@@ -165,6 +165,10 @@
   #define RF_TX_POWER_LOW     0x0CC7
   // The MPM's low power flag: the lowest too, 10 dB lower
   #define RF_TX_POWER_REDUCED 0x0CC7
+  // FrSky: option 0 at stock FrSky gear's frequency, 25 FSCTRL0 steps
+  // (40 kHz) below the crystal's nominal one, as on the MPM v2 (a stock
+  // CC2650 receiver needs -25 against this board too; mpm/upstream/cc2500.c)
+  #define BOARD_FRSKY_FREQ_STEPS -25
   //
 #else
   #error "No board: BOARD_<name> from CMake's BOARD"

@@ -777,10 +777,17 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
   the same (+25 in V2; +45 in V1, with its telemetry then 30 kHz above the
   MPM v2: UNI's V1 tune overshoots).
 - The MPM v2's HPOSC (98 ppm fast, corrected from TI's calibration) lands
-  within about 10 kHz of the LaunchPad's crystal: it is FrSky's CC2500s
-  that sit low, by about 25 steps (40 kHz, 16 ppm), all alike.
-- `BOARD_FRSKY_FREQ_STEPS` (-25 on the MPM v2 and the LaunchPad, `board.h`)
-  is added to the option for FrSky D, V, X and X2 (`mpm/upstream/cc2500.c`).
+  within about 10 kHz of the LaunchPad's crystal: it is FrSky's gear that
+  sits low, by about 25 steps (40 kHz, 16 ppm), all alike.
+- Not only the CC2500s: a G-RX6 (a CC2650 receiver) on stock ACCST 2.1.0
+  LBT needed about -25 against both the MPM v2 and an XJT-Lite running a
+  non-FrSky firmware; with UNI on the same receiver both landed near 0
+  (reported by a tester, October 2026). FrSky's own CC26xx firmware keeps
+  the same offset: it is their frequency plan, not the CC2500s' crystals.
+- `BOARD_FRSKY_FREQ_STEPS` (-25 on the MPM v2, the LaunchPad and the
+  XJT-Lite, `board.h`) is added to the option for FrSky D, V, X and X2
+  (`mpm/upstream/cc2500.c`). The XJT-Lite's value comes from the report
+  above, not from a sweep here.
   Check on the V8R4-II in V8: -50 .. +38, middle -6.
 - At full power (about +20 dBm, 1 m) the V8R4-II in V8 took 72 s to lock
   after a bind or a lost link, sometimes minutes; at range power 4 s. The
