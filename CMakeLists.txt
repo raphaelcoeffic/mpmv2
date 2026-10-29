@@ -14,7 +14,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 # Target board: BOARD_<name> for the sources
-set(BOARDS MPM_V2 CC2652R1_LAUNCHXL XJT_LITE)
+set(BOARDS MPM_V2 CC2652R1_LAUNCHXL XJT_LITE CC2755P10_LP)
 list(JOIN BOARDS ", " boards_text)
 set(BOARD MPM_V2 CACHE STRING "Target board (${boards_text})")
 set_property(CACHE BOARD PROPERTY STRINGS ${BOARDS})

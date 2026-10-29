@@ -98,6 +98,12 @@ if(NOT TARGET toolchain_gcc)
     target_compile_options(toolchain_gcc_m3 INTERFACE -mcpu=cortex-m3 -mfloat-abi=soft)
     target_link_options(toolchain_gcc_m3 INTERFACE -mcpu=cortex-m3 -mfloat-abi=soft)
     target_link_libraries(toolchain_gcc_m3 INTERFACE toolchain_gcc)
+
+    # CC27xx (CC2755P10): Cortex-M33, single precision FPU
+    add_library(toolchain_gcc_m33f INTERFACE)
+    target_compile_options(toolchain_gcc_m33f INTERFACE -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16)
+    target_link_options(toolchain_gcc_m33f INTERFACE -mcpu=cortex-m33 -mfloat-abi=hard -mfpu=fpv5-sp-d16)
+    target_link_libraries(toolchain_gcc_m33f INTERFACE toolchain_gcc)
 endif()
 
 

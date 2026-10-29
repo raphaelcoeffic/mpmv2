@@ -105,7 +105,37 @@ flash. The board itself is described in [hardware.md](hardware.md).
 
 ### CC2755P10 LaunchPad
 
-No bench build for the LP-EM-CC2755P10 yet. Our OpenOCD branch `cc27xx`
+No bench build for the LP-EM-CC2755P10 yet, only a radio bring-up shell
+(`src/cc27/radio_test.c`, commands in its header, UART on the XDS110 back
+channel at 115200):
+
+```sh
+cmake -B build-cc27 -G Ninja -DBOARD=CC2755P10_LP
+ninja -C build-cc27 flash-cc27-radio
+```
+
+`src/cc27/rf.c` drives TI's LRF layer (`lib/ti/drivers/rcl`, no RCL
+scheduler) with raw framing: sync word, fixed length payload. The PHY
+settings (`src/cc27/phy_nesb.c`, `phy_ble.c`) come from
+`tools/cc27_phy.py`, the same registers as SysConfig's `ti_radio_config.c`
+for TI's NESB and generic BLE PHYs. Against the MPM v2's `preset nrf1m` /
+`nrf2m` raw framing: 999 or 1000 packets of 1000 both ways at 1 and 2 Mbps.
+What the generic PBE needs for raw RX:
+
+- a CRC: with 0 CRC bits the PBE writes the packet to the FIFO, never
+  commits it and hangs (op not even ended by a hard stop). `rf.c` receives
+  the last byte as an 8-bit CRC, appended to the FIFO entry whatever the
+  verdict;
+- sync word B programmed (as A): unset, the MCE never starts its
+  demodulator;
+- NESB mode off (the NESB PHY turns it on);
+- the trim fields written 0 in the setup: `LRF_setupRadio()` ORs the FCFG
+  trims in.
+
+TI's RCL-489 workaround (IF mixer sign, I and Q swapped on CC27xx) is right
+for this chip.
+
+Our OpenOCD branch `cc27xx`
 (`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a
 flash driver for it, through its XDS110:
 

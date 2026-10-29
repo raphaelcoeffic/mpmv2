@@ -1,10 +1,13 @@
 # Set devices directory for linker scripts
 set(TI_DEVICE_DIR "${CMAKE_CURRENT_LIST_DIR}/ti/devices" PARENT_SCOPE)
 
-# Import TI devices: CC26x0 for the XJT-Lite (CC2650), CC13x2/CC26x2 for the
-# others
+# Import TI devices: CC26x0 for the XJT-Lite (CC2650), CC27xx for the
+# CC2755P10 LaunchPad, CC13x2/CC26x2 for the others
 if (BOARD STREQUAL "XJT_LITE")
   add_subdirectory(ti/devices/cc26x0)
+elseif (BOARD STREQUAL "CC2755P10_LP")
+  add_subdirectory(ti/devices/cc27xxx10)
+  add_subdirectory(ti/drivers/rcl)
 else()
   add_subdirectory(ti/devices/cc13x2_cc26x2)
 endif()
