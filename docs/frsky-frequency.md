@@ -85,6 +85,27 @@ and FSCTRL0 hold:
 - On the 4-in-1 (real CC2500), neither is defined: the code is the same as
   before, and the STM32 release images are byte-identical.
 
+## On the bench
+
+A stock X8R (ACCST 2.1.0 LBT, about 1 m) bound in X2 LBT, the option stepped
+after the bind; the edges are where TX_LQI falls to half (October 2026,
+[interop-results.md](interop-results.md), "Stock FrSky receivers"):
+
+| Build | Window (option) | Middle | At option 0, margin |
+|---|---|---|---|
+| CC2500 plan, no offset (before) | -83 .. +42 | -20 | 42 |
+| `FRSKY_CC26XX_PLAN` ON | -69 .. +54 | -7.5 | 54 |
+| `FRSKY_CC26XX_PLAN` OFF (CC2500 plan -25) | -58 .. +67 | +4.5 | 58 |
+
+- With the plan, the CC2500 emulation's frequency (`_freq_khz`, read over
+  J-Link during the link) was 2404970 + channel × 300 kHz at every reading.
+- OFF moves the window by the 25 steps; ON by 12.5, against the plan's
+  average of about 13.5 steps below the CC2500 plan (19 at channel 0, 9 at
+  channel 235). The width stays 125.
+- The X8R, a CC2500 receiver, is a little better centred with OFF: the plan
+  places it where FrSky's CC2650 transmitter does. Both leave more margin at
+  option 0 than before.
+
 ## How the images were read
 
 - The `.frsk` images were descrambled with `frk_tools/unpacker.py`; the XJT

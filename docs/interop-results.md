@@ -792,6 +792,20 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
   and X2 did until then. The XJT-Lite's value comes from the report above,
   not from a sweep here.
   Check on the V8R4-II in V8: -50 .. +38, middle -6.
+- The X8R in X2 LBT with both builds (October 2026, steps of 5, up, down and
+  up again; `_freq_khz` of the CC2500 emulation read over J-Link on the
+  plan: 2404970 + channel x 300 kHz exactly):
+
+  | Build | Window (option) | Middle | At option 0, margin |
+  |---|---|---|---|
+  | `FRSKY_CC26XX_PLAN` ON (default) | -69 .. +54 | -7.5 | 54 |
+  | `FRSKY_CC26XX_PLAN` OFF | -58 .. +67 | +4.5 | 58 |
+
+  OFF moves the window by the 25 steps of `FRSKY_FSCTRL0_OFFSET`; ON by
+  12.5, the plan's average of about 13.5 below the CC2500 plan. The width
+  stays 125. A CC2500 receiver sits a little closer to the CC2500 plan -25,
+  as expected: the CC26xx plan places the X8R where FrSky's own XJT-Lite
+  does.
 - At full power (about +20 dBm, 1 m) the V8R4-II in V8 took 72 s to lock
   after a bind or a lost link, sometimes minutes; at range power 4 s. The
   binds themselves run at low power.
