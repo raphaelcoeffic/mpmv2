@@ -135,6 +135,18 @@ What the generic PBE needs for raw RX:
 TI's RCL-489 workaround (IF mixer sign, I and Q swapped on CC27xx) is right
 for this chip.
 
+TI has no CC27xx PHY below 1 Mbps; `cc27_phy.py --from cc23xx` ports a
+CC23xx one (same LRF radio): fields by name, then the differences between
+TI's NESB PHY of both families (CC27xx-only registers, analog settings,
+PDIFIQCONJEN for the I/Q swap, the RSSI offset). Ported NESB 1 Mbps = TI's
+CC27xx one. The MSK 250 kbps PHY (genfsk images) receives the MPM v2's
+`hott` PHY (1000/1000), but its TX (MOD0.SYMSHP 2, fixed DTX taps, its own
+symbol mapping) is rubbish to FSK receivers (the SDR sees a 1 Mbps-like
+bit clock); `--gfsk` sends GFSK instead (NESB's BT 0.5 shape, SYMSHP 0,
+NESB's MODSYMMAP0): `src/cc27/phy_fsk250.c`, both ways with `hott`
+(196/200, 1000/1000); `nrf250k` and `xn250k` (160 and 127 kHz deviation)
+are received at about 85%.
+
 Our OpenOCD branch `cc27xx`
 (`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a
 flash driver for it, through its XDS110:

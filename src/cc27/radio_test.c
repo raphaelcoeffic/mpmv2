@@ -2,8 +2,9 @@
 // channel, 115200 8N1) driving the radio through rf.c, raw framing on TI's
 // NESB PHY (2-GFSK, 1 or 2 Mbps).
 //
-//   i [1|2|3]         PHY setup: NESB 1 or 2 Mbps (default 1), 3 TI's BLE
-//                     1 Mbps
+//   i [1|2|3|4]       PHY setup: NESB 1 or 2 Mbps (default 1), 3 TI's BLE
+//                     1 Mbps, 4 GFSK 250 kbps (TI's CC23xx MSK
+//                     PHY, ported, TX as GFSK)
 //   s HEX [BITS]      sync word, MSB first as on air (default 32 bits)
 //   f KHZ             frequency (default 2440000)
 //   p DBM             TX power, from the PA table (default 0)
@@ -29,6 +30,7 @@
 
 #include "board.h"
 #include "phy_ble.h"
+#include "phy_fsk250.h"
 #include "phy_nesb.h"
 #include "rf.h"
 
@@ -37,13 +39,15 @@ static uint8_t _pkt[RF_MAX_PAYLOAD];
 static char _line[96];
 static uint8_t _line_len;
 
-// 1, 2: NESB 1 or 2 Mbps; 3: TI's generic BLE 1 Mbps PHY (same images)
+// 1, 2: NESB 1 or 2 Mbps; 3: TI's generic BLE 1 Mbps PHY (same images);
+// 4: GFSK 250 kbps (genfsk images)
 static const LRF_Config *_phy;
 
 static void _setup(int phy)
 {
-  static const LRF_Config *const phys[] = {&phy_nesb_1_mbps, &phy_nesb_2_mbps, &phy_ble_1_mbps};
-  if (phy < 1 || phy > 3) phy = 1;
+  static const LRF_Config *const phys[] = {&phy_nesb_1_mbps, &phy_nesb_2_mbps, &phy_ble_1_mbps,
+                                           &phy_fsk250_common};
+  if (phy < 1 || phy > 4) phy = 1;
   _phy = phys[phy - 1];
   int res = rf_setup(_phy);
   uart_printf("@setup %d res=%d\n", phy, res);
