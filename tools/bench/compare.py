@@ -19,7 +19,8 @@ its SKY66112, default word 0x2853: about +20 dBm out), cc27 = the CC2755P10
 LaunchPad ($CC_PORT) at +5 dBm: the level of the MPM v2 at the 4-in-1 (on
 the SDR board: at +20 dBm the LaunchPad arrives about 15 dB stronger, enough
 to overload the A7105 at 500 kbps). coronav2 lowers the power (the CC2500's
-AGC freezes on a strong signal): the suite's word on both.
+frozen AGC takes a window of levels): the suite's word on the MPM v2, -10 dBm
+on the CC27.
 
 sweep: each test at trim offsets (--offsets, kHz) around the suites' trims,
 fewer packets (--count, default 50). run: the suites' counts, each test at the
@@ -43,9 +44,10 @@ from mpm_bench import Bench, find_port
 BOARDS = {
     # name: (port kind, power word, power for the tests with a lower one)
     "v2": ("v2", "0x2853", {"0x10c3": "0x10c3"}),
-    # coronav2 lowers the power against the CC2500's AGC freeze: the suite's
-    # word on both (CC27: -20 dBm; at +12 dBm it freezes, 0%)
-    "cc27": ("cc", "5", {"0x10c3": "0x10c3"}),
+    # coronav2 lowers the power against the CC2500's frozen AGC, which takes a
+    # window of levels: the CC27 at -10 dBm (2449 MHz: 296/300, the MPM v2 at
+    # 0x10c3 295/300; at -20 dBm 80 to 86%, bit errors; at 0 dBm 0%)
+    "cc27": ("cc", "5", {"0x10c3": "0xf6"}),
 }
 FAMILIES = ("cc2500", "a7105", "cyrf", "nrf")
 OK = 0.95  # a window: the offsets where at least 95% arrive

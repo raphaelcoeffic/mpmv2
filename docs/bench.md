@@ -143,7 +143,8 @@ interrupt storm. `sched` is 1 to 1.5 us late.
 Against the 4-in-1 (`suite_cc2500.py --trim -70`, `suite_a7105.py`): the
 CC2500 setups 100% both ways (`frskyx2eu` 99.5%; `redpineslow` since the
 RX oversampling, below), except `coronav2` CC27 -> MPM (at -20 dBm,
-250/250 at -10). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
+250/250 at -10: the CC2500's frozen gain takes a window of levels, -15 to -5
+dBm for the CC27 at the bench; [cc2755-vs-cc2652.md](cc2755-vs-cc2652.md)). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
 CC27 -> MPM, scattered single bit errors at -43 dBm; with the rectangular
 pulse 250/250, as the CC2652. The A7105 setups (`ch 170`): 100% A7105 ->
 CC27; CC27 -> A7105 at trim 70: 98 to 100%, `wfly2` 91% (97% at trim 20 to
