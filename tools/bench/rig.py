@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mpm_bench import Bench, find_port, setup_lines
@@ -151,6 +152,42 @@ def link_test(mpm: Bench, cc: Bench, payload: bytes, *, mpm_setup, cc_setup, mpm
         results["rev"] = send_and_count(cc, mpm, payload, 0 if cc2500 else len(payload), period, count,
                                         seq, status_crc=hw_crc)
     return results
+
+
+@dataclass
+class Case:
+    """One test of a suite: link_test() arguments without the CC2652's trim and
+    power, so that a run can choose them (the suite's own main, compare.py).
+
+    trim: the suite's trim for the CC2652 LaunchPad. pwr: a TX power word the
+    test needs ("0x10c3"), None: the device's default. family: the suite.
+    """
+    family: str
+    name: str
+    payload: bytes
+    mpm_setup: str
+    cc_setup: str
+    trim: int = 0
+    pwr: str | None = None
+    kw: dict = field(default_factory=dict)  # other link_test() arguments
+
+
+def run_case(mpm: Bench, cc: Bench, case: Case, *, trim: int | None = None, pwr: str | None = None,
+             count: int | None = None, direction: str | None = None, verbose: bool = False) -> dict:
+    """link_test() of a case. trim: instead of the case's; pwr: the power word
+    for the cases without one (None: the power stays as it is); count,
+    direction: override (a direction the case doesn't run: no result)."""
+    kw = dict(case.kw)
+    if count is not None:
+        kw["count"] = count
+    if direction is not None:
+        d = kw.get("direction", "both")
+        if d not in ("both", direction):
+            return {}
+        kw["direction"] = direction
+    p = case.pwr or pwr
+    cc_setup = (f"pwr {p};" if p else "") + f"trim {case.trim if trim is None else trim};{case.cc_setup}"
+    return link_test(mpm, cc, case.payload, mpm_setup=case.mpm_setup, cc_setup=cc_setup, verbose=verbose, **kw)
 
 
 def print_results(name: str, results: dict):

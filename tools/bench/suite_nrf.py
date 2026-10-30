@@ -46,6 +46,22 @@ def nrf_setups(name: str, addr: str) -> tuple[str, str]:
     return f"nrf_1m.txt;{rf};w 0x0a {addr};w 0x10 {addr}", f"preset {preset};nrf {addr} 2"
 
 
+def cases(names=None, addrs=None, period: int = 5000, count: int = 250, direction: str = "both"):
+    """rig.Case of each test (plain NRF24L01: one per address)."""
+    payload = rig.pattern(16)
+    for name in names or list(NRF) + list(P):
+        if name in NRF:
+            for addr in addrs or ADDRS:
+                mpm_setup, cc_setup = nrf_setups(name, addr)
+                yield rig.Case("nrf", f"{name} {addr}", payload, mpm_setup, cc_setup,
+                               kw=dict(ch=40, period=period, count=count,
+                                       direction="rev" if name == "nrf2m" else direction))
+            continue
+        mpm_setup, cc_setup = P[name]
+        yield rig.Case("nrf", name, payload, mpm_setup, cc_setup or mpm_setup,
+                       kw=dict(period=period, count=count, direction=direction))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"tests (default: all): {' '.join(list(NRF) + list(P))}")
@@ -53,23 +69,11 @@ def main():
     rig.common_args(ap, period=5000, count=250)
     a = ap.parse_args()
     fails = 0
-    payload = rig.pattern(16)
     mpm, cc = rig.open_devices()
     with mpm, cc:
-        for name in a.names or list(NRF) + list(P):
-            if name in NRF:
-                for addr in a.addr or ADDRS:
-                    mpm_setup, cc_setup = nrf_setups(name, addr)
-                    r = rig.link_test(mpm, cc, payload, mpm_setup=mpm_setup, cc_setup=cc_setup, ch=40, period=a.period,
-                                      count=a.count, direction="rev" if name == "nrf2m" else a.dir,
-                                      verbose=a.verbose)
-                    rig.print_results(f"{name} {addr}", r)
-                    fails += sum(v["good"] < v["count"] for v in r.values())
-                continue
-            mpm_setup, cc_setup = P[name]
-            r = rig.link_test(mpm, cc, payload, mpm_setup=mpm_setup, cc_setup=f"trim 0;{cc_setup or mpm_setup}",
-                              period=a.period, count=a.count, direction=a.dir, verbose=a.verbose)
-            rig.print_results(name, r)
+        for c in cases(a.names, a.addr, a.period, a.count, a.dir):
+            r = rig.run_case(mpm, cc, c, verbose=a.verbose)
+            rig.print_results(c.name, r)
             fails += sum(v["good"] < v["count"] for v in r.values())
     return 1 if fails else 0
 

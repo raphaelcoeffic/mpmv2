@@ -53,6 +53,18 @@ def setups(name: str, trim: int = 90) -> tuple[str, str, str, int]:
     return mpm_tx, mpm_rx, cc_setup, n
 
 
+def cases(names=None, trim: int = 90, ch: int = 170, period: int = 5000, count: int = 500,
+          direction: str = "both"):
+    """rig.Case of each test and direction (the MPM's TX and RX setups differ)."""
+    for name in names or list(P):
+        mpm_tx, mpm_rx, cc_setup, n = setups(name, trim)
+        cc_setup = cc_setup.split(";", 1)[1]  # the trim: the Case's
+        for d, m in (("fwd", mpm_tx), ("rev", mpm_rx)):
+            if direction in ("both", d):
+                yield rig.Case("a7105", name, rig.pattern(n), m, cc_setup, trim=trim,
+                               kw=dict(ch=ch, period=period, count=count, direction=d))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"protocols (default: all): {' '.join(P)}")
@@ -63,18 +75,15 @@ def main():
     fails = 0
     mpm, cc = rig.open_devices()
     with mpm, cc:
-        for name in a.names or list(P):
-            mpm_tx, mpm_rx, cc_setup, n = setups(name, a.trim)
-            payload = rig.pattern(n)
-            r = {}
-            if a.dir in ("both", "fwd"):
-                r |= rig.link_test(mpm, cc, payload, mpm_setup=mpm_tx, cc_setup=cc_setup, ch=a.ch,
-                                   period=a.period, count=a.count, direction="fwd", verbose=a.verbose)
-            if a.dir in ("both", "rev"):
-                r |= rig.link_test(mpm, cc, payload, mpm_setup=mpm_rx, cc_setup=cc_setup, ch=a.ch,
-                                   period=a.period, count=a.count, direction="rev", verbose=a.verbose)
-            rig.print_results(name, r)
-            fails += sum(v["good"] < v["count"] for v in r.values())
+        r, last = {}, None
+        for c in list(cases(a.names, a.trim, a.ch, a.period, a.count, a.dir)) + [None]:
+            if last and (c is None or c.name != last):
+                rig.print_results(last, r)
+                fails += sum(v["good"] < v["count"] for v in r.values())
+                r = {}
+            if c:
+                r |= rig.run_case(mpm, cc, c, verbose=a.verbose)
+                last = c.name
     return 1 if fails else 0
 
 

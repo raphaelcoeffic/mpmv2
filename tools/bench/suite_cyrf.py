@@ -77,6 +77,16 @@ P = {
 }
 
 
+def cases(names=None, trim: int = 0, ch: int = 30, period: int = 20000, count: int = 100,
+          direction: str = "both"):
+    """rig.Case of each test."""
+    for name in names or list(P):
+        mpm_setup, cc_setup, n, mpm_rx, cc_tx = (P[name] + ("", ""))[:5]
+        yield rig.Case("cyrf", name, rig.pattern(n), mpm_setup, cc_setup, trim=trim,
+                       kw=dict(mpm_rx_setup=mpm_rx, cc_rx_setup=cc_tx, ch=ch, period=period, count=count,
+                               direction=direction, seq=5 if name == "dsmbindresp" else rig.SEQ))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"protocols (default: all): {' '.join(P)}")
@@ -87,13 +97,9 @@ def main():
     fails = 0
     mpm, cc = rig.open_devices()
     with mpm, cc:
-        for name in a.names or list(P):
-            mpm_setup, cc_setup, n, mpm_rx, cc_tx = (P[name] + ("", ""))[:5]
-            r = rig.link_test(mpm, cc, rig.pattern(n), mpm_setup=mpm_setup, cc_setup=f"trim {a.trim};{cc_setup}",
-                              mpm_rx_setup=mpm_rx, cc_rx_setup=cc_tx, ch=a.ch, period=a.period,
-                              count=a.count, direction=a.dir, seq=5 if name == "dsmbindresp" else rig.SEQ,
-                              verbose=a.verbose)
-            rig.print_results(name, r)
+        for c in cases(a.names, a.trim, a.ch, a.period, a.count, a.dir):
+            r = rig.run_case(mpm, cc, c, verbose=a.verbose)
+            rig.print_results(c.name, r)
             fails += sum(v["good"] < v["count"] for v in r.values())
     return 1 if fails else 0
 

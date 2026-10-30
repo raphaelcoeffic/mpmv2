@@ -71,6 +71,28 @@ def phy(r: bytes) -> dict:
         f"chplan {base} {spacing}"]}
 
 
+def cases(mpm, names=None, trim: int = -35, period: int = 0, count: int = 200, direction: str = "both"):
+    """rig.Case of each test; sets the MPM up for each (its registers give the
+    packet format)."""
+    for name in names or list(P):
+        mpm_setup, cc_setup, n = P[name]
+        rig.run(mpm, mpm_setup)
+        p = phy(bytes.fromhex(mpm.cmd("r 0x00 0x2f")))
+        n = n or (min(p["pktlen"], 40) if p["var"] else p["pktlen"])
+        payload = rig.pattern(n)
+        if p["var"]:
+            payload = bytes([n - 1]) + payload[1:]
+        airtime = (n + p["pre"] + 6) * 8 * (2 if p["fec"] else 1) / p["rate"] * 1e6
+        if "ch " not in cc_setup:
+            cc_setup += ";ch 0"
+        pwr = None
+        if cc_setup.startswith("pwr "):
+            pwr, cc_setup = cc_setup[4:].split(";", 1)
+        yield rig.Case("cc2500", name, payload, mpm_setup, cc_setup, trim=trim, pwr=pwr,
+                       kw=dict(period=period or max(3000, int(airtime) + 2000), count=count,
+                               direction=direction, cc2500=True))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*", help=f"protocols (default: all): {' '.join(P)}")
@@ -81,28 +103,17 @@ def main():
     fails = 0
     mpm, cc = rig.open_devices()
     with mpm, cc:
-        for name in a.names or list(P):
-            mpm_setup, cc_setup, n = P[name]
-            rig.run(mpm, mpm_setup)
-            p = phy(bytes.fromhex(mpm.cmd("r 0x00 0x2f")))
-            if a.phy:
+        if a.phy:
+            for name in a.names or list(P):
+                rig.run(mpm, P[name][0])
+                p = phy(bytes.fromhex(mpm.cmd("r 0x00 0x2f")))
                 print(f"{name}: rate={p['rate']:.0f} preamble={p['pre']} PKTLEN={p['pktlen']}\n  "
                       + "\n  ".join(p["cmds"]))
-                continue
-            n = n or (min(p["pktlen"], 40) if p["var"] else p["pktlen"])
-            payload = rig.pattern(n)
-            if p["var"]:
-                payload = bytes([n - 1]) + payload[1:]
-            airtime = (n + p["pre"] + 6) * 8 * (2 if p["fec"] else 1) / p["rate"] * 1e6
-            period = a.period or max(3000, int(airtime) + 2000)
-            if "ch " not in cc_setup:
-                cc_setup += ";ch 0"
+            return 0
+        for c in cases(mpm, a.names, a.trim, a.period, a.count, a.dir):
             # pwr applies at once and is kept: the default unless the test sets one
-            if "pwr " not in cc_setup:
-                cc_setup = "pwr default;" + cc_setup
-            r = rig.link_test(mpm, cc, payload, mpm_setup=mpm_setup, cc_setup=f"trim {a.trim};{cc_setup}",
-                              period=period, count=a.count, direction=a.dir, cc2500=True, verbose=a.verbose)
-            rig.print_results(name, r)
+            r = rig.run_case(mpm, cc, c, pwr="default", verbose=a.verbose)
+            rig.print_results(c.name, r)
             fails += sum(v["good"] < v["count"] for v in r.values())
         cc.cmd("pwr default")
     return 1 if fails else 0
