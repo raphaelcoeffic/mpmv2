@@ -26,6 +26,9 @@
 #define US(x) ((x) * 4U)
 // Start of an operation: some margin for the PBE to be ready (TI: 50 us)
 #define START_DELAY US(100)
+// The same with the radio on and tuned (rf_fs_start()): the PBE takes the
+// op at once
+#define START_DELAY_TUNED US(30)
 // Hard stop: the PBE ends the operation within (measured: some us)
 #define STOP_TIMEOUT US(1000)
 
@@ -39,6 +42,10 @@ static rf_modem_t _modem_tx, _modem_rx;
 static uint32_t _events;
 static bool _running;
 static uint32_t _rx_fifo_size;
+// OP_FS: the synthesizer tuned ahead for a TX at _fs_freq (rf_fs_start()),
+// kept on once locked (OPDONE)
+static bool _fs_on;
+static uint32_t _fs_freq;
 
 // TX: the packet's bytes not in the FIFO yet (long packets)
 static const uint8_t *_tx_data;
@@ -181,7 +188,7 @@ static void _rx_copy(bool end)
   if (!end) _write_fifo_ptr(LRFDPBE_BASE + LRFDPBE_O_RXFSRP, (_rx_pos + size - 4) % size);
 }
 
-int rf_setup(const LRF_Config *config)
+int rf_configure(const LRF_Config *config)
 {
   rf_stop();
   // Every register again (the same PHY too: phy_fsk changes some after)
@@ -261,10 +268,10 @@ static void _cancel_systim0(void)
 }
 
 // The start time: at (0: as soon as possible), not before the synthesizer's
-// reference is ready (earliest) nor the PBE (START_DELAY)
-static uint32_t _start_time(uint32_t at, uint32_t earliest)
+// reference is ready (earliest) nor the PBE (delay: START_DELAY*)
+static uint32_t _start_time(uint32_t at, uint32_t earliest, uint32_t delay)
 {
-  uint32_t start = _now() + START_DELAY;
+  uint32_t start = _now() + delay;
   if (at && (int32_t)(at - start) > 0) start = at;
   if ((int32_t)(earliest - start) > 0) start = earliest;
   return start;
@@ -317,6 +324,7 @@ int rf_stop(void)
 {
   _tx_left = 0;
   _rx_active = false;
+  _fs_on = false;
   if (!_running) return RF_OK;
   int res = RF_OK;
   if (_op_busy()) {
@@ -343,20 +351,70 @@ static int _wait_done(uint32_t deadline)
   return rf_stop();
 }
 
-int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at)
+int rf_fs_start(uint32_t freq_hz)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
-  if (len > RF_MAX_PAYLOAD) return RF_ERR_PARAM;
   rf_stop();
   _rx_long = _rx_ready = false;
 
   uint32_t earliest = LRF_enableSynthRefsys();
-  HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = 0;
-  LRF_Interface_Generic_configOpTx(1, freq_hz);
+  LRF_Interface_Generic_configOpFs();
   _modem(&_modem_tx);
   LRF_programFrequency(freq_hz, true);
-  LRF_programTxPower(_power, freq_hz);
   LRF_enable();
+
+  _clear_events(0xFFFFFFFFU);
+  _start_at(_start_time(0, earliest, START_DELAY));
+  LRF_waitForTopsmReady();
+  LRF_Interface_Generic_sendOpFs();
+  _running = true;
+  _fs_on = true;
+  _fs_freq = freq_hz;
+  return RF_OK;
+}
+
+// The synthesizer of rf_fs_start() locked at freq_hz: its op done (waited
+// for), the radio left on. Else false, the radio off
+static bool _fs_ready(uint32_t freq_hz)
+{
+  bool on = _fs_on && _running && _fs_freq == freq_hz;
+  _fs_on = false;
+  if (on) {
+    uint32_t t = _now();
+    while (!(_events_now() & (EV_OPDONE | EV_OPERROR)) && _now() - t < STOP_TIMEOUT) {
+    }
+    _events = _events_now();
+    on = (_events & (EV_OPDONE | EV_OPERROR)) == EV_OPDONE;
+  }
+  if (!on) {
+    rf_stop();
+    return false;
+  }
+  _endcause = LRF_Interface_getCmdEndCause();
+  _cancel_systim0();
+  _running = false;
+  return true;
+}
+
+int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at)
+{
+  if (_state != RadioState_Configured) return RF_ERR_SETUP;
+  if (len > RF_MAX_PAYLOAD) return RF_ERR_PARAM;
+  _tx_left = 0;
+  _rx_active = false;
+  // Tuned ahead: no calibration (frequency 0), the synthesizer off after
+  bool fs = _fs_ready(freq_hz);
+  _rx_long = _rx_ready = false;
+
+  uint32_t earliest = fs ? _now() : LRF_enableSynthRefsys();
+  HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = 0;
+  LRF_Interface_Generic_configOpTx(1, fs ? 0 : freq_hz);
+  if (!fs) {
+    _modem(&_modem_tx);
+    LRF_programFrequency(freq_hz, true);
+  }
+  LRF_programTxPower(_power, freq_hz);
+  if (!fs) LRF_enable();
 
   // FIFO entry: length (after the field), numPad 1, one pad byte, the
   // packet: what fits, the PBE freeing what it sends (rf_busy() refills)
@@ -370,7 +428,7 @@ int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at
   _tx_fill();
 
   _clear_events(0xFFFFFFFFU);
-  _start_at(_start_time(at, earliest));
+  _start_at(_start_time(at, earliest, fs ? START_DELAY_TUNED : START_DELAY));
   LRF_waitForTopsmReady();
   LRF_Interface_Generic_sendOpTx();
   _running = true;
@@ -421,7 +479,7 @@ static int _rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at, b
   }
 
   _clear_events(0xFFFFFFFFU);
-  _start_at(_start_time(at, earliest));
+  _start_at(_start_time(at, earliest, START_DELAY));
   LRF_waitForTopsmReady();
   LRF_Interface_Generic_sendOpRx();
   _running = true;
@@ -460,6 +518,25 @@ bool rf_rx_read(rf_packet_t *pkt)
   // Deallocated: the PBE may write there again
   LRF_setRxFifoEffSz(_rx_fifo_size);
   return ok;
+}
+
+uint16_t rf_rx_peek(uint8_t *buf, uint16_t max)
+{
+  if (!_running || _rx_long || LRF_hasRxWordToRead()) return 0;
+  uint32_t rp;
+  uint32_t n = LRF_getUncommittedFifoStatus(&rp);
+  uint32_t w[(RF_FIFO_PAYLOAD + 16 + 3) / 4];
+  if (n > sizeof(w)) n = sizeof(w);
+  if (n < 4) return 0;
+  LRF_peekRxFifoWords(w, (n + 3) / 4, rp);
+  // The entry's length field and numPad come first
+  const uint8_t *b = (const uint8_t *)w;
+  uint32_t off = 3U + b[2];
+  if (n <= off) return 0;
+  n -= off;
+  if (n > max) n = max;
+  memcpy(buf, b + off, n);
+  return n;
 }
 
 int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)

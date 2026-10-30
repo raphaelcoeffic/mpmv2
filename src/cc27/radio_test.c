@@ -52,7 +52,7 @@ static void _setup(int phy)
                                            &phy_fsk250_common};
   if (phy < 1 || phy > 4) phy = 1;
   _phy = phys[phy - 1];
-  int res = rf_setup(_phy);
+  int res = rf_configure(_phy);
   rf_set_sync(_sync, _sync_bits);
   uart_printf("@setup %d res=%d\n", phy, res);
 }

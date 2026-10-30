@@ -74,7 +74,7 @@ static void _rate_word(uint32_t rate, uint16_t *baud, uint16_t *baudpre, uint32_
 
 int phy_fsk_setup(const phy_fsk_t *phy, phy_fsk_info_t *info)
 {
-  int res = rf_setup(phy->rate > GENFSK_MAX_RATE ? &phy_nesb_2_mbps : &phy_fsk250_common);
+  int res = rf_configure(phy->rate > GENFSK_MAX_RATE ? &phy_nesb_2_mbps : &phy_fsk250_common);
   if (res) return res;
 
   // Deviation: LRF programs the TX shape from it at each frequency change

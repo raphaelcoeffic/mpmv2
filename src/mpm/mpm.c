@@ -48,6 +48,7 @@ static uint8_t _input_ppm_n;
 
 // Callback scheduling
 static uint32_t _next_us;
+static uint32_t _cb_deadline;  // the running callback's
 static uint8_t _count;
 
 static uint32_t _blink_ms;
@@ -82,6 +83,8 @@ void mpm_bind_done()
 void mpm_sub_invalid() { _sub_valid = false; }
 
 bool mpm_sub_valid() { return _sub_valid; }
+
+uint32_t mpm_callback_deadline() { return _cb_deadline; }
 
 void mpm_send_status() { _send_status = true; }
 
@@ -438,6 +441,7 @@ static void _poll()
     return;
   }
 
+  _cb_deadline = _next_us;
   _next_us += _callback();
 
   // Late: the next callback right away. Else make sure the input gets

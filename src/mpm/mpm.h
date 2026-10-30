@@ -141,6 +141,11 @@ void mpm_run();
 void mpm_bind_done();
 void mpm_sub_invalid();
 bool mpm_sub_valid();
+
+// The deadline of the protocol callback running now, micros() time: when it
+// was due, however late it started. The chip emulations time their strobes
+// from it (cc2500.c)
+uint32_t mpm_callback_deadline();
 // The status telemetry at once (the next update), not at its period
 void mpm_send_status();
 // Telemetry frame of the given type: header + data

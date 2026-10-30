@@ -7,7 +7,14 @@
 //   RF_FIFO_PAYLOAD: CYRF6936 SDR) streamed through the PBE's FIFOs while
 //   radio_tx_wait(), radio_tx_done(), radio_receive() or radio_rx_active()
 //   poll: long RX restarts after each packet;
-// - variable length RX receives max_len bytes (the frame decoders cut);
+// - variable length RX: max_len bytes a packet (the frame decoders cut);
+//   len_fn() called from radio_receive_early(), as the bytes come, and the
+//   packet taken there once its length is in: RX starts again at the next
+//   call (the rest of max_len would hide the next packet). At rx_os > 1:
+//   fixed length only;
+// - radio_set_frequency_start() while idle: the synthesizer tuned and kept
+//   on for the next TX (OP_FS), which then starts without calibrating; RX
+//   tunes as it starts;
 // - TX power words: the CC2652's (TI's table) taken as their dBm, words
 //   below 0x100 as dBm (signed byte: "pwr 10", "pwr 0xf6" for -10);
 // - extra overrides: (address, value) pairs of 32-bit register writes after
@@ -60,6 +67,14 @@ static uint8_t _rx_os = 1;
 static uint8_t _rx_sync_bytes;
 static uint32_t _rx_sync_rest[2];
 static uint16_t _rx_dropped;
+// Variable length RX: its len_fn, the length it gave (0: not yet), the
+// packet taken early (RX to start again)
+static bool _var;
+static uint8_t _var_hdr;
+static radio_len_fn_t _var_fn;
+static void* _var_ctx;
+static uint16_t _var_len;
+static bool _var_taken;
 
 // TI's CC2652 PA table (+5 dBm PA): power word, dBm
 static const struct {
@@ -110,7 +125,10 @@ static void _stop()
 {
   if (_state != STATE_IDLE) _status = rf_stop();
   _state = STATE_IDLE;
+  _var_taken = false;
 }
+
+static radio_status_t _rx_start(uint16_t len);
 
 radio_status_t radio_init(const radio_phy_t* phy)
 {
@@ -141,13 +159,22 @@ radio_status_t radio_init(const radio_phy_t* phy)
 void radio_off()
 {
   _stop();
+  rf_stop();  // a tune ahead
 }
 
 radio_status_t radio_set_frequency(uint32_t freq_khz)
 {
   _freq_hz = freq_khz * 1000;
-  if (_state == STATE_RX) return radio_rx_start(_rx_len);
+  if (_state == STATE_RX) return _rx_start(_rx_len);
   return RADIO_OK;
+}
+
+// Idle: the synthesizer tuned for the next TX (rf_fs_start())
+radio_status_t radio_set_frequency_start(uint32_t freq_khz)
+{
+  if (_state != STATE_IDLE || !_phy_ok) return radio_set_frequency(freq_khz);
+  _freq_hz = freq_khz * 1000;
+  return _result(rf_fs_start(_freq_hz));
 }
 
 void radio_set_sync_word(uint32_t tx_sync, uint32_t rx_sync)
@@ -270,10 +297,11 @@ static bool _vote(rf_packet_t *p)
   return true;
 }
 
-radio_status_t radio_rx_start(uint16_t len)
+static radio_status_t _rx_start(uint16_t len)
 {
   if (!_phy_ok) return RADIO_ERR_PARAM;
   _stop();
+  _var_len = 0;
   _rx_syncs(_rx_sync, _rx_sync_alt ? _rx_sync_alt : _rx_sync);
   radio_status_t st = _result(rf_rx_start(_freq_hz, _os_len(len), true, 0));
   if (st != RADIO_OK) return st;
@@ -284,11 +312,28 @@ radio_status_t radio_rx_start(uint16_t len)
   return RADIO_OK;
 }
 
+radio_status_t radio_rx_start(uint16_t len)
+{
+  _var = false;
+  return _rx_start(len);
+}
+
 radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
                                   void* ctx)
 {
-  (void)hdr_len, (void)len_fn, (void)ctx;
-  return radio_rx_start(max_len);
+  radio_status_t st = radio_rx_start(max_len);
+  if (st != RADIO_OK || _rx_os != 1 || _phy.ble_2m || max_len > RF_FIFO_PAYLOAD) return st;
+  _var = true;
+  _var_hdr = hdr_len;
+  _var_fn = len_fn;
+  _var_ctx = ctx;
+  return RADIO_OK;
+}
+
+// The early packet taken: RX again, for the next one
+static void _var_restart()
+{
+  if (_state == STATE_RX && _var_taken) _rx_start(_rx_len);
 }
 
 static void _packet(const rf_packet_t* p, radio_packet_t* pkt, bool freq_offset)
@@ -326,6 +371,7 @@ void radio_rx_stop()
 
 bool radio_rx_active()
 {
+  _var_restart();
   return _state == STATE_RX && rf_busy();
 }
 
@@ -356,11 +402,36 @@ void radio_rx_stats(radio_rx_stats_t* stats)
 
 bool radio_receive(radio_packet_t* pkt)
 {
+  _var_restart();
   if (_state != STATE_RX) return false;
   rf_packet_t p;
   if (!rf_rx_read(&p) || !_vote(&p)) return false;
   _rx_count++;
+  _var_len = 0;
   _packet(&p, pkt, true);
+  return true;
+}
+
+bool radio_receive_early(radio_packet_t* pkt)
+{
+  if (!_var || _state != STATE_RX || _var_taken) return false;
+  uint16_t n = rf_rx_peek(pkt->data, _rx_len);
+  if (n < _var_hdr) return false;
+  if (!_var_len) {
+    _var_len = _var_fn(pkt->data, n, _var_ctx);
+    // Dropped: RX again
+    if (!_var_len) {
+      _var_taken = true;
+      return false;
+    }
+  }
+  if (n < _var_len) return false;
+  pkt->len = _var_len;
+  pkt->rssi = rf_rssi();
+  pkt->timestamp_us = HWREG(SYSTIM_BASE + SYSTIM_O_TIME1U);
+  pkt->freq_offset = RADIO_FREQ_OFFSET_NONE;
+  _var_taken = true;
+  _rx_count++;
   return true;
 }
 

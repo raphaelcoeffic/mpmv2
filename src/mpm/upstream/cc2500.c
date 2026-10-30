@@ -5,10 +5,14 @@
 // framing. TX sends the TX FIFO; RX fills a 64 byte RX FIFO as the chip does
 // (length byte, payload, RSSI and LQI | CRC_OK with APPEND_STATUS), address
 // check included. Read as the MPM reads it: RXBYTES, MARCSTATE, RSSI.
-// The RF core gives whole packets and starts sending about 0.2 ms later than
-// the CC2500 after the strobe: RXBYTES waits for a packet that ends within
-// RX_WAIT_US, which the CC2500 would have in its FIFO by then (FrSky X LBT
-// telemetry, received just before the protocol reads it).
+// The RF core gives whole packets, about 20 bit times after their end (its
+// demodulator): RXBYTES waits for a packet that ends within RX_WAIT_US, which
+// the CC2500 would have in its FIFO by then (FrSky X telemetry, received just
+// before the protocol reads it). TX goes on air at a fixed time after the
+// callback's deadline (TX_AT_US), not when the code reaches STX: a late
+// callback (that wait) would delay the receiver's reply as much, and the next
+// wait (FrSky X FCC: 400 us left before the next TX, UNI on CC2650 receivers
+// dropping out). A channel change starts tuning at once (about 140 us).
 //
 // Not emulated: SYNC_MODE 0 / 4 (no preamble or sync word: CC2500_250K_Init(),
 // the XN297 at 250 kbps runs on xn297.c), infinite packet length, TXOFF_MODE
@@ -25,6 +29,11 @@
 #define FXOSC 26000000ULL
 #define FIFO_SIZE 64
 #define RX_WAIT_US 500
+// TX: the RF core starts sending at the callback's deadline plus this, the
+// PA on 102 us later, when the strobe comes before (FrSky X: STX 110 us into
+// the callback): the same time on air however late the callback runs, as a
+// CC2500 sends a fixed time after STX. A later strobe sends at once
+#define TX_AT_US 300
 #define RSSI_OFFSET 72  // dBm, CC2500 datasheet table 31 (250 kBaud: 72, 2.4: 71)
 
 // Reset values (datasheet section 33), 0x00 to 0x2E
@@ -210,7 +219,10 @@ static void _tx()
   }
   uint16_t n = frame_tx_data(&_frame, _tx_fifo, len, _air);
   if (!n) return;
-  radio_tx_start(_air, n);
+  // Within TX_AT_US of now: the callback's deadline is this callback's
+  uint32_t at = mpm_callback_deadline() + TX_AT_US;
+  if ((int32_t)(at - micros()) <= 0 || (int32_t)(at - micros()) > TX_AT_US) at = 0;
+  radio_tx_start_at(_air, n, at);
   _state = S_TX;
   _tx_len = 0;
 }
@@ -252,7 +264,8 @@ static bool _address_ok(uint8_t a)
 static void _rx_poll()
 {
   if (_state == S_TX && radio_tx_done()) _state = S_IDLE;  // TXOFF_MODE IDLE
-  while (_state == S_RX && radio_receive(&_pkt)) {
+  // Whole packets, else the one whose last byte just came (variable length)
+  while (_state == S_RX && (radio_receive(&_pkt) || radio_receive_early(&_pkt))) {
     _rx_busy = false;
     uint8_t payload[FRAME_PAYLOAD_MAX];
     uint8_t n = 0;
@@ -280,11 +293,25 @@ static void _rx_poll()
   }
 }
 
+// A channel change while idle: the RF core tunes at once while the protocol
+// builds its packet (FrSky X: CHANNR 10 us into the callback, STX 110 us),
+// not at the strobe
+static void _tune_early()
+{
+  if (_state != S_IDLE || !_phy_on || _regs_changed()) return;
+  uint32_t khz = _channel_khz();
+  if (khz == _freq_khz) return;
+  _freq_khz = khz;
+  radio_set_frequency_start(khz);
+}
+
 void CC2500_WriteReg(uint8_t address, uint8_t data)
 {
   address &= 0x3F;
-  if (address < NREGS) _reg[address] = data;
-  else if (address == CC2500_3E_PATABLE) {
+  if (address < NREGS) {
+    _reg[address] = data;
+    if (address == CC2500_0A_CHANNR) _tune_early();
+  } else if (address == CC2500_3E_PATABLE) {
     _patable = data;
     uint16_t power = _power_word(data);
     if (power != _power) {

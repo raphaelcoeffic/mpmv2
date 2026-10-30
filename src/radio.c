@@ -235,6 +235,7 @@ static rfc_propRxOutput_t _rx_out;
 static uint32_t _freq_khz;
 static bool _rx_running;
 static bool _tx_running;  // radio_tx_start() not waited for yet
+static bool _fs_running;  // radio_set_frequency_start() not waited for yet
 
 static uint8_t _rx_entries[RX_ENTRIES][RX_ENTRY_SIZE] __attribute__((aligned(4)));
 static dataQueue_t _rx_queue;
@@ -247,7 +248,9 @@ static bool _rx_repeat;
 // the end of the command starts RX again on the next entry, unless it is not
 // read yet (_var_stalled: radio_receive() starts it). The RF core sets the
 // entry finished itself at the end of the command, before its interrupt:
-// _var_ready marks the packets to read
+// _var_ready marks the packets to read. The RF core writes the bytes into the
+// entry as they come: radio_receive_early() takes the packet once its last
+// byte is in (_var_taken: not kept at the end of the command)
 static bool _var;
 static uint8_t _var_hdr_len;
 static uint16_t _var_max_len;
@@ -256,6 +259,11 @@ static void* _var_ctx;
 static uint8_t _var_cur;
 static bool _var_len_set;  // CMD_PROP_SET_LEN sent for the current packet
 static bool _var_drop;     // not a valid length: ended at once, dropped
+static bool _var_taken;    // taken by radio_receive_early()
+static uint16_t _var_pkt_len;  // the current packet's length (CMD_PROP_SET_LEN)
+// Its RSSI, sampled by radio_receive_early() while it comes in: once its
+// last byte is in, the command has often ended (no instant RSSI)
+static int8_t _var_rssi;
 static bool _var_stalled;
 static uint16_t _var_len[RX_ENTRIES];
 static volatile bool _var_ready[RX_ENTRIES];
@@ -406,12 +414,14 @@ static void _var_start()
   if (_var_stalled) return;
 
   e->status = DATA_ENTRY_PENDING;
+  _var_rssi = RADIO_RSSI_NONE;
   memset(&e->pktStatus, 0, sizeof(e->pktStatus));
   e->nextIndex = 0;
   _rx_queue.pCurrEntry = (uint8_t*)e;
   _rx_queue.pLastEntry = (uint8_t*)e;
   _var_len_set = false;
   _var_drop = false;
+  _var_taken = false;
   _rx_foff[_var_cur] = FOFF_NONE;
   _rx_op->status = IDLE;
   uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)_rx_op);
@@ -426,7 +436,8 @@ static void _var_done(bool restart)
 {
   uint16_t status = RF_STATUS(_rx_op);
   rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
-  if (status == PROP_DONE_OK && _var_len_set && !_var_drop && e->nextIndex >= RX_APPENDED) {
+  if (status == PROP_DONE_OK && _var_len_set && !_var_drop && !_var_taken &&
+      e->nextIndex >= RX_APPENDED) {
     _var_len[_var_cur] = e->nextIndex - RX_APPENDED;
     _rx_foff_set[_var_cur] = true;
     _var_ready[_var_cur] = true;
@@ -466,6 +477,7 @@ static void _var_isr()
   _var_drop = !len || len > _var_max_len;
   static rfc_CMD_PROP_SET_LEN_t set_len = {.commandNo = CMD_PROP_SET_LEN};
   set_len.rxLen = _var_drop || len < n ? n : len;
+  _var_pkt_len = set_len.rxLen;
   _doorbell_post((uint32_t)&set_len);
 }
 
@@ -738,7 +750,7 @@ static void _init_ble_setup(const radio_phy_t* phy)
 }
 #endif
 
-static radio_status_t _run_fs()
+static void _init_fs()
 {
   memset(&_fs, 0, sizeof(_fs));
   _fs.commandNo = CMD_FS;
@@ -746,7 +758,20 @@ static radio_status_t _run_fs()
   _fs.condition.rule = COND_NEVER;
   _fs.frequency = _freq_khz / 1000;
   _fs.fractFreq = (uint16_t)(((_freq_khz % 1000) << 16) / 1000);
+}
+
+static radio_status_t _run_fs()
+{
+  _init_fs();
   return _run_op((rfc_radioOp_t*)&_fs);
+}
+
+// Wait for the CMD_FS of radio_set_frequency_start()
+static radio_status_t _fs_wait()
+{
+  if (!_fs_running) return RADIO_OK;
+  _fs_running = false;
+  return _wait_op((rfc_radioOp_t*)&_fs);
 }
 
 radio_status_t radio_init(const radio_phy_t* phy)
@@ -761,6 +786,7 @@ radio_status_t radio_init(const radio_phy_t* phy)
     return RADIO_ERR_PARAM;
 
   if (_powered) radio_off();
+  _fs_running = false;
   _hposc_init();
 
 #if !defined(MCU_CC26X0)
@@ -807,6 +833,19 @@ radio_status_t radio_set_frequency(uint32_t freq_khz)
   radio_rx_stop();
   _hposc_update();
   return _run_fs();
+}
+
+radio_status_t radio_set_frequency_start(uint32_t freq_khz)
+{
+  _freq_khz = freq_khz;
+  if (!_powered) return RADIO_OK;  // tuned by radio_init()
+  radio_tx_wait();
+  radio_rx_stop();
+  _hposc_update();
+  _init_fs();
+  radio_status_t st = _submit_op((rfc_radioOp_t*)&_fs);
+  _fs_running = st == RADIO_OK;
+  return st;
 }
 
 void radio_set_sync_word(uint32_t tx_sync, uint32_t rx_sync)
@@ -880,7 +919,8 @@ bool radio_tx_done() { return !_tx_running || _cmd_done(RF_STATUS(_tx_op)); }
 
 radio_status_t radio_tx_wait()
 {
-  if (!_tx_running) return RADIO_OK;
+  radio_status_t st = _fs_wait();
+  if (!_tx_running) return st;
   _tx_running = false;
   return _wait_op(_tx_op);
 }
@@ -1144,6 +1184,36 @@ bool radio_receive(radio_packet_t* pkt)
     if (_rx_running && _var_stalled) _var_start();
     IntEnable(INT_RFC_CPE_0);
   }
+  return true;
+}
+
+bool radio_receive_early(radio_packet_t* pkt)
+{
+  if (!_var) return false;
+  IntDisable(INT_RFC_CPE_0);
+  rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
+  uint16_t len = _var_pkt_len;
+  bool in = _rx_running && !_var_stalled && _var_len_set && !_var_drop && !_var_taken &&
+            RF_STATUS(_rx_op) == ACTIVE && *(volatile uint16_t*)&e->nextIndex >= len;
+  if (in) {
+    memcpy(pkt->data, &e->rxData, len);
+    _var_taken = true;
+  }
+  bool coming = !in && _rx_running && _var_len_set && !_var_drop && !_var_taken;
+  int16_t foff = _rx_foff[_var_cur];
+  IntEnable(INT_RFC_CPE_0);
+  if (coming) {
+    int8_t rssi = radio_rssi();
+    if (rssi != RADIO_RSSI_NONE) _var_rssi = rssi;
+  }
+  if (!in) return false;
+
+  pkt->len = len;
+  pkt->rssi = _var_rssi != RADIO_RSSI_NONE ? _var_rssi : radio_rssi();
+  pkt->timestamp_us = micros();
+  pkt->freq_offset = foff == FOFF_NONE ? RADIO_FREQ_OFFSET_NONE
+                     : (int16_t)(foff * (int32_t)_foff_deviation /
+                                 (FOFF_COUNTS_PER_DEVIATION * 1000));
   return true;
 }
 

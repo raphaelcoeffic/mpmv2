@@ -66,6 +66,10 @@ void radio_off();
 // Tune the synthesizer: frequency in kHz
 radio_status_t radio_set_frequency(uint32_t freq_khz);
 
+// Same, without waiting: the RF core tunes (CMD_FS, about 140 us) while the
+// CPU goes on. The next radio call waits for it first (radio_tx_wait())
+radio_status_t radio_set_frequency_start(uint32_t freq_khz);
+
 // Sync words for TX and RX, right aligned on sync_bits
 void radio_set_sync_word(uint32_t tx_sync, uint32_t rx_sync);
 
@@ -137,6 +141,14 @@ void radio_rx_stats(radio_rx_stats_t* stats);
 
 // Returns true and fills pkt if a packet has been received
 bool radio_receive(radio_packet_t* pkt);
+
+// Variable length RX: the packet being received, as soon as its last byte is
+// in, before the RF core ends it (radio_receive() gets it 20 bit times + 40
+// us after its last bit): the RSSI sampled by the calls while it came in
+// (else read now), timestamp_us = micros() now, the frequency offset from its
+// first bytes (CC27xx: none). radio_receive() does not return it
+// again. Call radio_receive() first: the packets before it
+bool radio_receive_early(radio_packet_t* pkt);
 
 // Extra RF core override words (HW_REG_OVERRIDE() etc.), appended to the
 // setup overrides of the next radio_init(): register experiments. n <= 8

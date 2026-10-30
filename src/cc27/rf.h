@@ -34,12 +34,12 @@ void rf_init(void);
 
 // PHY setup (a generated LRF_Config, see tools/cc27_phy.py), then the raw
 // framing on top of it. Returns LRF_SetupResult (0: ok)
-int rf_setup(const LRF_Config *config);
+int rf_configure(const LRF_Config *config);
 
 // Modem registers that differ between TX and RX (phy_fsk): DEMMISC3 (the
 // PDIF decimation slows the modulator too), BAUD and BAUDPRE (RX at a
 // multiple of the rate). Written before LRF_programFrequency(), which
-// computes the resampler from them. 0: the PHY's. rf_setup() clears them
+// computes the resampler from them. 0: the PHY's. rf_configure() clears them
 typedef struct {
   uint16_t demmisc3, baud, baudpre;
 } rf_modem_t;
@@ -79,11 +79,21 @@ int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)
 int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at);
 int rf_rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at);
 
+// The synthesizer tuned for a TX at freq_hz ahead of rf_tx_start() (OP_FS,
+// some 100 us, kept on once locked): that TX then starts without
+// calibrating. Any other operation ends it
+int rf_fs_start(uint32_t freq_hz);
+
 // True while the operation runs. Streams long packets: call it often
 bool rf_busy(void);
 
 // A packet received (true), from the RX FIFO
 bool rf_rx_read(rf_packet_t *pkt);
+
+// The packet being received (RF_FIFO_PAYLOAD bytes at most): its bytes the
+// PBE has written so far, up to max into buf; 0 while none or while a whole
+// packet waits for rf_rx_read()
+uint16_t rf_rx_peek(uint8_t *buf, uint16_t max);
 
 // Ends the operation (hard stop if it still runs: RF_ERR_TIMEOUT), the radio
 // off. Returns its end cause

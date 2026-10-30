@@ -37,5 +37,5 @@ typedef struct {
   uint8_t rx_os;
 } phy_fsk_info_t;
 
-// rf_setup() of the base PHY, then the changes. Returns rf_setup()'s result
+// rf_configure() of the base PHY, then the changes. Returns rf_configure()'s result
 int phy_fsk_setup(const phy_fsk_t *phy, phy_fsk_info_t *info);
