@@ -143,8 +143,9 @@ CC2500 setups 100% both ways (`frskyx2eu` 99.5%), except `redpineslow`
 MPM -> CC27 (0%, below) and `coronav2` CC27 -> MPM (at -20 dBm, 250/250 at
 -10). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
 CC27 -> MPM, scattered single bit errors at -43 dBm; with the rectangular
-pulse 250/250, as the CC2652. The A7105 setups: as the CC2652 (100%
-A7105 -> CC27, the narrow window the other way, see
+pulse 250/250, as the CC2652. The A7105 setups (`ch 170`): 100% A7105 ->
+CC27; CC27 -> A7105 at trim 70: 98 to 100%, `wfly2` 91% (97% at trim 20 to
+40). In GFSK it was the CC2652's narrow window (64 to 90% at trim 20, see
 [interop-results.md](interop-results.md)). Trap: Wi-Fi on channel 1 here,
 the suites' `ch 0` setups (2400 to 2410 MHz) lose a packet every 102 ms
 (the beacons) and in bursts, whatever the sender: compare radios at
