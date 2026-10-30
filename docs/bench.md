@@ -156,6 +156,11 @@ the suites' `ch 0` setups (2400 to 2410 MHz) lose a packet every 102 ms
 2440 MHz or so (`hitec.txt` turns the autocalibration off: `s 0x36;s 0x33`
 after a channel change).
 
+Against the MPM v2 bench with CC2500 framing (`frskyd`, `frskyx`, `frskyv`,
+`redpine`, `corona`, `hott`, length byte set): 100% both ways with the
+MPM v2 at trim 0 to +50 (frskyx: nothing outside that; at -35, the trim for
+the 4-in-1, nothing at all, which looked like a framing problem).
+
 The TX pulse: LRF's TX filter is a symmetric FIR of 48 taps at 16 per
 symbol (LRFDRFE DTX), `LRF_TxShape` its last 24 taps (TI's BT 0.5: a
 Gaussian-filtered rectangle, 20 taps), scale 2^28 / the sum of the 48 taps
