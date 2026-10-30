@@ -16,6 +16,13 @@
 // UART0: 48 MHz peripheral clock (CLKSVT / 2)
 #define UART_CLK 48000000
 
+// The HFXT above 48 MHz (ppb): TI's offset for the internal capacitor array
+// at 25 C (PowerCC27XX.c capArrayP0/P1: 10 ppm, 0.07 ppm/C), no temperature
+// tracking. CMake can add the crystal's own error
+#ifndef BOARD_HFXT_PPB
+#define BOARD_HFXT_PPB 10000
+#endif
+
 #define IOC_REG(dio) (IOC_BASE + IOC_O_IOC0 + 4 * (dio))
 #define IOC_UART0 4  // DIO1 TXD, DIO2 RXD
 
@@ -30,8 +37,14 @@ void board_init(void)
   // HFXT on, and again after standby (as TI's power driver; the amplitude
   // control as the ROM left it)
   HWREG(CKMD_BASE + CKMD_O_HFXTCTL) |= CKMD_HFXTCTL_EN | CKMD_HFXTCTL_AUTOEN;
-  // HFOSC (CLKSVT, the LRFD clock) tracks the HFXT once it runs
-  HWREG(CKMD_BASE + CKMD_O_HFTRACKCTL) |= CKMD_HFTRACKCTL_EN_M | CKMD_HFTRACKCTL_REFCLK_HFXT;
+  // HFOSC (CLKSVT, the LRFD clock) tracks the HFXT once it runs. RATIO:
+  // the HFXT's real frequency, which LRF_programFrequency() also scales the
+  // synthesizer by (TI's power driver sets it when its HFXT compensation
+  // is on)
+  uint32_t ratio = (uint32_t)(0xB71B00000000LL / (48000000 + 48 * BOARD_HFXT_PPB / 1000));
+  HWREG(CKMD_BASE + CKMD_O_HFTRACKCTL) =
+      (HWREG(CKMD_BASE + CKMD_O_HFTRACKCTL) & ~CKMD_HFTRACKCTL_RATIO_M) | CKMD_HFTRACKCTL_EN_M |
+      CKMD_HFTRACKCTL_REFCLK_HFXT | ratio;
 
   CLKCTLEnable(CLKCTL_BASE, CLKCTL_GPIO);
 
