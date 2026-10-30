@@ -8,6 +8,11 @@
 // down to 4 x rate x PDIF decimation, PDIF then by its decimation to 4 per
 // symbol. The channel bandwidth follows the samples' rate before the
 // resampler, so a wider signal (deviation) takes a larger PDIF decimation.
+//
+// A deviation large for the rate (redpineslow: 10 kbps, 38 kHz) leaves the
+// tones at the samples' Nyquist limit even at the largest PDIF decimation
+// (no room for a frequency offset): the RX then runs at a multiple of the
+// rate (rx_os), each bit received rx_os times (radio.c votes).
 
 #pragma once
 
@@ -19,6 +24,7 @@ typedef struct {
   uint32_t deviation;  // TX deviation (Hz); the RX bandwidth follows it
   int8_t log2_pdif;    // PDIF decimation, log2 (0 to 3); -1: from the deviation
   bool fsk;            // TX pulse: rectangular (2-FSK), else Gaussian BT 0.5
+  uint8_t rx_os;       // RX at rx_os x the rate; 0: from the deviation
 } phy_fsk_t;
 
 // What phy_fsk_setup() programmed
@@ -28,6 +34,7 @@ typedef struct {
   uint32_t rate_word;  // 21 bits
   uint8_t bde1, bde2, pdif;
   uint16_t demmisc3;
+  uint8_t rx_os;
 } phy_fsk_info_t;
 
 // rf_setup() of the base PHY, then the changes. Returns rf_setup()'s result

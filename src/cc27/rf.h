@@ -30,10 +30,14 @@ void rf_init(void);
 // framing on top of it. Returns LRF_SetupResult (0: ok)
 int rf_setup(const LRF_Config *config);
 
-// DEMMISC3 (demodulator decimation) for TX and for RX, when they differ:
-// the PDIF decimation slows the modulator too. 0: the PHY's. rf_setup()
-// clears them
-void rf_set_demmisc3(uint16_t tx, uint16_t rx);
+// Modem registers that differ between TX and RX (phy_fsk): DEMMISC3 (the
+// PDIF decimation slows the modulator too), BAUD and BAUDPRE (RX at a
+// multiple of the rate). Written before LRF_programFrequency(), which
+// computes the resampler from them. 0: the PHY's. rf_setup() clears them
+typedef struct {
+  uint16_t demmisc3, baud, baudpre;
+} rf_modem_t;
+void rf_set_modem(const rf_modem_t *tx, const rf_modem_t *rx);
 
 // Sync word, MSB first as on air, bits (8 to 32) right-aligned
 void rf_set_sync(uint32_t sync, uint8_t bits);

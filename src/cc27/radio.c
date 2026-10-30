@@ -8,7 +8,12 @@
 // - TX power words: the CC2652's (TI's table) taken as their dBm, words
 //   below 0x100 as dBm (signed byte: "pwr 10", "pwr 0xf6" for -10);
 // - extra overrides: (address, value) pairs of 32-bit register writes after
-//   the setup.
+//   the setup;
+// - a deviation large for the rate (redpineslow): RX at rx_os x the rate
+//   (phy_fsk), each bit repeated rx_os times, a majority vote per bit (a
+//   tie: the later half's first sample). The sync word's first 32 / rx_os
+//   bits searched (its last ones would match d391d391's first half), the
+//   rest received as data, checked (1 bit error at most) and dropped.
 
 #include "radio.h"
 
@@ -45,6 +50,11 @@ static uint16_t _rx_count;
 static uint16_t _status;
 static uint32_t _overrides[RADIO_EXTRA_OVERRIDES];
 static uint8_t _n_overrides;
+static uint8_t _rx_os = 1;
+// rx_os > 1: the sync bytes received as data, their values (A, B)
+static uint8_t _rx_sync_bytes;
+static uint32_t _rx_sync_rest[2];
+static uint16_t _rx_dropped;
 
 // TI's CC2652 PA table (+5 dBm PA): power word, dBm
 static const struct {
@@ -107,8 +117,10 @@ radio_status_t radio_init(const radio_phy_t* phy)
   _phy = *phy;
   phy_fsk_t fsk = {phy->symbol_rate, phy->deviation, -1, phy->fsk};
   if (phy->ble_2m) fsk = (phy_fsk_t){BLE_2M_RATE, BLE_2M_DEVIATION, -1, false};
-  int res = phy_fsk_setup(&fsk, NULL);
+  phy_fsk_info_t info;
+  int res = phy_fsk_setup(&fsk, &info);
   _phy_ok = res == 0;
+  _rx_os = _phy_ok ? info.rx_os : 1;
   if (!_phy_ok) {
     _status = res;
     return RADIO_ERR_BOOT;
@@ -184,16 +196,86 @@ radio_status_t radio_send(const uint8_t* data, uint16_t len)
   return st == RADIO_OK ? radio_tx_wait() : st;
 }
 
+// RX sync word at rx_os x the rate: its first bits, each repeated; the rest
+// (whole bytes) in *rest
+static uint32_t _os_sync(uint32_t sync, uint8_t bits, uint8_t *os_bits, uint32_t *rest)
+{
+  uint8_t rest_bits = bits * _rx_os > 32 ? (bits - 32 / _rx_os + 7) / 8 * 8 : 0;
+  uint8_t n = bits - rest_bits;
+  *rest = rest_bits ? sync & ((1U << rest_bits) - 1) : 0;
+  sync >>= rest_bits;
+  uint32_t out = 0;
+  for (int i = n - 1; i >= 0; i--)
+    for (uint8_t k = 0; k < _rx_os; k++) out = out << 1 | (sync >> i & 1);
+  *os_bits = n * _rx_os;
+  _rx_sync_bytes = rest_bits / 8;
+  return out;
+}
+
+static void _rx_syncs(uint32_t a, uint32_t b)
+{
+  uint8_t bits;
+  a = _os_sync(a, _phy.sync_bits, &bits, &_rx_sync_rest[0]);
+  b = _os_sync(b, _phy.sync_bits, &bits, &_rx_sync_rest[1]);
+  rf_set_syncs(a, b, bits);
+}
+
+// Received length at rx_os x the rate, the sync's rest included
+// (RF_MAX_PAYLOAD at most)
+static uint16_t _os_len(uint16_t len)
+{
+  uint32_t n = (uint32_t)(len + _rx_sync_bytes) * _rx_os;
+  return n > RF_MAX_PAYLOAD ? RF_MAX_PAYLOAD / _rx_os * _rx_os : n;
+}
+
+static uint8_t _bit_errors(uint32_t a, uint32_t b)
+{
+  uint8_t n = 0;
+  for (a ^= b; a; a &= a - 1) n++;
+  return n;
+}
+
+// Majority vote per rx_os bits (MSB first), then the sync's rest checked
+// and dropped. False: not the sync
+static bool _vote(rf_packet_t *p)
+{
+  if (_rx_os == 1) return true;
+  uint16_t n = p->len / _rx_os;
+  uint8_t out[RF_MAX_PAYLOAD / 2] = {0};
+  for (uint16_t i = 0; i < n * 8; i++) {
+    uint8_t ones = 0, mid = 0;
+    for (uint8_t k = 0; k < _rx_os; k++) {
+      uint32_t j = (uint32_t)i * _rx_os + k;
+      uint8_t bit = p->data[j / 8] >> (7 - j % 8) & 1;
+      ones += bit;
+      if (k == _rx_os / 2) mid = bit;
+    }
+    uint8_t bit = ones * 2 > _rx_os || (ones * 2 == _rx_os && mid);
+    out[i / 8] |= bit << (7 - i % 8);
+  }
+  uint32_t rest = 0;
+  for (uint8_t i = 0; i < _rx_sync_bytes && i < n; i++) rest = rest << 8 | out[i];
+  if (n < _rx_sync_bytes || (_bit_errors(rest, _rx_sync_rest[0]) > 1 &&
+                             _bit_errors(rest, _rx_sync_rest[1]) > 1)) {
+    _rx_dropped++;
+    return false;
+  }
+  p->len = n - _rx_sync_bytes;
+  memcpy(p->data, out + _rx_sync_bytes, p->len);
+  return true;
+}
+
 radio_status_t radio_rx_start(uint16_t len)
 {
   if (!_phy_ok) return RADIO_ERR_PARAM;
   _stop();
-  rf_set_syncs(_rx_sync, _rx_sync_alt ? _rx_sync_alt : _rx_sync, _phy.sync_bits);
-  radio_status_t st = _result(rf_rx_start(_freq_hz, len, true, 0));
+  _rx_syncs(_rx_sync, _rx_sync_alt ? _rx_sync_alt : _rx_sync);
+  radio_status_t st = _result(rf_rx_start(_freq_hz, _os_len(len), true, 0));
   if (st != RADIO_OK) return st;
   _state = STATE_RX;
   _rx_len = len;
   _rx_count = 0;
+  _rx_dropped = 0;
   return RADIO_OK;
 }
 
@@ -222,11 +304,12 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
   pkt->len = 0;
   radio_status_t st = radio_send(data, len);
   if (st != RADIO_OK) return st;
-  rf_set_sync(rx_sync, _phy.sync_bits);
+  _rx_syncs(rx_sync, rx_sync);
   rf_packet_t p;
-  int res = rf_rx(_freq_hz, rx_len, window_us, &p);
+  int res = rf_rx(_freq_hz, _os_len(rx_len), window_us, &p);
   if (res == RF_ERR_NO_PACKET) return RADIO_NO_PACKET;
   if (res != RF_OK) return _result(res);
+  if (!_vote(&p)) return RADIO_NO_PACKET;
   _packet(&p, pkt, false);
   return RADIO_OK;
 }
@@ -256,13 +339,13 @@ int8_t radio_rssi()
 }
 
 // The PBE's CRC verdicts are on the last byte only (rf.c): all packets
-// count as ok
+// count as ok, nok the ones whose sync's rest is wrong (rx_os > 1)
 void radio_rx_stats(radio_rx_stats_t* stats)
 {
   rf_stats_t st;
   rf_stats(&st);
   stats->ok = _rx_count;
-  stats->nok = 0;
+  stats->nok = _rx_dropped;
   stats->buf_full = st.rx_fifo_full;
 }
 
@@ -270,7 +353,7 @@ bool radio_receive(radio_packet_t* pkt)
 {
   if (_state != STATE_RX) return false;
   rf_packet_t p;
-  if (!rf_rx_read(&p)) return false;
+  if (!rf_rx_read(&p) || !_vote(&p)) return false;
   _rx_count++;
   _packet(&p, pkt, true);
   return true;

@@ -127,6 +127,8 @@ What differs from the CC2652 bench:
   -20 dBm (`coronav2`'s 0x10c3);
 - variable length RX receives the maximum length (the frame decoders cut);
   no CRC verdicts (all packets count as ok);
+- RX at a multiple of the rate for a large deviation (`redpineslow`,
+  below): packets of 255 / 4 - 3 bytes at most there;
 - no `timing` (no test pins), no SX1281, `radio_hposc_offset()` 0;
 - packets up to 255 bytes; the RX FIFO entry carries the frequency
   estimate (about deviation / 72 per step, the sender above is positive,
@@ -139,9 +141,9 @@ after the compare until the compare value is read, so ICLR alone gives an
 interrupt storm. `sched` is 1 to 1.5 us late.
 
 Against the 4-in-1 (`suite_cc2500.py --trim -70`, `suite_a7105.py`): the
-CC2500 setups 100% both ways (`frskyx2eu` 99.5%), except `redpineslow`
-MPM -> CC27 (0%, below) and `coronav2` CC27 -> MPM (at -20 dBm, 250/250 at
--10). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
+CC2500 setups 100% both ways (`frskyx2eu` 99.5%; `redpineslow` since the
+RX oversampling, below), except `coronav2` CC27 -> MPM (at -20 dBm,
+250/250 at -10). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
 CC27 -> MPM, scattered single bit errors at -43 dBm; with the rectangular
 pulse 250/250, as the CC2652. The A7105 setups (`ch 170`): 100% A7105 ->
 CC27; CC27 -> A7105 at trim 70: 98 to 100%, `wfly2` 91% (97% at trim 20 to
@@ -226,9 +228,18 @@ ways 99 to 100% (the MPM side's RX counts as with TI's 250 kbps PHY):
 `hitec`, `hott`, `bugs` (250 kbps, 250 kHz), `nrf250k`, `xn250k`, `flysky`
 (500 kbps), `nrf1m`, `nrf2mble`; the MPM's own 2 Mbps PHY (`nrf2m`) receives
 none of the CC27's 2 Mbps packets, TI's NESB 2M ones neither. `redpineslow`
-(10 kbps, 38 kHz deviation, h = 7.6) fails: the deviation is close to the
-PDIF input's Nyquist limit. Received at 4 x the rate (sync bits repeated 4
-times, a majority vote per 4 bits) it decodes. The SDR measures the CC27's
+(10 kbps, 38 kHz deviation, h = 7.6) at the rate receives nothing: the
+tones sit at the Nyquist limit of the samples (4 per symbol, PDIF
+decimation 2 at most: 80 kHz), no room left for a frequency offset.
+`phy_fsk` then runs the RX at a multiple of the rate (`rx_os`, 4 at most)
+until half the samples' rate is the deviation + 60 kHz (only `redpineslow`:
+4, the other presets have 79 kHz or more at 1). `radio.c` searches the sync
+word's first 32 / `rx_os` bits with each bit repeated `rx_os` times (its
+last 16 would match `d391d391`'s first half), receives the rest of it as
+data, takes a majority vote per `rx_os` bits, checks the rest (1 bit error
+at most) and drops it. The TX stays at the rate: `rf_set_modem()` keeps
+BAUD, BAUDPRE and DEMMISC3 for TX and RX. `redpineslow`: 100% both ways
+with the 4-in-1 and the MPM v2, window about 100 kHz (2 x: 65 kHz). The SDR measures the CC27's
 deviation at 27-28 kHz for 31.75 (FrSky D), the MPM v2's at 30 kHz.
 Sensitivity untested (the MPM's weakest power still gives -73 dBm; the bad
 packets per airtime are about the same for every rate, Wi-Fi at 2440 MHz).

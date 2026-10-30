@@ -31,7 +31,7 @@ static LRF_RadioState _state = RadioState_Down;
 static const LRF_Config *_config;
 static LRF_TxPowerTable_Index _power = {.rawValue = 0};
 static uint16_t _endcause;
-static uint16_t _demmisc3_tx, _demmisc3_rx;
+static rf_modem_t _modem_tx, _modem_rx;
 static uint32_t _events;
 static bool _running;
 static uint32_t _rx_fifo_size;
@@ -100,21 +100,24 @@ int rf_setup(const LRF_Config *config)
   }
   _state = RadioState_Configured;
   _config = config;
-  _demmisc3_tx = _demmisc3_rx = 0;
+  _modem_tx = _modem_rx = (rf_modem_t){0};
   _raw_framing();
   return 0;
 }
 
-void rf_set_demmisc3(uint16_t tx, uint16_t rx)
+void rf_set_modem(const rf_modem_t *tx, const rf_modem_t *rx)
 {
-  _demmisc3_tx = tx;
-  _demmisc3_rx = rx;
+  _modem_tx = *tx;
+  _modem_rx = *rx;
 }
 
-// Before LRF_programFrequency(), which takes the decimation from it
-static void _demmisc3(uint16_t value)
+// Before LRF_programFrequency(), which takes the decimation and rate from
+// them
+static void _modem(const rf_modem_t *m)
 {
-  if (value) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMMISC3) = value;
+  if (m->demmisc3) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMMISC3) = m->demmisc3;
+  if (m->baud) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_BAUD) = m->baud;
+  if (m->baudpre) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_BAUDPRE) = m->baudpre;
 }
 
 void rf_set_syncs(uint32_t sync_a, uint32_t sync_b, uint8_t bits)
@@ -225,7 +228,7 @@ int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at
   uint32_t earliest = LRF_enableSynthRefsys();
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = 0;
   LRF_Interface_Generic_configOpTx(1, freq_hz);
-  _demmisc3(_demmisc3_tx);
+  _modem(&_modem_tx);
   LRF_programFrequency(freq_hz, true);
   LRF_programTxPower(_power, freq_hz);
   LRF_enable();
@@ -267,7 +270,7 @@ int rf_rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at)
   // len - 1 bytes and the CRC byte
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = RX_CRC_BITS;
   LRF_Interface_Generic_configOpRx(1, freq_hz, repeat, len - RX_CRC_BITS / 8);
-  _demmisc3(_demmisc3_rx);
+  _modem(&_modem_rx);
   LRF_programFrequency(freq_hz, false);
   LRF_enable();
   // Sync found: the MCE's event to SYSTIM channel 4 (capture), as TI's
