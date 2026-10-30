@@ -26,7 +26,7 @@ bool board_hfxt_wait(uint32_t timeout_us);
 uint32_t board_us(void);
 void board_delay_us(uint32_t us);
 
-void uart_init(uint32_t baudrate);
+void board_uart_init(uint32_t baudrate);
 void uart_putc(uint8_t c);
 void uart_write(const void *buf, uint32_t len);
 int uart_getc(void);  // -1 if nothing received

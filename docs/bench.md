@@ -105,14 +105,56 @@ flash. The board itself is described in [hardware.md](hardware.md).
 
 ### CC2755P10 LaunchPad
 
-No bench build for the LP-EM-CC2755P10 yet, only a radio bring-up shell
-(`src/cc27/radio_test.c`, commands in its header, UART on the XDS110 back
-channel at 115200):
+The bench (`src/bench.c`, `frame.c`) runs on the LP-EM-CC2755P10 over a
+`radio.h` of its own (`src/cc27/radio.c`, `timer.c`, `uart.c`, `main.c`:
+the CC2652's file names), UART on the XDS110 back channel at 921600, `info`
+says `dev=cc2755`. The suites run unchanged with
+`CC_PORT=/dev/cu.usbmodemLS5600OQ1`. The radio bring-up shell
+(`src/cc27/radio_test.c`, commands in its header, 115200) is still there:
 
 ```sh
 cmake -B build-cc27 -G Ninja -DBOARD=CC2755P10_LP
-ninja -C build-cc27 flash-cc27-radio
+ninja -C build-cc27 flash-cc27-bench   # or flash-cc27-radio
 ```
+
+What differs from the CC2652 bench:
+
+- every PHY is `phy_fsk` (below), GFSK BT 0.5 or, with the PHY's 2-FSK
+  flag, a rectangular pulse (TX only: the RX is the same). `rx_bw`,
+  `if_freq` and the sync threshold are ignored;
+- `pwr`: the CC2652's PA table words taken as their dBm (+5 dBm at most),
+  words below 0x100 as dBm (`pwr 10`, `pwr 0xf6` for -10), other words
+  -20 dBm (`coronav2`'s 0x10c3);
+- variable length RX receives the maximum length (the frame decoders cut);
+  no CRC verdicts (all packets count as ok);
+- no `timing` (no test pins), no SX1281, `radio_hposc_offset()` 0;
+- packets up to 255 bytes; the RX FIFO entry carries the frequency
+  estimate (about deviation / 72 per step, the sender above is positive,
+  compressed beyond about 60 steps), the RSSI and the sync time (SYSTIM,
+  captured as TI's `RCL_Hal_setupSyncFoundCap()`).
+
+The alarm is SYSTIM channel 0 on CPU IRQ 16, as TI's ClockP
+(`kernel/nortos/dpl/ClockPLPF3_nortos.c`): the channel's event stays set
+after the compare until the compare value is read, so ICLR alone gives an
+interrupt storm. `sched` is 1 to 1.5 us late.
+
+Against the 4-in-1 (`suite_cc2500.py --trim -70`, `suite_a7105.py`): the
+CC2500 setups 100% both ways (`frskyx2eu` 99.5%), except `redpineslow`
+MPM -> CC27 (0%, below) and `coronav2` CC27 -> MPM (at -20 dBm, 250/250 at
+-10). In GFSK `ares`, `hott`, `hitec` (2-FSK on the CC2500) lost 5 to 30%
+CC27 -> MPM, scattered single bit errors at -43 dBm; with the rectangular
+pulse 250/250, as the CC2652. The A7105 setups: as the CC2652 (100%
+A7105 -> CC27, the narrow window the other way, see
+[interop-results.md](interop-results.md)). Trap: Wi-Fi on channel 1 here,
+the suites' `ch 0` setups (2400 to 2410 MHz) lose a packet every 102 ms
+(the beacons) and in bursts, whatever the sender: compare radios at
+2440 MHz or so (`hitec.txt` turns the autocalibration off: `s 0x36;s 0x33`
+after a channel change).
+
+The TX pulse: LRF's TX filter is a symmetric FIR of 48 taps at 16 per
+symbol (LRFDRFE DTX), `LRF_TxShape` its last 24 taps (TI's BT 0.5: a
+Gaussian-filtered rectangle, 20 taps), scale 2^28 / the sum of the 48 taps
+(17 bits). 2-FSK: 8 taps of 255.
 
 `src/cc27/rf.c` drives TI's LRF layer (`lib/ti/drivers/rcl`, no RCL
 scheduler) with raw framing: sync word, fixed length payload. The PHY
@@ -180,6 +222,17 @@ times, a majority vote per 4 bits) it decodes. The SDR measures the CC27's
 deviation at 27-28 kHz for 31.75 (FrSky D), the MPM v2's at 30 kHz.
 Sensitivity untested (the MPM's weakest power still gives -73 dBm; the bad
 packets per airtime are about the same for every rate, Wi-Fi at 2440 MHz).
+
+Against the 4-in-1's CC2500 (bench presets `frskyd`, `frskyx`, `ch 0`; the
+CC27 raw on the CC2500's sync word: `AAAAD391` for FrSky D's 16 bits,
+`D391D391`, length byte, payload and CRC received as data): 100%, same
+polarity as the CC2500 and the CC2652. FrSky X at PDIF decimation 1 and 2,
+FrSky D at 2 only (at 1: 92 degrees per sample). The 4-in-1 sits about
+70 kHz (X) and 90 kHz (D, FSCTRL0 -25) below the CC27's frequency; windows
+of about 100 kHz (X) and 70 kHz (D). Trap: a strong sender (-39 dBm) also
+shows up mirrored about the CC27's channel centre, inverted bits included
+(4-in-1 at -70 kHz: received with the inverted sync word at +30 to +90 kHz),
+which looks like a polarity difference.
 
 Our OpenOCD branch `cc27xx`
 (`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a

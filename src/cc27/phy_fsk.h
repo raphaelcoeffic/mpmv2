@@ -1,4 +1,4 @@
-// GFSK at any symbol rate and deviation: TI's 250 kbps PHY (phy_fsk250,
+// GFSK (or 2-FSK) at any symbol rate and deviation: TI's 250 kbps PHY (phy_fsk250,
 // genfsk images; above 1.2 Mbps NESB 2 Mbps, ble5 images), its rate,
 // deviation and the demodulator's decimation changed after the setup.
 //
@@ -11,12 +11,14 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct {
   uint32_t rate;       // symbol rate (Hz)
   uint32_t deviation;  // TX deviation (Hz); the RX bandwidth follows it
   int8_t log2_pdif;    // PDIF decimation, log2 (0 to 3); -1: from the deviation
+  bool fsk;            // TX pulse: rectangular (2-FSK), else Gaussian BT 0.5
 } phy_fsk_t;
 
 // What phy_fsk_setup() programmed

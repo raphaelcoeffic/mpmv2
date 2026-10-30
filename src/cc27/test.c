@@ -14,7 +14,7 @@ int main(void)
 {
   uint32_t t0 = board_us();  // runs on through resets
   board_init();
-  uart_init(115200);
+  board_uart_init(115200);
 
   bool hfxt = board_hfxt_wait(10000);
   uint32_t t_hfxt = board_us() - t0;

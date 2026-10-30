@@ -3,8 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <driverlib/gpio.h>
-#include <driverlib/interrupt.h>
+#if defined(BOARD_CC2755P10_LP)
+  #include <ti/drivers/dpl/HwiP.h>
+  #include "cc27/board.h"
+  #define IntMasterDisable() (HwiP_disable() != 0)
+  #define IntMasterEnable() HwiP_restore(0)
+  #define BENCH_DEV "cc2755"
+#else
+  #include <driverlib/gpio.h>
+  #include <driverlib/interrupt.h>
+  #define BENCH_DEV "cc2652"
+#endif
 
 #include "bench.h"
 #include "board.h"
@@ -20,9 +29,11 @@
 
 // Commands (one per line, numbers in decimal or 0x hex):
 //
-//   info                         @ok bench=1 dev=cc2652 ...
+//   info                         @ok bench=1 dev=cc2652 ... (cc2755: CC2755P10
+//                                LaunchPad, src/cc27)
 //   chip <cc2652|sx1281> [dbm]   radio for the PHY (applied at once and kept): the
-//                                CC2652 RF core (default) or the SX1281 (MPM v2: GFSK
+//                                CC2652 RF core (default; the CC2755's radio on its
+//                                LaunchPad, either name) or the SX1281 (MPM v2: GFSK
 //                                125 kbps to 2 Mbps, TX power in dBm into the
 //                                PA, default 0, max 2)
 //   preset <name>                load a PHY preset (and its channel plan):
@@ -207,6 +218,9 @@ static void _led_show(led_state_t state)
 #elif defined(LED_GREEN) && defined(LED_RED)
   GPIO_writeDio(LED_RED, state == LED_TX || state == LED_RX_BAD);
   GPIO_writeDio(LED_GREEN, state == LED_RX || state == LED_RX_BAD);
+#elif defined(BOARD_LED_RED) && defined(BOARD_LED_GREEN)
+  board_led(BOARD_LED_RED, state == LED_TX || state == LED_RX_BAD);
+  board_led(BOARD_LED_GREEN, state == LED_RX || state == LED_RX_BAD);
 #else
   (void)state;
 #endif
@@ -515,10 +529,14 @@ static bool _rx_start()
 //
 
 #if defined(PA_CTX)
+  #define TIMING_PINS
   #define TIMING_PA PA_CTX  // the PA/LNA's CTX (board.c), no LNA enable pin
 #elif defined(LED_RED) && defined(LED_GREEN)
+  #define TIMING_PINS
   #define TIMING_PA LED_RED
   #define TIMING_LNA LED_GREEN
+#else
+  #define TIMING_PA 0  // none: no edges (timing refused)
 #endif
 #define TIMING_EDGES 16
 #define TIMING_NONE 0  // no edge found
@@ -532,7 +550,7 @@ typedef struct {
 static volatile edge_t _edges[TIMING_EDGES];
 static volatile uint8_t _n_edges;
 
-#if defined(TIMING_PA)
+#if defined(TIMING_PINS)
 static void _edge_pin(uint32_t pin, uint32_t ticks)
 {
   if (!GPIO_getEventDio(pin)) return;
@@ -554,7 +572,7 @@ static void _edge_isr()
 // or off (the pins as before)
 static bool _timing_pins(bool on)
 {
-#if defined(TIMING_PA)
+#if defined(TIMING_PINS)
   static bool isr;
   if (!isr) {
     isr = true;
@@ -707,7 +725,7 @@ static bool _need_phy()
 
 static void _print_chip()
 {
-  _printf("chip=%s", _sx ? "sx1281" : "cc2652");
+  _printf("chip=%s", _sx ? "sx1281" : BENCH_DEV);
   if (_sx && _phy_ok) {
     const sx1281_mod_t* m = sx1281_mod();
     _printf(" dbm=%d sx_rate=%lu sx_bw=%lu sx_dev=%lu sx_bt=%s", _sx_dbm, m->rate, m->bw, m->dev,
@@ -717,7 +735,7 @@ static void _print_chip()
 
 static void _cmd_info()
 {
-  _printf("@ok bench=1 dev=cc2652 phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
+  _printf("@ok bench=1 dev=" BENCH_DEV " phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
           "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld autotrim=%s hposc=%d ",
           _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
           _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
@@ -733,7 +751,7 @@ static void _cmd_chip(char* args)
   char* name = _next_arg(&args);
   bool sx = name && !strcmp(name, "sx1281");
   uint32_t dbm = _number_or(&args, SX1281_TX_DBM_DEFAULT);
-  if (!name || (!sx && strcmp(name, "cc2652")) || (int32_t)dbm < -18 ||
+  if (!name || (!sx && strcmp(name, "cc2652") && strcmp(name, BENCH_DEV)) || (int32_t)dbm < -18 ||
       (int32_t)dbm > SX1281_TX_DBM_MAX) {
     _printf("@err usage: chip <cc2652|sx1281> [dbm -18..%d]\r\n", SX1281_TX_DBM_MAX);
     return;

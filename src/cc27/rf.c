@@ -22,6 +22,8 @@
 #define US(x) ((x) * 4U)
 // Start of an operation: some margin for the PBE to be ready (TI: 50 us)
 #define START_DELAY US(100)
+// Hard stop: the PBE ends the operation within (measured: some us)
+#define STOP_TIMEOUT US(1000)
 
 #define BUFRAM(reg) (LRFD_BUFRAM_BASE + PBE_GENERIC_RAM_O_##reg)
 
@@ -31,10 +33,14 @@ static LRF_TxPowerTable_Index _power = {.rawValue = 0};
 static uint16_t _endcause;
 static uint16_t _demmisc3_tx, _demmisc3_rx;
 static uint32_t _events;
+static bool _running;
+static uint32_t _rx_fifo_size;
 
 void (*rf_debug)(int step, uint32_t events, int8_t rssi, uint16_t endcause);
 
 static uint32_t _now(void) { return HWREG(SYSTIM_BASE + SYSTIM_O_TIME250N); }
+
+uint32_t rf_time(void) { return _now(); }
 
 void rf_init(void)
 {
@@ -47,11 +53,13 @@ void rf_init(void)
 // RX: the PBE only ends a packet on a CRC verdict (with no CRC bits it
 // never does: the entry stays uncommitted, the operation hangs). 8 CRC bits
 // then, the PHY's polynomial: the packet's last byte, appended to the FIFO
-// entry (APPENDCRC), the entry kept whatever the verdict. The packet's RSSI
-// follows (APPENDRSSI, 2 bytes: LASTRSSI is only for packets with a good
-// CRC). EXTRABYTES: their room, in the entry's length
+// entry (APPENDCRC), the entry kept whatever the verdict. Then the
+// frequency estimate, the RSSI (a byte each; LASTRSSI and LASTFREQOFF are
+// only for packets with a good CRC) and the SYSTIM time of the sync word (4
+// bytes, from the capture on SYSTIM channel 4). EXTRABYTES: their room, all
+// of it in the entry's length
 #define RX_CRC_BITS 8
-#define RX_EXTRA_BYTES (RX_CRC_BITS / 8 + 2)
+#define RX_EXTRA_BYTES (RX_CRC_BITS / 8 + 1 + 1 + 4)
 
 // Raw framing over the PHY's settings: no header, length field, CRC (see
 // RX_CRC_BITS), whitening, NESB; payloads of a fixed length (MAXLEN); bit
@@ -70,7 +78,8 @@ static void _raw_framing(void)
   uint16_t fifocfg = HWREGH_READ_LRF(BUFRAM(FIFOCFG));
   fifocfg &= ~(0xFC00U | PBE_GENERIC_RAM_FIFOCFG_AUTOFLUSHCRC_M | PBE_GENERIC_RAM_FIFOCFG_AUTOFLUSHEMPTY_M);
   HWREGH_WRITE_LRF(BUFRAM(FIFOCFG)) =
-      fifocfg | PBE_GENERIC_RAM_FIFOCFG_APPENDCRC | PBE_GENERIC_RAM_FIFOCFG_APPENDRSSI;
+      fifocfg | PBE_GENERIC_RAM_FIFOCFG_APPENDCRC | PBE_GENERIC_RAM_FIFOCFG_APPENDFREQEST |
+      PBE_GENERIC_RAM_FIFOCFG_APPENDRSSI | PBE_GENERIC_RAM_FIFOCFG_APPENDTIMESTAMP;
   HWREGH_WRITE_LRF(BUFRAM(EXTRABYTES)) = RX_EXTRA_BYTES;
   // Not NESB (the NESB PHY turns it on): in RX the PBE would take a PCF and
   // answer with an ACK
@@ -79,6 +88,7 @@ static void _raw_framing(void)
 
 int rf_setup(const LRF_Config *config)
 {
+  rf_stop();
   // Every register again (the same PHY too: phy_fsk changes some after)
   LRF_RadioState state = _state;
   if (state > RadioState_ImagesLoaded) state = RadioState_ImagesLoaded;
@@ -107,7 +117,7 @@ static void _demmisc3(uint16_t value)
   if (value) HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMMISC3) = value;
 }
 
-void rf_set_sync(uint32_t sync, uint8_t bits)
+void rf_set_syncs(uint32_t sync_a, uint32_t sync_b, uint8_t bits)
 {
   // REFLEN: sync length - 1; LRF right-aligns the word to it (and reverses
   // it for HDRORDER)
@@ -115,12 +125,14 @@ void rf_set_sync(uint32_t sync, uint8_t bits)
   demswqu0 = (demswqu0 & ~LRFDMDM_DEMSWQU0_REFLEN_M) |
              (((uint32_t)(bits - 1) << LRFDMDM_DEMSWQU0_REFLEN_S) & LRFDMDM_DEMSWQU0_REFLEN_M);
   HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMSWQU0) = demswqu0;
-  // B as A, as TI's NESB PTX: NESB searches both (PRX: two pipes); with B
-  // not programmed the MCE never starts its demodulator (MDM ENABLE stays
-  // TOPSM|FIFO, the RFE never acks the RX start)
-  LRF_Interface_Generic_programSyncWordA(sync);
-  LRF_Interface_Generic_programSyncWordB(sync);
+  // TX sends A. B: with B not programmed the MCE never starts its
+  // demodulator (MDM ENABLE stays TOPSM|FIFO, the RFE never acks the RX
+  // start); NESB searches both (PRX: two pipes)
+  LRF_Interface_Generic_programSyncWordA(sync_a);
+  LRF_Interface_Generic_programSyncWordB(sync_b);
 }
+
+void rf_set_sync(uint32_t sync, uint8_t bits) { rf_set_syncs(sync, sync, bits); }
 
 int rf_set_power(int8_t dbm)
 {
@@ -150,24 +162,14 @@ static void _cancel_systim0(void)
   _clear_events(EV_SYSTIM0);
 }
 
-// Waits for OPDONE / OPERROR until the deadline (SYSTIM)
-static int _wait_done(uint32_t deadline)
+// The start time: at (0: as soon as possible), not before the synthesizer's
+// reference is ready (earliest) nor the PBE (START_DELAY)
+static uint32_t _start_time(uint32_t at, uint32_t earliest)
 {
-  for (;;) {
-    _events = _events_now();
-    if (_events & (EV_OPDONE | EV_OPERROR)) break;
-    if ((int32_t)(_now() - deadline) > 0) {
-      LRF_sendHardStop();
-      uint32_t t = _now();
-      while (!(_events_now() & (EV_OPDONE | EV_OPERROR)) && _now() - t < US(1000)) {
-      }
-      _events = _events_now();
-      _endcause = LRF_Interface_getCmdEndCause();
-      return RF_ERR_TIMEOUT;
-    }
-  }
-  _endcause = LRF_Interface_getCmdEndCause();
-  return _endcause;
+  uint32_t start = _now() + START_DELAY;
+  if (at && (int32_t)(at - start) > 0) start = at;
+  if ((int32_t)(earliest - start) > 0) start = earliest;
+  return start;
 }
 
 static void _end(void)
@@ -176,12 +178,49 @@ static void _end(void)
   _clear_events(0xFFFFFFFFU);
   LRF_disable();
   LRF_disableSynthRefsys();
+  _running = false;
 }
 
-int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len)
+bool rf_busy(void)
+{
+  if (!_running) return false;
+  _events = _events_now();
+  return !(_events & (EV_OPDONE | EV_OPERROR));
+}
+
+int rf_stop(void)
+{
+  if (!_running) return RF_OK;
+  int res = RF_OK;
+  if (rf_busy()) {
+    LRF_sendHardStop();
+    uint32_t t = _now();
+    while (!(_events_now() & (EV_OPDONE | EV_OPERROR)) && _now() - t < STOP_TIMEOUT) {
+    }
+    _events = _events_now();
+    res = RF_ERR_TIMEOUT;
+  }
+  _endcause = LRF_Interface_getCmdEndCause();
+  if (res == RF_OK) res = _endcause;
+  _end();
+  return res;
+}
+
+// Waits for OPDONE / OPERROR until the deadline (SYSTIM), stops the
+// operation then
+static int _wait_done(uint32_t deadline)
+{
+  while (rf_busy()) {
+    if ((int32_t)(_now() - deadline) > 0) return rf_stop();
+  }
+  return rf_stop();
+}
+
+int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
-  if (len > RF_MAX_PAYLOAD) len = RF_MAX_PAYLOAD;
+  if (len > RF_MAX_PAYLOAD) return RF_ERR_PARAM;
+  rf_stop();
 
   uint32_t earliest = LRF_enableSynthRefsys();
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = 0;
@@ -204,32 +243,41 @@ int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len)
   LRF_writeTxFifoWords(entry, (len + 4 + 3) / 4);
 
   _clear_events(0xFFFFFFFFU);
-  uint32_t start = _now() + START_DELAY;
-  if ((int32_t)(earliest - start) > 0) start = earliest;
-  _start_at(start);
+  _start_at(_start_time(at, earliest));
   LRF_waitForTopsmReady();
   LRF_Interface_Generic_sendOpTx();
-
-  int res = _wait_done(start + US(10000));
-  _end();
-  return res;
+  _running = true;
+  return RF_OK;
 }
 
-int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt)
+int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len)
+{
+  int res = rf_tx_start(freq_hz, data, len, 0);
+  if (res) return res;
+  return _wait_done(_now() + START_DELAY + US(10000) + US((uint32_t)len * 8 * 1000));
+}
+
+int rf_rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
-  if (len > RF_MAX_PAYLOAD) len = RF_MAX_PAYLOAD;
-  if (len < 2) len = 2;
+  if (len > RF_MAX_PAYLOAD || len < 2) return RF_ERR_PARAM;
+  rf_stop();
 
   uint32_t earliest = LRF_enableSynthRefsys();
-  // One packet, then OPDONE: len - 1 bytes and the CRC byte
+  // len - 1 bytes and the CRC byte
   HWREGH_WRITE_LRF(BUFRAM(NUMCRCBITS)) = RX_CRC_BITS;
-  LRF_Interface_Generic_configOpRx(1, freq_hz, 0, len - RX_CRC_BITS / 8);
+  LRF_Interface_Generic_configOpRx(1, freq_hz, repeat, len - RX_CRC_BITS / 8);
   _demmisc3(_demmisc3_rx);
   LRF_programFrequency(freq_hz, false);
   LRF_enable();
-  LRF_prepareRxFifo();
-  LRF_setRxFifoEffSz(256);
+  // Sync found: the MCE's event to SYSTIM channel 4 (capture), as TI's
+  // RCL_Hal_setupSyncFoundCap(): the PBE's packet timestamps
+  HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_SYSTIMEVTMUX0) = 21 << LRFDMDM_SYSTIMEVTMUX0_SEL0_S;
+  HWREG_WRITE_LRF(LRFDDBELL_BASE + LRFDDBELL_O_SYSTIMOEV) = LRFDDBELL_SYSTIMOEV_SRC2_MCESYSTIM0;
+  HWREG(SYSTIM_BASE + SYSTIM_O_CH4CFG) |=
+      SYSTIM_CH4CFG_INP_RISE | SYSTIM_CH4CFG_MODE_CAPT | SYSTIM_CH4CFG_REARM_EN;
+  _rx_fifo_size = LRF_prepareRxFifo();
+  LRF_setRxFifoEffSz(_rx_fifo_size);
   HWREGH_WRITE_LRF(BUFRAM(NRXOK)) = 0;
   HWREGH_WRITE_LRF(BUFRAM(NRXNOK)) = 0;
   HWREGH_WRITE_LRF(BUFRAM(NRXIGNORED)) = 0;
@@ -237,11 +285,50 @@ int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt)
   HWREGH_WRITE_LRF(BUFRAM(NRXFIFOFULL)) = 0;
 
   _clear_events(0xFFFFFFFFU);
-  uint32_t start = _now() + START_DELAY;
-  if ((int32_t)(earliest - start) > 0) start = earliest;
-  _start_at(start);
+  _start_at(_start_time(at, earliest));
   LRF_waitForTopsmReady();
   LRF_Interface_Generic_sendOpRx();
+  _running = true;
+  return RF_OK;
+}
+
+bool rf_rx_read(rf_packet_t *pkt)
+{
+  if (!LRF_hasRxWordToRead()) return false;
+  // Entry: length (from numPad on), numPad, the pad bytes, the packet,
+  // EXTRABYTES (the CRC byte, frequency estimate, RSSI, timestamp)
+  uint32_t entry_len = LRF_peekRxFifo(0) & 0xFFFF;
+  uint32_t words = (2 + entry_len + 3) / 4;
+  uint32_t buf[(RF_MAX_PAYLOAD + 16) / 4];
+  bool ok = false;
+  if (words <= sizeof(buf) / 4) {
+    LRF_readRxFifoWords(buf, words);
+    uint8_t *b = (uint8_t *)buf;
+    uint8_t num_pad = b[2];
+    int n = (int)entry_len - 1 - num_pad - RX_EXTRA_BYTES + RX_CRC_BITS / 8;
+    if (n > 0 && n <= RF_MAX_PAYLOAD) {
+      const uint8_t *p = b + 3 + num_pad;
+      memcpy(pkt->data, p, n);
+      pkt->len = n;
+      pkt->freq_est = (int8_t)p[n];
+      pkt->rssi = (int8_t)p[n + 1];
+      pkt->time = p[n + 2] | p[n + 3] << 8 | p[n + 4] << 16 | (uint32_t)p[n + 5] << 24;
+      ok = true;
+    }
+  } else {
+    LRF_discardRxFifoWords(words);
+  }
+  // Deallocated: the PBE may write there again
+  LRF_setRxFifoEffSz(_rx_fifo_size);
+  return ok;
+}
+
+int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt)
+{
+  // One packet, then OPDONE
+  int res = rf_rx_start(freq_hz, len < 2 ? 2 : len, false, 0);
+  if (res) return res;
+  uint32_t start = _now();
 
   // The PBE takes SYSTIM0 as the start; the stop is ours (hard stop)
   if (rf_debug) {
@@ -252,38 +339,18 @@ int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt)
       rf_debug(i, _events_now(), LRF_readRssi(), HWREGH_READ_LRF(LRFD_BUFRAM_BASE + 6));
     }
   }
-  int res = _wait_done(start + US(timeout_us));
-  pkt->len = 0;
-  if (_events & (EV_RXOK | EV_RXNOK)) {
-    if (LRF_hasRxWordToRead()) {
-      // Entry: length (from numPad on), numPad, the pad bytes, the packet,
-      // EXTRABYTES (the CRC byte, the RSSI)
-      uint32_t w = LRF_peekRxFifo(0);
-      uint32_t entry_len = w & 0xFFFF;
-      uint32_t words = (2 + entry_len + 3) / 4;
-      uint32_t buf[(RF_MAX_PAYLOAD + 16) / 4];
-      if (words <= sizeof(buf) / 4) {
-        LRF_readRxFifoWords(buf, words);
-        uint8_t *b = (uint8_t *)buf;
-        uint8_t num_pad = b[2];
-        int n = (int)entry_len - 1 - num_pad - RX_EXTRA_BYTES + RX_CRC_BITS / 8;
-        if (n > 0 && n <= RF_MAX_PAYLOAD) {
-          memcpy(pkt->data, b + 3 + num_pad, n);
-          pkt->len = n;
-          pkt->rssi = (int8_t)b[3 + num_pad + n];
-        }
-      } else {
-        LRF_discardRxFifoWords(words);
-      }
-    }
-    pkt->time = LRF_Interface_Generic_getLastPacketTimestamp();
-    res = RF_OK;
-  } else if (res == RF_ERR_TIMEOUT) {
-    res = RF_ERR_NO_PACKET;
+  while (rf_busy() && (int32_t)(_now() - start - START_DELAY - US(timeout_us)) < 0) {
   }
-  _end();
-  return res;
+  pkt->len = 0;
+  if (rf_rx_read(pkt)) {
+    rf_stop();
+    return RF_OK;
+  }
+  res = rf_stop();
+  return res == RF_ERR_TIMEOUT ? RF_ERR_NO_PACKET : res;
 }
+
+int8_t rf_rssi(void) { return _running ? LRF_readRssi() : RF_RSSI_NONE; }
 
 void rf_stats(rf_stats_t *stats)
 {

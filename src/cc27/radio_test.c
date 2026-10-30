@@ -308,7 +308,7 @@ static void _command(char *line)
 int main(void)
 {
   board_init();
-  uart_init(115200);
+  board_uart_init(115200);
   bool hfxt = board_hfxt_wait(10000);
   rf_init();
   uart_printf("\n@cc27 radio hfxt=%d\n", hfxt);

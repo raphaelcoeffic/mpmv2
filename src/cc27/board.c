@@ -76,7 +76,7 @@ void board_delay_us(uint32_t us)
   }
 }
 
-void uart_init(uint32_t baudrate)
+void board_uart_init(uint32_t baudrate)
 {
   CLKCTLEnable(CLKCTL_BASE, CLKCTL_UART0);
   _ioc(BOARD_UART_TX, IOC_UART0);

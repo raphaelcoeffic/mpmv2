@@ -33,6 +33,17 @@
 #define MAX_BDE2 8U
 #define MAX_LOG2_PDIF 1
 
+// TX pulse for 2-FSK. LRF's TX filter: a symmetric FIR of 48 taps at 16
+// per symbol, the base PHYs' tables its last 24 (TI's Gaussian BT 0.5:
+// rectangle filtered, 20 taps). The scale: 2^28 / sum of the 48 taps, the
+// deviation then the long run's
+#define SHAPE_SAMPLES_PER_SYMBOL 16
+static const LRF_TxShape _shape_rect = {
+    .scale = (1U << 28) / (SHAPE_SAMPLES_PER_SYMBOL * 255),
+    .numCoeff = SHAPE_SAMPLES_PER_SYMBOL / 2,
+    .coeff = {255, 255, 255, 255, 255, 255, 255, 255},
+};
+
 static LRF_SwConfig _sw;
 
 static uint32_t _div_round(uint64_t a, uint32_t b) { return (uint32_t)((a + b / 2) / b); }
@@ -46,6 +57,7 @@ int phy_fsk_setup(const phy_fsk_t *phy, phy_fsk_info_t *info)
   LRF_SwParam *sw = (LRF_SwParam *)swParamList;
   _sw = *sw->swConfig;
   _sw.modFrequencyDeviation = phy->deviation;
+  if (phy->fsk) _sw.txShape = &_shape_rect;
   sw->swConfig = &_sw;
 
   uint32_t pre = _div_round(BAUD_CLOCK, phy->rate * BAUD_CLOCKS_PER_SYMBOL);

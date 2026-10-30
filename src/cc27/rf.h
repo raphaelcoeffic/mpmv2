@@ -1,8 +1,8 @@
 // CC27xx radio: TI's LRF layer for the setup (PHY, trims, synthesizer, TX
-// power), the PBE's generic TX and RX operations driven directly, blocking.
-// Raw framing: preamble, a sync word of up to 32 bits, a fixed length
-// payload; no header, length field or CRC (done in software, as the CC2500
-// and NRF24 emulations do).
+// power), the PBE's generic TX and RX operations driven directly, one at a
+// time, polled (no interrupts). Raw framing: preamble, a sync word of up to
+// 32 bits, a fixed length payload; no header, length field or CRC (done in
+// software, as the CC2500 and NRF24 emulations do).
 
 #pragma once
 
@@ -11,13 +11,18 @@
 
 #include <ti/drivers/rcl/LRF.h>
 
-#define RF_MAX_PAYLOAD 64
+// The FIFOs of TI's PHYs: RX 268 bytes for an entry (payload and 12 bytes
+// of status), TX 536
+#define RF_MAX_PAYLOAD 255
 
 // Operation results: the PBE's end cause, or one of these
 #define RF_OK 0
 #define RF_ERR_SETUP -1     // LRF_setupRadio() failed
 #define RF_ERR_TIMEOUT -2   // no OPDONE / OPERROR in time
 #define RF_ERR_NO_PACKET -3 // RX: nothing in the window
+#define RF_ERR_PARAM -4     // length
+
+#define RF_RSSI_NONE (-128)
 
 void rf_init(void);
 
@@ -33,20 +38,48 @@ void rf_set_demmisc3(uint16_t tx, uint16_t rx);
 // Sync word, MSB first as on air, bits (8 to 32) right-aligned
 void rf_set_sync(uint32_t sync, uint8_t bits);
 
+// Sync words A (sent, searched) and B (searched too)
+void rf_set_syncs(uint32_t sync_a, uint32_t sync_b, uint8_t bits);
+
 // TX power in dBm (from the PA table: the next level up)
 int rf_set_power(int8_t dbm);
 
-int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len);
+// SYSTIM time (0.25 us), the operations' start times
+uint32_t rf_time(void);
 
 typedef struct {
   uint8_t len;
   int8_t rssi;
+  // Frequency estimate: the sender above us, in about deviation / 72 steps
+  // (measured from 31 to 250 kbps, compressed beyond 60 steps)
+  int8_t freq_est;
   uint32_t time;  // SYSTIM at sync (0.25 us)
   uint8_t data[RF_MAX_PAYLOAD];
 } rf_packet_t;
 
-// Receive one packet of len bytes (2 at least) within timeout_us
+// Blocking: one packet (rf_tx), one packet of len bytes (2 at least)
+// within timeout_us (rf_rx)
+int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len);
 int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt);
+
+// Non-blocking: the operation starts at SYSTIM time at (0: as soon as
+// possible, about 100 us), a running one stopped first. RX: packets of len
+// bytes, one (repeat false) or until rf_stop()
+int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at);
+int rf_rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at);
+
+// True while the operation runs
+bool rf_busy(void);
+
+// A packet received (true), from the RX FIFO
+bool rf_rx_read(rf_packet_t *pkt);
+
+// Ends the operation (hard stop if it still runs: RF_ERR_TIMEOUT), the radio
+// off. Returns its end cause
+int rf_stop(void);
+
+// Instant RSSI (dBm) while an operation runs, RF_RSSI_NONE if not valid
+int8_t rf_rssi(void);
 
 // Last end cause and events, for debugging
 uint16_t rf_last_endcause(void);

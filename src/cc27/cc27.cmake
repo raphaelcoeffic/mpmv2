@@ -50,3 +50,10 @@ add_cc27_application(cc27-test cc27/test.c)
 add_cc27_application(cc27-radio cc27/radio_test.c cc27/rf.c cc27/lrf_hal.c cc27/phy_nesb.c cc27/phy_ble.c
     cc27/phy_fsk250.c cc27/phy_fsk.c)
 target_link_libraries(cc27-radio_elf lrf_cc27xxx10)
+
+# Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
+# radio.h, timer.h and uart.h implemented by cc27/radio.c, timer.c, uart.c
+add_cc27_application(cc27-bench cc27/main.c bench.c frame.c sx1281.c cc27/radio.c cc27/timer.c
+    cc27/uart.c cc27/rf.c cc27/lrf_hal.c cc27/phy_nesb.c cc27/phy_fsk250.c cc27/phy_fsk.c)
+target_compile_definitions(cc27-bench_elf PRIVATE BENCH)
+target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
