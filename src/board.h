@@ -161,7 +161,8 @@
   #define RF_TX_POWER_REDUCED 0x0CC7
   //
 #elif defined(BOARD_CC2755P10_LP)
-  // LP-EM-CC2755P10 (CC27xx): the radio bench only (src/cc27, its board.h)
+  // LP-EM-CC2755P10 (CC27xx): the radio bench and the MPM port (src/cc27,
+  // its board.h)
   #define SERIAL_RX_IOD 2
   #define SERIAL_TX_IOD 1
   #define IOID_UNUSED   0xFFFFFFFF
@@ -170,6 +171,8 @@
   // +5 dBm as the CC2652 LaunchPad
   #define RF_TX_POWER_DEFAULT 0x7217
   #define RF_TX_POWER_LOW     0x04C6
+  // The MPM's low power flag: 15 dB lower
+  #define RF_TX_POWER_REDUCED 0x0ACF
   //
 #else
   #error "No board: BOARD_<name> from CMake's BOARD"
