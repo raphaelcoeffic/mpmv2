@@ -158,6 +158,34 @@ the suites' `ch 0` setups (2400 to 2410 MHz) lose a packet every 102 ms
 2440 MHz or so (`hitec.txt` turns the autocalibration off: `s 0x36;s 0x33`
 after a channel change).
 
+`suite_nrf.py` (the 4-in-1's NRF24L01, its CC2500 for the 250 kbps XN297
+setups, ch 40), the CC27 at +20 dBm (`CC_INIT="pwr 20"`): CC27 -> 4-in-1
+98 to 100% (`nrf2m`, 2 Mbps: 94 to 98%, as the CC2652); 4-in-1 -> CC27 90
+to 100% (the CC2652: 97 to 98% on the same tests; `xn297enh_unscr` 89 to 93%,
+the CC2652 98%). At +5 dBm the CC27 -> NRF24L01 links lose 4 to 6%, one
+packet per 102 ms (Wi-Fi beacons at 2440 MHz): the MPM v2 sends 25 dB
+stronger. `suite_cyrf.py` (ch 30, +20 dBm): `dsm`, `devo`, `j6pro`,
+`wk2x01`, `scorpio`, `kyosho3`, `traxxas`, `wfly` 100% CC27 -> CYRF6936,
+92 to 100% the other way. `dsmbind`, `dsmbindresp`, `mlink`, `losi` (SDR,
+64 chips per bit: a 16 byte DSM bind packet is 1029 bytes on air) stream
+through the PBE's FIFOs (`rf.c`, packets above 255 bytes, up to 1100): TX
+refilled while the CPU polls (auto deallocation, `TXADEAL`), RX copied out
+behind the PBE's write pointer (`RXFWP`, ahead of the commit) with the
+FIFO's write limit (`RXFSRP`) moved after it, one packet per operation and
+RX started again. 96 to 100% CC27 -> CYRF6936, 90 to 100% the other way
+(they were 0%; the CC2652: 89 to 100%). The errors left are SDR decisions
+(single 64-chip bits, a packet decoded inverted from its middle on): the
+streamed copy matched the FIFO's last 260 bytes at the end of every packet
+(200 packets checked). Trap: the bench must call `radio_receive()` /
+`radio_rx_active()` within 2 ms at 1 Mbps (4 ms for TX), else the FIFO
+overflows mid-packet. Same day: the 4-in-1's CC2500 needed `--trim -80` for
+`frskyd`, `frskyv` (0% at the default -35 and at -40) and `radiolink` (70%
+at -35), all three 100% at -80 (short packets: not streamed), CC27 -> A7105 `flysky` 81%, `wfly2` 55% (the firmware before:
+83%, 55%): the 4-in-1's drift, not the streaming.
+Trap: after the 4-in-1 restarted (USB hub power), its NRF24L01 sent the
+right payload with a wrong CRC and received nothing until `info` (which
+resets every chip) ran once.
+
 Against the MPM v2 bench with CC2500 framing (`frskyd`, `frskyx`, `frskyv`,
 `redpine`, `corona`, `hott`, length byte set): 100% both ways with the
 MPM v2 at trim 0 to +50 (frskyx: nothing outside that; at -35, the trim for

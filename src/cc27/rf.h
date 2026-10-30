@@ -3,6 +3,11 @@
 // time, polled (no interrupts). Raw framing: preamble, a sync word of up to
 // 32 bits, a fixed length payload; no header, length field or CRC (done in
 // software, as the CC2500 and NRF24 emulations do).
+//
+// Packets longer than RF_FIFO_PAYLOAD (CYRF6936 SDR: 1 KB on air) stream
+// through the FIFOs, while the CPU polls (rf_busy(), rf_rx_read()): TX
+// refilled as the PBE sends, RX copied out as it arrives. At 1 Mbps a FIFO
+// lasts 2 ms (RX) or 4 ms (TX): no other work in between.
 
 #pragma once
 
@@ -12,8 +17,9 @@
 #include <ti/drivers/rcl/LRF.h>
 
 // The FIFOs of TI's PHYs: RX 268 bytes for an entry (payload and 12 bytes
-// of status), TX 536
-#define RF_MAX_PAYLOAD 255
+// of status), TX 536. Longer packets: streamed
+#define RF_FIFO_PAYLOAD 255
+#define RF_MAX_PAYLOAD 1100
 
 // Operation results: the PBE's end cause, or one of these
 #define RF_OK 0
@@ -52,7 +58,7 @@ int rf_set_power(int8_t dbm);
 uint32_t rf_time(void);
 
 typedef struct {
-  uint8_t len;
+  uint16_t len;
   int8_t rssi;
   // Frequency estimate: the sender above us, in about deviation / 72 steps
   // (measured from 31 to 250 kbps, compressed beyond 60 steps)
@@ -63,16 +69,17 @@ typedef struct {
 
 // Blocking: one packet (rf_tx), one packet of len bytes (2 at least)
 // within timeout_us (rf_rx)
-int rf_tx(uint32_t freq_hz, const uint8_t *data, uint8_t len);
-int rf_rx(uint32_t freq_hz, uint8_t len, uint32_t timeout_us, rf_packet_t *pkt);
+int rf_tx(uint32_t freq_hz, const uint8_t *data, uint16_t len);
+int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt);
 
 // Non-blocking: the operation starts at SYSTIM time at (0: as soon as
 // possible, about 100 us), a running one stopped first. RX: packets of len
-// bytes, one (repeat false) or until rf_stop()
+// bytes, one (repeat false) or until rf_stop(). TX: data stays valid until
+// the end (a long packet is sent from it)
 int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at);
 int rf_rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at);
 
-// True while the operation runs
+// True while the operation runs. Streams long packets: call it often
 bool rf_busy(void);
 
 // A packet received (true), from the RX FIFO

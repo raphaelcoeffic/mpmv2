@@ -3,7 +3,10 @@
 // - radio_phy_t's fsk: TX only (2-FSK), the RX is the same (rx_bw, if_freq
 //   and sync_threshold are ignored: phy_fsk takes the bandwidth from the
 //   deviation);
-// - packets of up to RF_MAX_PAYLOAD bytes (the PBE's FIFOs);
+// - packets of up to RF_MAX_PAYLOAD bytes, the longer ones (above
+//   RF_FIFO_PAYLOAD: CYRF6936 SDR) streamed through the PBE's FIFOs while
+//   radio_tx_wait(), radio_tx_done(), radio_receive() or radio_rx_active()
+//   poll: long RX restarts after each packet;
 // - variable length RX receives max_len bytes (the frame decoders cut);
 // - TX power words: the CC2652's (TI's table) taken as their dBm, words
 //   below 0x100 as dBm (signed byte: "pwr 10", "pwr 0xf6" for -10);
@@ -27,6 +30,8 @@
 
 #include "phy_fsk.h"
 #include "rf.h"
+
+_Static_assert(RF_MAX_PAYLOAD <= RADIO_MAX_PKT_LEN, "rf.c packets in radio_packet_t");
 
 // rf_packet_t's frequency estimate: steps of about deviation / 72
 #define FREQ_EST_STEPS_PER_DEV 72
