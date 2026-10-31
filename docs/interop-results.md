@@ -661,7 +661,7 @@ FrSky L with the real protocol code. CFlie at 2 Mbps is the only one left
 The same suites with the MPM v2 board (CC2652RB, SKY66112 PA/LNA, see
 [hardware.md](hardware.md)) in place of the LaunchPad: `CC_PORT=v2`, the two
 modules about 1 m apart on a desk, MPM v2 at its default power (`0x2853`,
-0 dBm into the PA, about +20 dBm out), October 2026.
+0 dBm into the PA, about +18 dBm out: [TX power](#tx-power)), October 2026.
 
 **Frequency.** The CC2652RB runs on its BAW oscillator (HPOSC), about 98 ppm
 fast on this chip (`info`: `hposc=-411`). With the HPOSC correction in
@@ -814,11 +814,11 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
 
 The MPM's low power flag (EdgeTX's low power mode; its range check only
 shows RSSI) did nothing on the MPM v2: CC2500, NRF24L01, XN297 and A7105
-at the default, DSM at the bind and range level. `RF_TX_POWER_REDUCED`
-(`board.h`) is now used for the chips' low power levels. Its word on the
-MPM v2 from a stock X8R (FrSky X2 LBT, in another room;
-at 1 m its RSSI didn't move from 86 over 20 dB), each word 20 s, the RSSI
-mean after 3 s, October 2026:
+at the default, DSM at the bind and range level. A low power word was then
+used for the chips' low power levels (since replaced by the chips' own
+steps, [TX power](#tx-power)). Its word on the MPM v2 from a stock X8R
+(FrSky X2 LBT, in another room; at 1 m its RSSI didn't move from 86 over
+20 dB), each word 20 s, the RSSI mean after 3 s, October 2026:
 
 | Word | TI table (into the PA) | X8R RSSI | Below the default |
 |---|---|---|---|
@@ -838,6 +838,98 @@ mean after 3 s, October 2026:
   `0x2853` / `0x0ACF` / `0x04C6` for FrSky X2, AFHDS2A, V2x2, Bayang, XK and
   DSM. DSM first stayed at `0x2853` in all three: see `CYRF_Reset()` in
   [mpm-core.md](mpm-core.md) (CYRF6936).
+
+### TX power
+
+Until now the port sent every bind and range check level at one word
+(`0x04C6`) and every low power level at another (`0x0ACF`), whatever the
+chip; on a 4-in-1 the bind levels go from the NRF24L01's -18 dBm to the
+CYRF6936's -35 dBm, behind PAs. Measured October 2026 with
+[`power_sweep.py`](../tools/bench/power_sweep.py): one board sends 40
+packets at each of its levels on 4 channels, the CC2652 LaunchPad bench
+(or the MPM v2) receives, the median RSSI of each level and channel, the mean
+of the channels. The boards about 45 cm apart, the 4-in-1's antenna
+vertical, the LaunchPads' horizontal, the MPM v2's one of each.
+
+- The LaunchPad's RSSI follows the 4-in-1's CC2500 at 1 dB a dB over its
+  32 dB of PATABLE steps (the CC2500 datasheet's), from -60 to -26 dBm. It
+  compresses about 2 dB above -17 dBm: the first 4-in-1 sweeps (top levels at
+  -12 to -14 dBm) gave steps 2 to 3 dB shorter, the numbers below are from
+  the boards placed further apart.
+- The MPM v2: the PA saturates above a word of about -5 dBm (TI's table):
+  `0x2853` to `0x7217` within 1 dB. The CC2652RB's words below sit lower than
+  TI's table says (`0x04C6`: 24 dB below `0x2853`, not 20); the CC2652R1
+  LaunchPad follows the table within 1.5 dB.
+
+Below full power, dB, per word (`RF_TX_POWER_STEPS` in the boards' `board.h`):
+
+| Word | MPM v2 (below `0x2853`) | CC2652R1 LaunchPad (below `0x7217`) |
+|---|---|---|
+| `0x7217` | -0.8 | 0 |
+| `0x2853` | 0 | 4.5 |
+| `0x1893` | 1.0 | 7.0 |
+| `0x12D6` | 2.8 | 9.3 |
+| `0x10D4` | 4.0 | 10.5 |
+| `0x0ACF` | 9.0 | 13.3 |
+| `0x0ACC` | 13.6 | 16.3 |
+| `0x06CA` | 17.3 | 18.7 |
+| `0x06C8` | 20.6 | 21.5 |
+| `0x04C6` | 24.3 | 24.3 |
+| `0x04C4` | 29.3 | 28.0 |
+| `0x04C3` | 31.3 | 30.7 |
+| `0x04C2` | 34.3 | 33.5 |
+| `0x04C1` | 37 | 37 |
+
+The 4-in-1's chips at their levels (the bench firmware writes the power
+register), below each chip's own top level:
+
+| Chip | Levels (nominal dBm): below the top, dB |
+|---|---|
+| NRF24L01 (RF_PWR) | -18: 16.7, -12: 8.5, -6: 3.7, 0: 0 (its PA compresses the top steps) |
+| CC2500 (PATABLE) | -30: 34.2, -28: 31.0, -26: 28.6, -24: 25.6, -22: 24.6, -20: 22.6, -18: 20.6, -16: 17.8, -14: 14.8, -12: 13.6, -10: 11.8, -8: 10.0, -6: 8.8, -4: 5.8, -2: 3.6, 0: 0.8, +1: 0 |
+| A7105 (TX_TEST) | -23: 19.7, -20: 16.5, -16: 13.5, -11: 8.7, -6: 3.7, 0: 0.3, +1: 0 |
+| CYRF6936 (PA_SETTING) | -35: 33.2, -30: 27.2, -24: 20.4, -18: 15.0, -13: 10.7, -5: 5.0, 0: 1.0, +4: 0 |
+
+Absolute levels:
+
+- MPM v2, from the path both ways (`power_sweep.py recip`: the LaunchPad
+  sends at +5 dBm, its RSSI and the MPM v2's, whose RX gain is taken as the
+  SKY66112's 11 dB LNA less about 3 dB of balun, switch and filter): +17.5
+  to +18.7 dBm at J2 / J3, about 3 dB below the datasheet's +21 dBm, within
+  the method's ±3 dB. Both antennas give the same: the path cancels. The PA
+  is set up as its datasheet's high power TX mode (CSD, CRX, CHL high, CPS
+  low, CTX from the RF core's PA enable, VCC2 3.3 V).
+- The 4-in-1 against the MPM v2: at first the 4-in-1 reached the LaunchPad
+  10 to 16 dB stronger, from where the boards stood (the MPM v2 to LaunchPad
+  path: 42 dB on J3, 46 on J2). With the two modules swapped and the RSSI
+  of both places averaged, the 4-in-1's chips at their top level come 0 to
+  3 dB above the MPM v2's `0x2853`: about +19 to +21 dBm.
+- So the bind levels on the 4-in-1 are about: NRF24L01 +3, A7105 +1,
+  CYRF6936 -13 (range -7), CC2500 -14 dBm; its low power about +11 dBm
+  (CYRF6936 +5), LBT +14 dBm. The port's former `0x04C6` was -7 dBm on the
+  MPM v2 for all of them: 10 dB short for the NRF24L01 and the XN297 on it
+  (the port's V2x2 bind packets reached the MPM v2 bench 21 to 24 dB below
+  its data, the 4-in-1's 13 to 14), 7 dB over for the CC2500. FrSky LBT
+  went out at full power.
+
+The emulations now take each chip level as its step below the chip's
+top on the 4-in-1 (rounded, [mpm-core.md](mpm-core.md#tx-power)) and
+`rf_power_word()` picks the board's closest word. Checked with the port
+on the LaunchPad (`build-lp`), the MPM v2 bench receiving the bind and the
+data packets, data at full power:
+
+| Protocol (chip) | Bind | Data | Below full | Target (LaunchPad step) |
+|---|---|---|---|---|
+| V2x2 (NRF24L01) | -50 | -34 | 16 | 17 (16) |
+| FrSky D (CC2500) | -70 | -35 | 35 | 34 (34) |
+| XK (XN297 at 250 kbps: the CC2500's) | -70 | -38 | 32 | 34 (34) |
+| AFHDS2A (A7105) | -54 | about -35 (the others) | about 19 | 20 (20) |
+| DSM (CYRF6936, DSMX) | -72 | -36 | 36 | 33 (34) |
+
+Within the 2 to 3 dB the RSSI moves from channel to channel (bind and
+data are on different channels). The CC2755 LaunchPad's steps are TI's
+dBm (not measured, down to -20 dBm: 25 dB), the XJT-Lite's FrSky's table
+(down to 10 dB).
 
 ## Automatic frequency trim
 

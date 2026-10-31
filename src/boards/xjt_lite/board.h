@@ -50,10 +50,11 @@
 // the PA (FrSky's table): 0x0CC7 9 dBm, 0x0CC9 12, 0x0CCB 14, 0x144B 15,
 // 0x194E 16, 0x1D52 17, 0x2558 19, 0x3161 21. The stock default: 19 dBm
 #define RF_TX_POWER_DEFAULT 0x2558
-// Bind and range check: the lowest, 9 dBm
-#define RF_TX_POWER_LOW     0x0CC7
-// The MPM's low power flag: the lowest too, 10 dB lower
-#define RF_TX_POWER_REDUCED 0x0CC7
+// The words for each level below it, dB (rf_power_word()), from FrSky's
+// table: down to 9 dBm, 10 dB (bind and range check)
+#define RF_TX_POWER_STEPS                                                    \
+  {0, 0x2558}, {2, 0x1D52}, {3, 0x194E}, {4, 0x144B}, {5, 0x0CCB}, {7, 0x0CC9}, \
+  {10, 0x0CC7}
 
 void board_init();
 // The board's pins at boot (board.c), from board_init()

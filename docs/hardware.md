@@ -37,7 +37,9 @@ CC2652 → F2 balun → U3 RF1; SX1281 → U3 RF2. U3 → F1 band-pass → SKY66
 grounded: CTX alone switches between RX (LNA, 11 dB) and TX high-power mode
 (22 dB, +21 dBm). CTX is driven by the RF core PA enable (RFC_GPO1). The PA
 input is +5 dBm max: see `RF_TX_POWER_DEFAULT` in `src/boards/mpm_v2/board.h`
-and `doc/SKY66112-11_203225P.pdf`.
+and `doc/SKY66112-11_203225P.pdf`. Measured: about +18 dBm at J2 / J3 with
+the default word, the PA saturated; the lower words in `RF_TX_POWER_STEPS`
+([interop-results.md](interop-results.md#tx-power)).
 
 With the SX1281 (`src/drivers/sx1281.c`, `doc/SX1280-81_Rev3.2_Mar2020.pdf`), U3
 is switched to RF2 and CTX becomes a GPIO, high only while the SX1281 sends

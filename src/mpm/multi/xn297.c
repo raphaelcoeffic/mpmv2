@@ -12,14 +12,16 @@
 #define NRF_FREQ_BASE_KHZ 2400000
 #define SYNC_THRESHOLD_STRICT 0x32  // as the bench: repeated address patterns
 
-// TX power words for the NRF power levels: high = the board default, low
-// power reduced, the bind and range check levels (-18 dBm on the NRF24L01) low
-#define POWER_HIGH RF_TX_POWER_DEFAULT
-#define POWER_REDUCED RF_TX_POWER_REDUCED
-#define POWER_LOW RF_TX_POWER_LOW
+// TX power, dB below full power on a 4-in-1 (rf_power_word()): its NRF24L01's
+// levels, its CC2500's at 250 kbps (XN297_Configure()). Bind and range:
+// -18 dBm on the NRF24L01, -30 dBm on the CC2500; low power: -12 and -6 dBm
+#define DB_LOW_NRF 17
+#define DB_LOW_CC2500 34
+#define DB_REDUCED 9
 
 static radio_phy_t _phy;
 static bool _crc, _scramble, _250k;
+static uint8_t _db_low;  // bind and range check level
 static uint8_t _addr_len = 5;
 static frame_t _tx, _tx_enh; // TX address: standard and enhanced framing
 static frame_t _rx, _rx_enh; // RX address: standard and enhanced framing
@@ -66,7 +68,9 @@ bool xn297_configure(bool crc_en, bool scramble_en, bool bitrate, bool force_nrf
   _pkt_ready = false;
   _air_len = 0;
   _freq_offset_khz = 0;
-  _power = POWER_LOW;  // bind power until XN297_SetPower()
+  // The MPM uses its CC2500 at 250 kbps when it has one
+  _db_low = _250k && !force_nrf ? DB_LOW_CC2500 : DB_LOW_NRF;
+  _power = rf_power_word(_db_low);  // bind power until XN297_SetPower()
 
   static const uint8_t zero[5] = {0};
   _frame_setup(&_tx, zero, false);
@@ -201,11 +205,12 @@ void XN297_RFChannel(uint8_t number)
 
 void XN297_SetPower()
 {
-  uint16_t power = IS_BIND_DONE ? POWER_HIGH : POWER_LOW;
+  uint8_t db = IS_BIND_DONE ? 0 : _db_low;
 #ifdef NRF24L01_ENABLE_LOW_POWER
-  if (IS_BIND_DONE && !IS_POWER_FLAG_on) power = POWER_REDUCED;
+  if (IS_BIND_DONE && !IS_POWER_FLAG_on) db = DB_REDUCED;
 #endif
-  if (IS_RANGE_FLAG_on) power = POWER_LOW;
+  if (IS_RANGE_FLAG_on) db = _db_low;
+  uint16_t power = rf_power_word(db);
   if (power == _power) return;
   _power = power;
   radio_set_tx_power(power);

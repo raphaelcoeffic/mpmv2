@@ -53,13 +53,16 @@ static void _reset()
   memset(_id, 0, sizeof(_id));
 }
 
-// TX power word for TX_TEST (PAC, TBG): the MPM's high power (+1 dBm on the
-// A7105) at the board default, low power (-11 dBm) reduced, bind and range
-// (-23 dBm) low
+// TX power word for TX_TEST (PAC, TBG): dB below full power (+1 dBm) on a
+// 4-in-1, from A7105_POWER_6 down to 0. The MPM's low power (-11 dBm) 9 dB
+// down, bind and range (-23 dBm) 20
 static uint16_t _power_word(uint8_t tx_test)
 {
-  if (tx_test >= A7105_POWER_4) return RF_TX_POWER_DEFAULT;
-  return tx_test >= A7105_POWER_3 ? RF_TX_POWER_REDUCED : RF_TX_POWER_LOW;
+  static const uint8_t table[][2] = {{A7105_POWER_5, 0}, {A7105_POWER_4, 4}, {A7105_POWER_3, 9},
+                                     {A7105_POWER_2, 14}, {A7105_POWER_1, 17}};
+  for (uint32_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
+    if (tx_test >= table[i][0]) return rf_power_word(table[i][1]);
+  return rf_power_word(20);
 }
 
 static uint8_t _len() { return _reg[A7105_03_FIFOI] + 1 > FIFO_SIZE ? FIFO_SIZE : _reg[A7105_03_FIFOI] + 1; }
@@ -235,7 +238,7 @@ uint8_t A7105_Reset()
   _reset();
   _flags = 0;
   _rssi_adc = 160;
-  _power = RF_TX_POWER_LOW;
+  _power = _power_word(_reg[A7105_28_TX_TEST]);
   _phy_on = false;  // radio_init() at the next TX or RX
   return 1;
 }

@@ -69,7 +69,7 @@ static bool _alt;
 static radio_phy_t _phy;
 static bool _phy_on;
 static uint32_t _freq_khz;
-static uint16_t _power = RF_TX_POWER_LOW;
+static uint16_t _power;  // from TX_CFG at each TX
 static radio_packet_t _pkt;
 static uint8_t _air[FRAME_AIR_MAX];
 
@@ -103,13 +103,13 @@ static void _reset()
   _phy_on = false;  // radio_init() at the next TX or RX
 }
 
-// TX power word for TX_CFG.PA_SETTING: the MPM's high power (+4 dBm on the
-// CYRF6936) at the board default, low power (-18 dBm) reduced, bind and range
-// (-35 and -30 dBm) low
+// TX power word for TX_CFG.PA_SETTING (-35 to +4 dBm): dB below full power
+// on a 4-in-1. The MPM's low power (-18 dBm) 15 dB down, bind (-35 dBm) 33,
+// range (-30 dBm) 27
 static uint16_t _power_word(uint8_t pa)
 {
-  if (pa >= CYRF_POWER_5) return RF_TX_POWER_DEFAULT;
-  return pa >= CYRF_POWER_3 ? RF_TX_POWER_REDUCED : RF_TX_POWER_LOW;
+  static const uint8_t db[] = {33, 27, 20, 15, 11, 5, 1, 0};
+  return rf_power_word(db[pa & 7]);
 }
 
 // frame_init() takes about 2 ms here (its RX sync word choice), too long at

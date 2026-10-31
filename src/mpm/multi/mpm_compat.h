@@ -135,7 +135,13 @@ enum TXRX_State {
   RX_EN
 };
 
-// NRF power (the XN297 emulation maps them to RF core power words)
+// TX power: the board's RF core power word for a level db dB below its full
+// power (the closest of RF_TX_POWER_STEPS, board.h). The chip emulations
+// give each chip power level as measured on a 4-in-1: dB below that chip's
+// own full power (docs/interop-results.md, TX power)
+uint16_t rf_power_word(uint8_t db);
+
+// NRF power (the XN297 emulation takes them as the NRF24L01's levels)
 enum NRF_POWER {
   NRF_POWER_0 = 0x00,  // -18dBm
   NRF_POWER_1 = 0x01,  // -12dBm

@@ -1,5 +1,8 @@
 // Globals and helpers of Multiprotocol.ino (DIY-Multiprotocol-TX-Module,
 // GPL v3)
+#include <stdlib.h>
+
+#include "board.h"
 #include "chips.h"
 #include "eeprom.h"
 
@@ -250,4 +253,17 @@ void crc8_update(uint8_t byte)
       crc8 = (crc8 << 1) ^ crc8_polynomial;
     else
       crc8 <<= 1;
+}
+
+uint16_t rf_power_word(uint8_t db)
+{
+  static const struct {
+    uint8_t db;
+    uint16_t word;
+  } steps[] = {RF_TX_POWER_STEPS};
+  // The closest step, the lower power of two as close
+  uint32_t best = 0;
+  for (uint32_t i = 1; i < sizeof(steps) / sizeof(steps[0]); i++)
+    if (abs(steps[i].db - db) <= abs(steps[best].db - db)) best = i;
+  return steps[best].word;
 }

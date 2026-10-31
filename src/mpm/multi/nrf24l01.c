@@ -70,14 +70,13 @@ static uint16_t _air_len;
 
 uint8_t rf_setup;
 
-// TX power word for RF_SETUP RF_PWR: the MPM's high power (0 dBm on the
-// NRF24L01) at the board default, low power (-12 dBm) reduced, bind and range
-// (-18 dBm) low
+// TX power word for RF_SETUP RF_PWR (-18, -12, -6, 0 dBm): dB below full
+// power on a 4-in-1, whose PA compresses the top steps. The MPM's bind and
+// range level (-18 dBm) 17 dB down, its low power (-12 dBm) 9
 static uint16_t _power_word()
 {
-  static const uint16_t words[] = {RF_TX_POWER_LOW, RF_TX_POWER_REDUCED, RF_TX_POWER_DEFAULT,
-                                   RF_TX_POWER_DEFAULT};
-  return words[(_reg[NRF24L01_06_RF_SETUP] >> 1) & 3];
+  static const uint8_t db[] = {17, 9, 4, 0};
+  return rf_power_word(db[(_reg[NRF24L01_06_RF_SETUP] >> 1) & 3]);
 }
 
 static uint8_t _addr_len()
@@ -373,7 +372,7 @@ void NRF24L01_Reset()
   _tx_len = _rx_count = 0;
   _air_len = 0;
   _tx_busy = false;
-  _power = RF_TX_POWER_LOW;
+  _power = _power_word();
   _phy_on = false;  // radio_init() at the next TX or RX
   _setup_dirty = true;
 }

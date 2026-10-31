@@ -38,7 +38,7 @@ static radio_phy_t _phy = {
     .preamble_bytes = 4,
     .sync_bits = 32,
     .if_freq = (int16_t)0x8000,
-    .tx_power = RF_TX_POWER_LOW,
+    .tx_power = 0x0CC7,  // FrSky's lowest, 9 dBm (board.h)
 };
 #define SYNC_WORD 0xD391D391
 

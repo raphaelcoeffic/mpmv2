@@ -78,19 +78,21 @@ static uint8_t _air[FRAME_AIR_MAX];
 
 static uint32_t _pow2(uint8_t e) { return 1UL << e; }
 
-// TX power word for a PATABLE value: the MPM's high and LBT power (+1 and
-// -4 dBm on the CC2500) at the board default, low power (-6 dBm) reduced,
-// bind and range (-30 dBm) low
+// TX power word for a PATABLE value: dB below full power (+1 dBm) on a
+// 4-in-1, for the values of CC2500_POWER_0 to 17. The MPM's LBT power (-4 dBm)
+// 6 dB down, its low power (-6 dBm) 9, bind and range (-30 dBm) 34. Other
+// values (Corona's first byte, TEST): full power
 static uint16_t _power_word(uint8_t pa)
 {
-  switch (pa) {
-    case CC2500_POWER_17: case CC2500_POWER_16: case CC2500_POWER_15: case CC2500_POWER_14:
-      return RF_TX_POWER_DEFAULT;
-    case CC2500_POWER_13: case CC2500_POWER_12: case CC2500_POWER_11:
-      return RF_TX_POWER_REDUCED;
-    default:
-      return RF_TX_POWER_LOW;
-  }
+  static const uint8_t table[][2] = {
+      {CC2500_POWER_0, 255}, {CC2500_POWER_1, 34},  {CC2500_POWER_2, 31},  {CC2500_POWER_3, 29},
+      {CC2500_POWER_4, 26},  {CC2500_POWER_5, 25},  {CC2500_POWER_6, 23},  {CC2500_POWER_7, 21},
+      {CC2500_POWER_8, 18},  {CC2500_POWER_9, 15},  {CC2500_POWER_10, 14}, {CC2500_POWER_11, 12},
+      {CC2500_POWER_12, 10}, {CC2500_POWER_13, 9},  {CC2500_POWER_14, 6},  {CC2500_POWER_15, 4},
+      {CC2500_POWER_16, 1}};
+  for (uint32_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
+    if (table[i][0] == pa) return rf_power_word(table[i][1]);
+  return rf_power_word(0);
 }
 
 static uint32_t _rate()
@@ -435,7 +437,7 @@ uint8_t CC2500_Reset()
   _state = S_IDLE;
   memcpy(_reg, _reset_regs, NREGS);
   _patable = 0xC6;
-  _power = RF_TX_POWER_LOW;
+  _power = _power_word(_patable);
   _tx_len = _rx_len = 0;
   _lqi = 0;
   _phy_on = false;  // radio_init() at the next TX or RX

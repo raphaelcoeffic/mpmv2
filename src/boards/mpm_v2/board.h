@@ -25,10 +25,13 @@
   //
   // RF core TX power word: +5 dBm (TI table)
   #define RF_TX_POWER_DEFAULT 0x7217
-  // Bind and range check (the NRF24L01's -18 dBm): 25 dB lower
-  #define RF_TX_POWER_LOW     0x04C6
-  // The MPM's low power flag: -5 dBm, 10 dB lower (TI table)
-  #define RF_TX_POWER_REDUCED 0x12D6
+  // The words for each level below it, dB (rf_power_word()): measured on
+  // air, within 1.5 dB of TI's table (docs/interop-results.md, TX power)
+  #define RF_TX_POWER_STEPS                                                    \
+    {0, 0x7217}, {1, 0x4E63}, {2, 0x385D}, {3, 0x3259}, {5, 0x2853},           \
+    {7, 0x1893}, {9, 0x12D6}, {11, 0x10D4}, {13, 0x0ACF}, {16, 0x0ACC},        \
+    {19, 0x06CA}, {20, 0x0443}, {22, 0x0484}, {24, 0x04C6}, {26, 0x04C5},      \
+    {28, 0x04C4}, {31, 0x04C3}, {34, 0x04C2}, {37, 0x04C1}
   //
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
@@ -96,13 +99,17 @@
   //
   // RF core TX power word: 0 dBm (CC2652RB table). The SKY66112 input
   // is +5 dBm max, -2 dBm recommended, 22 dB gain (+21 dBm out):
-  // see doc/SKY66112-11_203225P.pdf
+  // see doc/SKY66112-11_203225P.pdf. Measured: about +18 dBm at J2 / J3,
+  // the PA saturated (words above 0x1893 add 1 dB at most)
   #define RF_TX_POWER_DEFAULT 0x2853
-  // Bind and range check (the NRF24L01's -18 dBm): about 20 dB lower
-  #define RF_TX_POWER_LOW     0x04C6
-  // The MPM's low power flag: -10 dBm into the PA, 10 to 13 dB lower (a
-  // stock X8R's RSSI 10.5 below the default's, docs/interop-results.md)
-  #define RF_TX_POWER_REDUCED 0x0ACF
+  // The words for each level below it, dB (rf_power_word()): measured on
+  // air (docs/interop-results.md, TX power); TI's table puts 0x04C6 20 dB
+  // down, it is 24. Lowest: 0x04C1, about -19 dBm out
+  #define RF_TX_POWER_STEPS                                                  \
+    {0, 0x2853}, {1, 0x1893}, {3, 0x12D6}, {4, 0x10D4}, {8, 0x0AD0},         \
+    {9, 0x0ACF}, {14, 0x0ACC}, {17, 0x06CA}, {21, 0x06C8}, {22, 0x0484},     \
+    {24, 0x04C6}, {27, 0x04C5}, {28, 0x0482}, {29, 0x04C4}, {31, 0x04C3},    \
+    {34, 0x04C2}, {37, 0x04C1}
   //
   #define BUTTON        IOID_0
   //

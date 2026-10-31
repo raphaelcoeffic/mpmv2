@@ -31,9 +31,12 @@
 // TX power: the CC2652's words, the platform's radio.c takes them as their
 // dBm. +5 dBm as the CC2652 LaunchPad
 #define RF_TX_POWER_DEFAULT 0x7217
-#define RF_TX_POWER_LOW 0x04C6
-// The MPM's low power flag: 15 dB lower
-#define RF_TX_POWER_REDUCED 0x0ACF
+// The words for each level below it, dB (rf_power_word()): TI's dBm, not
+// measured here, down to its PHYs' lowest, -20 dBm
+#define RF_TX_POWER_STEPS                                                       \
+  {0, 0x7217}, {1, 0x4E63}, {2, 0x385D}, {3, 0x3259}, {4, 0x2856}, {5, 0x2853}, \
+  {8, 0x1893}, {10, 0x12D6}, {11, 0x10D4}, {15, 0x0ACF}, {17, 0x0ACC},          \
+  {20, 0x06CA}, {23, 0x06C8}, {25, 0x04C6}
 
 void board_led(uint32_t dio, bool on);
 void board_led_toggle(uint32_t dio);
