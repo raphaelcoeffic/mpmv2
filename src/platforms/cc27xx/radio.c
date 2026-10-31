@@ -9,10 +9,11 @@
 //   radio_tx_wait(), radio_tx_done(), radio_receive() or radio_rx_active()
 //   poll: long RX restarts after each packet;
 // - variable length RX: max_len bytes a packet (the frame decoders cut);
-//   len_fn() called from radio_receive_early(), as the bytes come, and the
-//   packet taken there once its length is in: RX starts again at the next
-//   call (the rest of max_len would hide the next packet). At rx_os > 1:
-//   fixed length only;
+//   len_fn() called from radio_receive() and radio_receive_early(), as the
+//   bytes come (long packets too: the protocol knows one is coming), and
+//   the packet taken in radio_receive_early() once its length is in: RX
+//   starts again at the next call (the rest of max_len would hide the next
+//   packet; long packets: at their end). At rx_os > 1: fixed length only;
 // - radio_set_frequency_start() while idle: the synthesizer tuned and kept
 //   on for the next TX (OP_FS), which then starts without calibrating; RX
 //   tunes as it starts;
@@ -68,8 +69,9 @@ static uint8_t _rx_os = 1;
 static uint8_t _rx_sync_bytes;
 static uint32_t _rx_sync_rest[2];
 static uint16_t _rx_dropped;
-// Variable length RX: its len_fn, the length it gave (0: not yet), the
-// packet taken early (RX to start again)
+// Variable length RX (_var_fn): its len_fn, the length it gave (0: not
+// yet), the packet taken early (RX to start again); _var: it may be (not a
+// long packet)
 static bool _var;
 static uint8_t _var_hdr;
 static radio_len_fn_t _var_fn;
@@ -316,6 +318,7 @@ static radio_status_t _rx_start(uint16_t len)
 radio_status_t radio_rx_start(uint16_t len)
 {
   _var = false;
+  _var_fn = NULL;
   return _rx_start(len);
 }
 
@@ -323,8 +326,8 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
                                   void* ctx)
 {
   radio_status_t st = radio_rx_start(max_len);
-  if (st != RADIO_OK || _rx_os != 1 || _phy.ble_2m || max_len > RF_FIFO_PAYLOAD) return st;
-  _var = true;
+  if (st != RADIO_OK || _rx_os != 1 || _phy.ble_2m) return st;
+  _var = max_len <= RF_FIFO_PAYLOAD;
   _var_hdr = hdr_len;
   _var_fn = len_fn;
   _var_ctx = ctx;
@@ -335,6 +338,23 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
 static void _var_restart()
 {
   if (_state == STATE_RX && _var_taken) _rx_start(_rx_len);
+}
+
+// Variable length RX: the packet being received, up to max bytes into buf
+// (their number returned); len_fn() once its first hdr bytes are in (the
+// CC2652 calls it from the RF core interrupt), with all of them: the
+// protocols time the packet's end from their number. None in: the length
+// for the next one (a long packet dropped at its end isn't read)
+static uint16_t _var_peek(uint8_t* buf, uint16_t max)
+{
+  uint16_t n = rf_rx_peek(buf, max);
+  if (!n) _var_len = 0;
+  if (n > max) n = max;
+  if (n < _var_hdr || _var_len) return n;
+  _var_len = _var_fn(buf, n, _var_ctx);
+  // Dropped: RX again
+  if (!_var_len) _var_taken = true;
+  return n;
 }
 
 static void _packet(const rf_packet_t* p, radio_packet_t* pkt, bool freq_offset)
@@ -406,7 +426,13 @@ bool radio_receive(radio_packet_t* pkt)
   _var_restart();
   if (_state != STATE_RX) return false;
   rf_packet_t p;
-  if (!rf_rx_read(&p) || !_vote(&p)) return false;
+  if (!rf_rx_read(&p)) {
+    // The length as soon as it comes (pkt's data: scratch), then the check
+    // for its end only
+    if (_var_fn && !_var_taken) _var_peek(pkt->data, _var_len ? 0 : _rx_len);
+    return false;
+  }
+  if (!_vote(&p)) return false;
   _rx_count++;
   _var_len = 0;
   _packet(&p, pkt, true);
@@ -416,17 +442,8 @@ bool radio_receive(radio_packet_t* pkt)
 bool radio_receive_early(radio_packet_t* pkt)
 {
   if (!_var || _state != STATE_RX || _var_taken) return false;
-  uint16_t n = rf_rx_peek(pkt->data, _rx_len);
-  if (n < _var_hdr) return false;
-  if (!_var_len) {
-    _var_len = _var_fn(pkt->data, n, _var_ctx);
-    // Dropped: RX again
-    if (!_var_len) {
-      _var_taken = true;
-      return false;
-    }
-  }
-  if (n < _var_len) return false;
+  uint16_t n = _var_peek(pkt->data, _rx_len);
+  if (!_var_len || n < _var_len) return false;
   pkt->len = _var_len;
   pkt->rssi = rf_rssi();
   pkt->timestamp_us = HWREG(SYSTIM_BASE + SYSTIM_O_TIME1U);

@@ -522,20 +522,29 @@ bool rf_rx_read(rf_packet_t *pkt)
 
 uint16_t rf_rx_peek(uint8_t *buf, uint16_t max)
 {
-  if (!_running || _rx_long || LRF_hasRxWordToRead()) return 0;
-  uint32_t rp;
-  uint32_t n = LRF_getUncommittedFifoStatus(&rp);
+  if (!_running) return 0;
+  uint32_t n;
   uint32_t w[(RF_FIFO_PAYLOAD + 16 + 3) / 4];
-  if (n > sizeof(w)) n = sizeof(w);
-  if (n < 4) return 0;
-  LRF_peekRxFifoWords(w, (n + 3) / 4, rp);
-  // The entry's length field and numPad come first
   const uint8_t *b = (const uint8_t *)w;
+  if (_rx_long) {
+    // Long: the copy so far
+    _rx_pump();
+    if (!_rx_active || _rx_ready) return 0;
+    n = _rx_got;
+    b = (const uint8_t *)_rx_buf;
+  } else {
+    if (LRF_hasRxWordToRead()) return 0;
+    uint32_t rp;
+    n = LRF_getUncommittedFifoStatus(&rp);
+    if (n > sizeof(w)) n = sizeof(w);
+    if (n < 4) return 0;
+    LRF_peekRxFifoWords(w, (n + 3) / 4, rp);
+  }
+  // The entry's length field and numPad come first
   uint32_t off = 3U + b[2];
   if (n <= off) return 0;
   n -= off;
-  if (n > max) n = max;
-  memcpy(buf, b + off, n);
+  memcpy(buf, b + off, n < max ? n : max);
   return n;
 }
 

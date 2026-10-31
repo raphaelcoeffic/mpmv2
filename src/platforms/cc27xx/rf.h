@@ -90,9 +90,9 @@ bool rf_busy(void);
 // A packet received (true), from the RX FIFO
 bool rf_rx_read(rf_packet_t *pkt);
 
-// The packet being received (RF_FIFO_PAYLOAD bytes at most): its bytes the
-// PBE has written so far, up to max into buf; 0 while none or while a whole
-// packet waits for rf_rx_read()
+// The packet being received: the number of bytes the PBE has written so far
+// (a long packet: copied so far), up to max of them into buf; 0 while none or
+// while a whole packet waits for rf_rx_read()
 uint16_t rf_rx_peek(uint8_t *buf, uint16_t max);
 
 // Ends the operation (hard stop if it still runs: RF_ERR_TIMEOUT), the radio
