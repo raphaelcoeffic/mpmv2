@@ -33,6 +33,12 @@
   // timing test: BOOT pin
   #define TEST_PIN      IOID_19
   //
+  // Boot loader link to the radio: UART0, the XDS110 back channel, where the
+  // MPM port talks to the radio (tools/bench/radio_sim.py): the MPM v2's
+  // window, up to 300 ms on an idle line, the application at once on radio
+  // traffic (docs/update.md)
+  #define BL_RADIO_UART0
+  //
 #elif defined(BOARD_MPM_V2)
   // *****************
   // * MPM v2 pinout *

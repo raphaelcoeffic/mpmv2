@@ -2,8 +2,8 @@
 //
 // Speaks the STK500v1 subset EdgeTX uses to flash a MULTI-Module
 // (radio/src/io/multi_firmware_update.cpp), at 57600 8N1, on the radio link
-// (BL_RADIO_*, board.h) and on the console UART (USB serial). See
-// docs/update.md.
+// (BL_RADIO_*, board.h) and on the console UART (USB serial; the LaunchPad's
+// radio link, BL_RADIO_UART0). See docs/update.md.
 //
 // At power up: no valid application -> serve STK500 until one is written.
 // Otherwise listen for STK_GET_SYNC for up to BL_WINDOW_MS, and start the
@@ -68,8 +68,19 @@ typedef struct {
   bool radio;
 } port_t;
 
+// The radio's link: UART1 on the BL_RADIO_* pins, or UART0 itself
+// (BL_RADIO_UART0: the LaunchPad, whose MPM port talks to the radio there)
+#if defined(BL_RADIO_RX) || defined(BL_RADIO_UART0)
+  #define BL_RADIO 1
+#endif
+#if defined(BL_RADIO_UART0)
+  #define UART0_RADIO true
+#else
+  #define UART0_RADIO false
+#endif
+
 static const port_t _ports[] = {
-    {UART0_BASE, false},
+    {UART0_BASE, UART0_RADIO},
 #if defined(BL_RADIO_RX)
     {UART1_BASE, true},
 #endif
@@ -279,7 +290,7 @@ static const port_t* wait_sync(bool forever)
 
     uint32_t t = millis() - start;
     if (t < BL_CONSOLE_MS) continue;
-#if defined(BL_RADIO_RX)
+#if defined(BL_RADIO)
     if (noise > BL_NOISE_BYTES) return 0;
   #if defined(BL_RADIO_ABSENT_LEVEL)
     // DIN reads the pad after the IOC inversion

@@ -143,6 +143,11 @@ page back right after writing it works.
    - at the latest after `BL_WINDOW_MS` (300 ms), when the line stays idle
      and driven.
 
+   On the CC2652 LaunchPad the radio link is UART0 itself, the XDS110 back
+   channel, where its MPM port talks to the radio (`radio_sim.py`):
+   `BL_RADIO_UART0` gives it the same window, 300 ms on the idle line, the
+   application at once on radio frames.
+
    A radio that reboots (watchdog) with the model in the air gets the module
    back with its first frames: the window only runs its full length when the
    radio drives the line and sends nothing, which only EdgeTX's flashing
@@ -263,10 +268,20 @@ flash erased over J-Link, USB-C the only power, `rom_flash.py` 13.5 s at
 file system; then `stk500_flash.py --verify` over it, 48 s.
 
 `stk500_flash.py` resets the CC2652 through the CH343 DTR (BOOT high) and
-syncs every 10 ms, within the 20 ms console window. With `--no-reset` it
-syncs for 5 s like EdgeTX; `--invert` drives the radio bay through a plain
-USB serial adapter (TX to the PPM pin, RX from S.Port); `--radio` goes
-through a radio's USB serial (EdgeTX CLI, see
+syncs every 10 ms, within the 20 ms console window. On a LaunchPad
+(`--openocd "openocd -f board/ti_cc26x2_launchpad.cfg"`, plus `-c "adapter
+serial ..."` with several XDS110) OpenOCD resets the chip and leaves it
+halted, the sync starts, and a second OpenOCD lets it run: a boot loader
+already in a session would answer a sync sent before the reset. Syncs sent
+while OpenOCD drives the XDS110 did not reach the 20 ms console window,
+hence the LaunchPad's 300 ms one. Tested on the CC2652 LaunchPad
+(2026-10-31): updates both ways between the firmware and the bench, an
+old-header image refused, half an image (the boot loader then stays) and
+the full one over it.
+
+With `--no-reset` it syncs for 5 s like EdgeTX; `--invert` drives the
+radio bay through a plain USB serial adapter (TX to the PPM pin, RX from
+S.Port); `--radio` goes through a radio's USB serial (EdgeTX CLI, see
 [Internal modules](#internal-modules) for the external bay).
 
 ## Not chosen

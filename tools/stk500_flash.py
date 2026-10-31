@@ -18,10 +18,19 @@ padded with zeros, LEAVE_PROGMODE at the end or on error.
                                                     through the radio's USB
                                                     (EdgeTX CLI, external
                                                     module pass-through)
+  stk500_flash.py --port /dev/cu.usbmodemL11008LU1 \
+      --openocd "openocd -f board/ti_cc26x2_launchpad.cfg" ...
+                                                    LaunchPad: UART0 on the
+                                                    XDS110, reset through it
 
 Port: --port, else $V2_PORT, else the first CH343. The CH343 resets the
 CC2652 (DTR) with BOOT high (RTS), then the sync goes out every 10 ms: the
-boot loader listens on the console for at least 50 ms after reset.
+boot loader listens on the console for at least 20 ms after reset.
+--openocd: the chip reset through OpenOCD (a LaunchPad's XDS110 has no reset
+line on its UART), given as the openocd command and its options (board,
+adapter serial): a reset that leaves the chip halted, then the sync every
+10 ms, started before a second openocd lets it run (a boot loader already
+in a session would answer a sync sent before the reset).
 
 --radio: "serialpassthrough rfmod 1 57600 ppm hangup" to the EdgeTX CLI, which stops
 the pulses, powers the bay off for 500 ms and on again with the ports open
@@ -31,6 +40,8 @@ script exits and closes the port (hangup: DTR drops).
 """
 
 import argparse
+import shlex
+import subprocess
 import os
 import sys
 import time
@@ -150,6 +161,7 @@ def main():
     ap.add_argument("file", help="mpm-v2.bin (image + MULTI signature)")
     ap.add_argument("--port")
     ap.add_argument("--no-reset", action="store_true", help="don't reset through DTR, sync for 5 s as EdgeTX")
+    ap.add_argument("--openocd", help="openocd command and options resetting the chip (LaunchPads)")
     ap.add_argument("--radio", action="store_true", help="EdgeTX CLI on --port: pass-through to the external bay")
     ap.add_argument("--invert", action="store_true", help="inverted serial (radio bay through a plain adapter)")
     ap.add_argument("--no-check", action="store_true", help="skip the file signature check")
@@ -164,6 +176,13 @@ def main():
     if a.radio:
         stk.passthrough()
         ok = stk.sync(0.01, 2)
+    elif a.openocd:
+        ocd = shlex.split(a.openocd)
+        quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+        subprocess.run(ocd + ["-c", "init", "-c", "reset halt", "-c", "shutdown"], check=True, **quiet)
+        run = subprocess.Popen(ocd + ["-c", "init", "-c", "resume", "-c", "shutdown"], **quiet)
+        ok = stk.sync(0.01, 5)
+        run.wait()
     elif a.no_reset:
         ok = stk.sync(0.1, 5)
     else:
