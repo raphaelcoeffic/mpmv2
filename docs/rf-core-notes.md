@@ -243,7 +243,7 @@ TI's `SW_REG_BYTE_OVERRIDE` (`0x8003 | index << 4 | value << 16`) and
 
 The Bluetooth whitening seen on the proprietary commands is the Bluetooth
 LFSR (x^7 + x^4 + 1) seeded 0x65, advertising channel 37, on every channel.
-`radio.c` writes 0x04 at index 0x10 (override `0x00048103`) on the Bluetooth
+`rf_cc26x2.c` writes 0x04 at index 0x10 (override `0x00048103`) on the Bluetooth
 setup: MSB first, no whitening, as on the proprietary PHY.
 
 `0x4004110C` reads 3 with the proprietary PN9 whitening, 2 without it and on
@@ -254,5 +254,5 @@ the Bluetooth setup: a PN9 whitener enable, it seems.
 TI's CPE patches (`rf_patch_cpe_prop`, `rf_patch_cpe_bt5`) copy their image
 only once per boot and count on the retained RF core RAM. Loading the other
 one after a power cycle of the RF core hung the next setup (status ACTIVE):
-`radio.c` clears both patches' state (`cleanPropPatch()`, `cleanBt5Patch()`)
+`rf_cc26x2.c` clears both patches' state (`cleanPropPatch()`, `cleanBt5Patch()`)
 before loading one.

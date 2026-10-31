@@ -42,7 +42,7 @@ add_executable(bootloader ${board_dir}/bootloader/main.c ${cc26xx_dir}/board.c $
 target_compile_definitions(bootloader PRIVATE ${board_definitions})
 target_compile_options(bootloader PRIVATE -Os)
 target_include_directories(bootloader PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bootloader driverlib_cc13x2_cc26x2)
+target_link_libraries(bootloader ${cc26xx_driverlib})
 target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
 set_target_properties(bootloader PROPERTIES
     LINKER_FILE ${board_dir}/bootloader.ld
@@ -82,7 +82,7 @@ function(add_application name file)
         target_compile_definitions(${elf} PRIVATE DEBUG)
     endif()
     target_link_libraries(${elf}
-        driverlib_cc13x2_cc26x2
+        ${cc26xx_driverlib}
         segger_rtt
         littlefs
     )

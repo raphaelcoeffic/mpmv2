@@ -7,9 +7,10 @@ message("## Target is FrSky XJT-Lite (CC2650F128): reduced MPM")
 
 set(XJT_OPENOCD openocd CACHE STRING "OpenOCD with J-Link cJTAG support")
 
+set(cc26xx_chip cc26x0)
 include(platforms/cc26xx/platform.cmake)
 # The reduced MPM: its protocols (mpm/upstream/mpm_config.h, xjt_mpm_sources)
-list(APPEND board_definitions MCU_CC26X0 MPM_REDUCED)
+list(APPEND board_definitions MPM_REDUCED)
 
 # Target <name>: <name>.elf and <name>.bin in the build directory, with
 # board_init(). flash-<name>: the application only, at 0x8000
@@ -18,7 +19,7 @@ function(add_xjt_application name)
     add_executable(${elf} ${ARGN} ${cc26xx_dir}/board.c ${board_dir}/board.c)
     target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
-    target_link_libraries(${elf} driverlib_cc26x0)
+    target_link_libraries(${elf} ${cc26xx_driverlib})
     target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
     set_target_properties(${elf} PROPERTIES
         OUTPUT_NAME ${name}
@@ -50,8 +51,8 @@ endfunction()
 add_xjt_application(xjtl-test ${board_dir}/xjtl_test.c ${cc26xx_dir}/timer.c)
 
 # Radio bring-up: a shell on the bay link driving the RF core
-add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c ${cc26xx_dir}/radio.c
-    syscalls.c)
+add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c
+    ${cc26xx_radio_sources} syscalls.c)
 
 # EEPROM pin probe
 add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${cc26xx_dir}/timer.c

@@ -5,6 +5,7 @@
 #include <driverlib/osc.h>
 #include <driverlib/prcm.h>
 #include "board.h"
+#include "cc26xx_compat.h"
 
 #define POWER_DOMAINS (PRCM_DOMAIN_PERIPH | PRCM_DOMAIN_SERIAL)
 
@@ -19,14 +20,8 @@ void board_init()
 
   // Power ON periph and serial
   PRCMPowerDomainOn(POWER_DOMAINS);
-#if defined(MCU_CC26X0)
-  // CC26x0 driverlib: no PRCMPowerDomainsAllOn()
-  while (PRCMPowerDomainStatus(POWER_DOMAINS) != PRCM_DOMAIN_POWER_ON) {
-  }
-#else
   while (PRCMPowerDomainsAllOn(POWER_DOMAINS) != PRCM_DOMAIN_POWER_ON) {
   }
-#endif
 
   PRCMPeripheralRunEnable(PRCM_PERIPH_GPIO);
   PRCMLoadSet();
