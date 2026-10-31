@@ -12,32 +12,43 @@ set(src_include_dirs
 )
 
 # The MULTI-Module core, the same on every board; mpm_port.c and the EEPROM
-# are the board's (mpm/mpm_port.h, eeprom.h)
+# are the board's (mpm/mpm_port.h, eeprom.h). mpm/multi: what the protocol
+# files of the MULTI-Module expect around them (Multiprotocol.ino's globals,
+# telemetry, mpm_config.h for _Config.h) and the RF chips they drive,
+# emulated on the radio (mpm_chip_sources)
+set(mpm_dir ${CMAKE_CURRENT_SOURCE_DIR}/mpm)
 set(mpm_sources
     mpm/mpm.c
     mpm/mpm_frame.c
     mpm/mpm_settings.c
     mpm/protocols.c
     mpm/proto_test.c
-    mpm/upstream/mpm_compat.c
-    mpm/upstream/xn297.c
-    mpm/upstream/Bayang_nrf24l01.c
-    mpm/upstream/nrf24l01.c
-    mpm/upstream/V2X2_nrf24l01.c
-    mpm/upstream/XK_ccnrf.c
-    mpm/upstream/cc2500.c
-    mpm/upstream/frsky.c
-    mpm/upstream/a7105.c
-    mpm/upstream/FlySky_a7105.c
-    mpm/upstream/AFHDS2A_a7105.c
-    mpm/upstream/cyrf6936.c
-    mpm/upstream/dsm_all.c
-    mpm/upstream/telemetry.c
+    mpm/multi/mpm_compat.c
+    mpm/multi/telemetry.c
+)
+set(mpm_chip_sources
+    mpm/multi/nrf24l01.c
+    mpm/multi/xn297.c
+    mpm/multi/cc2500.c
+    mpm/multi/a7105.c
+    mpm/multi/cyrf6936.c
 )
 
-# What a target with the MULTI-Module core needs: its version (the module
-# reports it to the radio), the FrSky frequency plan
-function(target_mpm_definitions target)
+# The protocol files, target_mpm_protocols(<target>): in the MULTI-Module
+# repo Multiprotocol/*.ino themselves (mpm/sketch), in mpm-v2 their C copies
+# (mpm/upstream). The rest of src/ is the same in both
+if (EXISTS ${mpm_dir}/sketch)
+    include(mpm/sketch/protocols.cmake)
+else()
+    include(mpm/upstream/protocols.cmake)
+endif()
+
+# A target with the MULTI-Module core (mpm_sources, mpm_chip_sources): the
+# protocol files, the version (the module reports it to the radio), the
+# FrSky frequency plan
+function(target_mpm target)
+    target_include_directories(${target} PRIVATE ${mpm_dir}/multi)
+    target_mpm_protocols(${target})
     target_compile_definitions(${target} PRIVATE
         MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
     if (FRSKY_CC26XX_PLAN)

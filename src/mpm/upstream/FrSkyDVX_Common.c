@@ -35,7 +35,7 @@ static uint16_t __attribute__((unused)) FrSkyX_CRCTable(uint8_t val)
 	val /= 16 ;
 	return word ^ (0x1081 * val) ;
 }
-uint16_t frskyx_crc(uint8_t *data, uint8_t len, uint16_t init)  // mpm-v2: FrSkyX_crc() in mpm_compat.h (default argument)
+uint16_t FrSkyX_crc(uint8_t *data, uint8_t len, uint16_t init)  // mpm-v2: init=0 by FrSkyX_crc() in mpm_compat.h
 {
 	uint16_t crc = init;
 	for(uint8_t i=0; i < len; i++)

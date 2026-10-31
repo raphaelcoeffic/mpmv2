@@ -19,7 +19,7 @@
 // and RXOFF_MODE other than IDLE / staying in RX, OOK, Manchester, wake on
 // radio, the GDO pins. Calibration strobes do nothing (the RF core calibrates
 // at each tune), FSCAL1 reads back what was written
-#include "iface_cc2500.h"
+#include "chips.h"
 
 #include "board.h"
 #include "frame.h"

@@ -11,11 +11,11 @@
 // The DSM bind details in the log (DSM_cyrf6936: bind started, the
 // receiver's response or its timeout, clone ID): a few lines a bind
 #define DEBUG_BIND 1
-// FrSky's frequency plans (FrSkyDVX_Common.c): the CC26xx radios sit at
+// FrSky's frequency plans (FrSkyDVX_common.ino): the CC26xx radios sit at
 // the nominal frequency. X and X2 on FrSky's CC26xx plan with
 // FRSKY_CC26XX_PLAN (CMake option, on by default); D and V, and X / X2
 // without it, 25 FSCTRL0 steps (40 kHz) lower, where stock FrSky CC2500 gear
-// listens (X8R, S8R, V8R4-II: docs/frsky-frequency.md)
+// listens (X8R, S8R, V8R4-II: docs/frsky-frequency.md of mpm-v2)
 #define FRSKY_FSCTRL0_OFFSET -25
 
 #if defined(MPM_REDUCED)

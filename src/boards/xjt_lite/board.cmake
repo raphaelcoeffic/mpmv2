@@ -9,7 +9,7 @@ set(XJT_OPENOCD openocd CACHE STRING "OpenOCD with J-Link cJTAG support")
 
 set(cc26xx_chip cc26x0)
 include(platforms/cc26xx/platform.cmake)
-# The reduced MPM: its protocols (mpm/upstream/mpm_config.h, xjt_mpm_sources)
+# The reduced MPM: its protocols (mpm/multi/mpm_config.h, xjt_chip_sources)
 list(APPEND board_definitions MPM_REDUCED)
 
 # Target <name>: <name>.elf and <name>.bin in the build directory, with
@@ -58,18 +58,10 @@ add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c
 add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${cc26xx_dir}/timer.c
     core/log.c core/syscalls.c)
 
-# The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h), without
+# The MPM port: FrSky D and X, V2x2, XK (mpm/multi/mpm_config.h), without
 # the A7105 and CYRF6936 emulations (RAM)
-set(xjt_mpm_sources ${mpm_sources})
-list(REMOVE_ITEM xjt_mpm_sources
-    mpm/upstream/Bayang_nrf24l01.c
-    mpm/upstream/a7105.c
-    mpm/upstream/FlySky_a7105.c
-    mpm/upstream/AFHDS2A_a7105.c
-    mpm/upstream/cyrf6936.c
-    mpm/upstream/dsm_all.c
-)
-# The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h)
+set(xjt_chip_sources ${mpm_chip_sources})
+list(REMOVE_ITEM xjt_chip_sources mpm/multi/a7105.c mpm/multi/cyrf6936.c)
 add_xjt_application(firmware
     core/main_mpm.c
     ${board_dir}/eeprom.c
@@ -78,6 +70,7 @@ add_xjt_application(firmware
     core/frame.c
     core/log.c
     core/syscalls.c
-    ${xjt_mpm_sources}
+    ${mpm_sources}
+    ${xjt_chip_sources}
 )
-target_mpm_definitions(firmware_elf)
+target_mpm(firmware_elf)

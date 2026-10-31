@@ -1,9 +1,10 @@
 #pragma once
 
 // What the MULTI-Module protocol files expect from Multiprotocol.ino,
-// Multiprotocol.h, TX_Def.h and Convert.ino (DIY-Multiprotocol-TX-Module
-// v1.3.4.74, GPL v3), on top of the mpm core: the protocol files compile with
-// an include added and few changes. Names of the MPM, so no prefixes here
+// Multiprotocol.h and TX_Def.h, on top of the mpm core: for the protocol
+// files (Multiprotocol/*.ino as one C++ unit, mpm/sketch in the MULTI-Module
+// repo; their C copies, mpm/upstream in mpm-v2) and the C files here. Names
+// of the MPM, so no prefixes here
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -294,7 +295,7 @@ void TelemetryUpdate();
 extern uint8_t FrSkyX_TX_Seq, FrSkyX_TX_IN_Seq, FrSkyX_RX_Seq;
 
 //
-// Convert.ino, Multiprotocol.ino helpers
+// Convert.ino (with the protocol files), Multiprotocol.ino helpers (mpm_compat.c)
 //
 void reverse_channel(uint8_t num);
 uint16_t convert_channel_ppm(uint8_t num);
@@ -310,15 +311,12 @@ void convert_channel_HK310(uint8_t num, uint8_t* low, uint8_t* high);
 void convert_failsafe_HK310(uint8_t num, uint8_t* low, uint8_t* high);
 uint16_t convert_channel_frsky(uint8_t num);
 
-uint16_t FrSkyX_scaleForPXX_n(uint8_t i, uint8_t num_chan);
-uint16_t FrSkyX_scaleForPXX_FS_n(uint8_t i, uint8_t num_chan);
-// Default arguments of the C++ originals
-#define FrSkyX_scaleForPXX(...) _FRSKY_DEF8(FrSkyX_scaleForPXX_n, __VA_ARGS__, 8, 0)
-#define FrSkyX_scaleForPXX_FS(...) _FRSKY_DEF8(FrSkyX_scaleForPXX_FS_n, __VA_ARGS__, 8, 0)
-#define _FRSKY_DEF8(f, a, b, ...) f(a, b)
-uint16_t frskyx_crc(uint8_t* data, uint8_t len, uint16_t init);
+// FrSkyDVX_common.ino, for telemetry.c: init is a default argument in C++
+#ifndef __cplusplus
+uint16_t FrSkyX_crc(uint8_t* data, uint8_t len, uint16_t init);
 #define FrSkyX_crc(...) _FRSKYX_CRC(__VA_ARGS__, 0, 0)
-#define _FRSKYX_CRC(d, l, i, ...) frskyx_crc(d, l, i)
+#define _FRSKYX_CRC(d, l, i, ...) FrSkyX_crc(d, l, i)
+#endif
 
 // EEPROM (Multiprotocol.h layout): eeprom.c, in the file system
 typedef uint16_t EE_ADDR;

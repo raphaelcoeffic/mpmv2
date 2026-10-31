@@ -14,7 +14,7 @@
 #include "debug.h"
 #include "mpm/mpm.h"
 #include "timer.h"
-#include "mpm/upstream/mpm_compat.h"
+#include "mpm/multi/mpm_compat.h"
 
 #define CHIP_SIZE 256
 #define PAGE_SIZE 16

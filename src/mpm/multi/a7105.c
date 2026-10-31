@@ -8,7 +8,7 @@
 // Not emulated: whitening (WHTS), segment FIFOs, the A7105 deviation
 // (always 250 kHz: the A7105 receives it best, see the bench presets),
 // calibration (done at once, VCO_SBCAL_I reads back what was written)
-#include "iface_a7105.h"
+#include "chips.h"
 
 #include "board.h"
 #include "frame.h"

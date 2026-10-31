@@ -19,7 +19,7 @@
 #include "board.h"
 #include "eeprom.h"
 #include "timer.h"
-#include "mpm/upstream/mpm_compat.h"
+#include "mpm/multi/mpm_compat.h"
 
 #define BAUDRATE 100000
 

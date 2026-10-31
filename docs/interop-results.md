@@ -788,7 +788,7 @@ output). October 2026, before `BOARD_FRSKY_FREQ_STEPS`:
   G-RX8) hops 30 kHz below the CC2500 plan at channel 0, with a 300 kHz
   spacing ([frsky-frequency.md](frsky-frequency.md)). FrSky X and X2 now
   use that plan (`FRSKY_CC26XX_PLAN`); FrSky D and V stay 25 steps below the
-  CC2500 plan (`FRSKY_FSCTRL0_OFFSET`, `mpm/upstream/mpm_config.h`), as X
+  CC2500 plan (`FRSKY_FSCTRL0_OFFSET`, `mpm/multi/mpm_config.h`), as X
   and X2 did until then. The XJT-Lite's value comes from the report above,
   not from a sweep here.
   Check on the V8R4-II in V8: -50 .. +38, middle -6.

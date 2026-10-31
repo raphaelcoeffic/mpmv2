@@ -77,7 +77,7 @@ and FSCTRL0 hold:
 - **FrSky D and V:** always the CC2500 plan, 25 steps lower. Neither the
   XJT-Lite nor the G-RX8 implements them, so there is no FrSky CC26xx plan to
   copy; the −25 was measured on the V8R4-II.
-- **The −25** is `FRSKY_FSCTRL0_OFFSET` (`src/mpm/upstream/mpm_config.h`),
+- **The −25** is `FRSKY_FSCTRL0_OFFSET` (`src/mpm/multi/mpm_config.h`),
   added to the option by `FrSky_fsctrl0()` (clamped to ±127) at init and by
   `FrSky_SetFreqOffset()` after an option change. All the CC26xx boards sit
   at the nominal frequency, so it's one value for all of them. FrSky L is left

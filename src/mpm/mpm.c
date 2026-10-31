@@ -156,7 +156,7 @@ static uint16_t _proto_list_callback()
   return 1000;
 }
 
-// Protocol layer hook (upstream/telemetry.c): the protocol's telemetry
+// Protocol layer hook (multi/telemetry.c): the protocol's telemetry
 __attribute__((weak)) void mpm_protocol_telemetry() {}
 
 // As TelemetryUpdate(): the status first, else the protocol's telemetry
@@ -172,15 +172,15 @@ static void _update_telem(uint32_t ms)
   if (_callback && mpm.protocol != MPM_PROTO_LIST) mpm_protocol_telemetry();
 }
 
-// Protocol layer hook (upstream/mpm_compat.c): the protocol data of a radio
+// Protocol layer hook (multi/mpm_compat.c): the protocol data of a radio
 // frame (mpm.data: S.Port for the receiver, bind options...)
 __attribute__((weak)) void mpm_protocol_frame_data() {}
 
-// Protocol layer hook (upstream/mpm_compat.c): what the MPM's protocol_init()
+// Protocol layer hook (multi/mpm_compat.c): what the MPM's protocol_init()
 // resets before a protocol starts
 __attribute__((weak)) void mpm_protocol_prepare() {}
 
-// Protocol layer hook (upstream/mpm_compat.c): the RF chips' work between
+// Protocol layer hook (multi/mpm_compat.c): the RF chips' work between
 // callbacks, what the chips do by themselves (a packet received)
 __attribute__((weak)) void mpm_protocol_idle() {}
 

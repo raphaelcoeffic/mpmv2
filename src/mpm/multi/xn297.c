@@ -3,7 +3,7 @@
 // receives the XN297 frames that frame.c builds. As the NRF24L01: TX starts
 // with XN297_WritePayload() in TX mode, RX runs from XN297_SetTxRxMode(RX_EN)
 // until the next mode change, a packet is kept until read
-#include "iface_xn297.h"
+#include "xn297.h"
 
 #include "board.h"
 #include "frame.h"

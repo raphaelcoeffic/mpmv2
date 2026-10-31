@@ -12,7 +12,7 @@
 // packet control field is sent and TX_DS set once the packet is out: no ack
 // is received, MAX_RT never set), ack payloads, RX pipes 1 to 5, the 3
 // payload TX FIFO (one payload, sent at once)
-#include "iface_nrf24l01.h"
+#include "chips.h"
 
 #include "board.h"
 #include "frame.h"

@@ -96,9 +96,9 @@ target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 # The MPM port: the radio's link on UART0 (100000 8E2, mpm_port.c), the
 # protocols of the MPM v2 build, the EEPROM in RAM (eeprom.c)
 add_cc27_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c ${board_dir}/eeprom.c
-    ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/frame.c core/log.c ${mpm_sources})
+    ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/frame.c core/log.c ${mpm_sources} ${mpm_chip_sources})
 target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
-target_mpm_definitions(cc27-mpm_elf)
+target_mpm(cc27-mpm_elf)
 # Another module's ID (e.g. 0x2bf3be8e, an MPM v2's): its bound receivers
 set(CC27_MODULE_ID "" CACHE STRING "MPM module ID of the CC27 port (empty: the chip's)")
 if (CC27_MODULE_ID)

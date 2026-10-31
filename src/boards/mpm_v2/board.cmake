@@ -26,6 +26,7 @@ set(firmware_sources
     core/app_header.c
     ${board_dir}/mpm_port.c
     ${mpm_sources}
+    ${mpm_chip_sources}
     core/eeprom.c
     core/file_server.c
     core/frame.c
@@ -78,7 +79,7 @@ function(add_application name file)
     add_executable(${elf} ${firmware_sources} ${ARGN})
     target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
-    target_mpm_definitions(${elf})
+    target_mpm(${elf})
     if (DEBUG)
         target_compile_definitions(${elf} PRIVATE DEBUG)
     endif()

@@ -26,7 +26,7 @@
 // as the Lemon-RX DSMP misses packets 0.5 ms off). So nothing slow at TX GO:
 // the frame_init() results are cached, the synthesizer tuned at the CHANNEL
 // write, the RX only sync threshold does not set up the PHY again.
-#include "iface_cyrf6936.h"
+#include "chips.h"
 
 #ifdef CYRF6936_INSTALLED
 

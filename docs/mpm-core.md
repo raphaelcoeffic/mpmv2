@@ -115,29 +115,44 @@ FrSky hub, S.Port, AFHDS2A and DSM frames only).
 
 ## MPM protocol files
 
-`src/mpm/upstream/`: protocol files of the MPM (v1.3.4.74) compiled as C,
-with one line added (`#include "mpm_compat.h"`) and the few C++isms fixed
-(default arguments: macros, marked `mpm-v2`). The protocols sharing static
-functions are built as one file, as the MPM builds its `.ino` files.
+Two directories. `src/mpm/multi/`: what the MPM's protocol files expect
+around them and the RF chips they drive, emulated on the radio; the same
+files in the MULTI-Module repo, where the protocols are `Multiprotocol/*.ino`
+themselves, built as one C++ file (`src/mpm/sketch`). `src/mpm/upstream/`
+(mpm-v2 only): protocol files of the MPM (v1.3.4.74) compiled as C, with
+one line added (`#include "mpm_compat.h"`) and the few C++isms fixed
+(default arguments: macros, marked `mpm-v2`), with copies of their
+`iface_*.h`. The protocols sharing static functions are built as one file,
+as the MPM builds its `.ino` files. The protocol files come with
+`target_mpm()` (`src/CMakeLists.txt`, from `upstream/protocols.cmake`).
+
+`src/mpm/multi/`:
 
 | File | Content |
 |---|---|
 | `multi_enums.h` | The protocol and sub protocol enums of `Multiprotocol.h`, unchanged |
 | `mpm_config.h` | The protocols built, as `_Config.h` / `Validate.h` |
-| `mpm_compat.h/c` | The globals and helpers of `Multiprotocol.ino`, `Multiprotocol.h`, `TX_Def.h` and `Convert.ino`; the MPM names of the core's state (`Channel_data`, `rx_tx_addr`, `option`, the `IS_*` flags) are macros on `mpm` |
-| `iface_xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames |
+| `mpm_compat.h/c` | The globals and helpers of `Multiprotocol.ino`, `Multiprotocol.h` and `TX_Def.h`; the MPM names of the core's state (`Channel_data`, `rx_tx_addr`, `option`, the `IS_*` flags) are macros on `mpm` |
+| `xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames |
+| `nrf24l01.c` | NRF24L01 emulation (`NRF24l01_SPI.ino`): the registers become `frame.c`'s NRF framing (ShockBurst, or Enhanced ShockBurst with EN_AA / DYNPD) and the RF core PHY (1 Mbps, 2 Mbps, 250 kbps); a payload goes on air when written in TX mode, pipe 0 RX into a 3 payload FIFO. Not emulated: acks and retransmissions (TX_DS once sent, MAX_RT never), ack payloads, pipes 1 to 5 |
+| `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
+| `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
+| `cyrf6936.c` | CYRF6936 emulation (`CYRF6936_SPI.ino`), see below |
+| `telemetry.c` | `Telemetry.ino`, `MULTI_TELEMETRY` part: the core calls `TelemetryUpdate()` when no status frame is due, frames written only with 48 bytes free in the UART buffer |
+
+`src/mpm/upstream/`:
+
+| File | Content |
+|---|---|
+| `chips.h`, `iface_*.h` | The RF chips' registers and functions for the emulations and the protocols (`iface_xn297.h`: `multi/xn297.h`) |
+| `convert.c` | `Convert.ino` |
 | `Bayang_nrf24l01.c` | Bayang |
-| `iface_nrf24l01.h`, `nrf24l01.c` | NRF24L01 emulation (`NRF24l01_SPI.ino`): the registers become `frame.c`'s NRF framing (ShockBurst, or Enhanced ShockBurst with EN_AA / DYNPD) and the RF core PHY (1 Mbps, 2 Mbps, 250 kbps); a payload goes on air when written in TX mode, pipe 0 RX into a 3 payload FIFO. Not emulated: acks and retransmissions (TX_DS once sent, MAX_RT never), ack payloads, pipes 1 to 5 |
 | `V2X2_nrf24l01.c` | V2x2: Std, JXD506, MR101 |
 | `XK_ccnrf.c` | XK (X450, X420, Cars) and MoFly, on the XN297 emulation |
-| `iface_cc2500.h`, `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
 | `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`) |
-| `iface_a7105.h`, `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
 | `FlySky_a7105.c` | FlySky (AFHDS): Std, V9x9, V6x6, V912, CX20 |
 | `AFHDS2A_a7105.c` | AFHDS2A |
-| `iface_cyrf6936.h`, `cyrf6936.c` | CYRF6936 emulation (`CYRF6936_SPI.ino`), see below |
 | `dsm_all.c` | DSM (`DSM.c`, `DSM_cyrf6936.c`; macOS file names are case insensitive: not `dsm.c`) |
-| `telemetry.c` | `Telemetry.ino`, `MULTI_TELEMETRY` part: the core calls `TelemetryUpdate()` when no status frame is due, frames written only with 48 bytes free in the UART buffer |
 
 The protocol table entries follow the MPM's: sub protocol names with their
 length byte first (`STR_SUBTYPE_*`), the callback returns `uint16_t`, an
