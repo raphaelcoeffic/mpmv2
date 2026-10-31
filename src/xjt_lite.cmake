@@ -51,6 +51,17 @@ add_xjt_application(xjtl-radio xjtl_radio.c board.c timer.c radio.c syscalls.c)
 # EEPROM pin probe
 add_xjt_application(xjtl-eeprom xjtl_eeprom.c mpm/eeprom_xjt.c board.c log.c timer.c syscalls.c)
 
+# The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h), without
+# the A7105 and CYRF6936 emulations (RAM)
+set(xjt_mpm_sources ${mpm_sources})
+list(REMOVE_ITEM xjt_mpm_sources
+    mpm/upstream/Bayang_nrf24l01.c
+    mpm/upstream/a7105.c
+    mpm/upstream/FlySky_a7105.c
+    mpm/upstream/AFHDS2A_a7105.c
+    mpm/upstream/cyrf6936.c
+    mpm/upstream/dsm_all.c
+)
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h)
 add_xjt_application(firmware
     main_xjt.c
@@ -62,26 +73,10 @@ add_xjt_application(firmware
     timer.c
     uart.c
     mpm/eeprom_xjt.c
-    mpm/mpm.c
-    mpm/mpm_frame.c
     mpm/mpm_port_xjt.c
-    mpm/mpm_settings.c
-    mpm/protocols.c
-    mpm/proto_test.c
-    mpm/upstream/mpm_compat.c
-    mpm/upstream/xn297.c
-    mpm/upstream/nrf24l01.c
-    mpm/upstream/V2X2_nrf24l01.c
-    mpm/upstream/XK_ccnrf.c
-    mpm/upstream/cc2500.c
-    mpm/upstream/frsky.c
-    mpm/upstream/telemetry.c
+    ${xjt_mpm_sources}
 )
-target_compile_definitions(firmware_elf PRIVATE
-    MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
-if (FRSKY_CC26XX_PLAN)
-    target_compile_definitions(firmware_elf PRIVATE FRSKY_CC26XX_PLAN)
-endif()
+target_mpm_definitions(firmware_elf)
 set_source_files_properties(radio.c frame.c timer.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )

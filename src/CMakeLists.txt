@@ -1,16 +1,8 @@
-
-set(firmware_sources
-    board.c
-    dma.c
-    eeprom.c
-    file_server.c
-    flash_driver.c
-    lfs_driver.c
-    led_rgb.c
-    main.c
+# The MULTI-Module core, the same on every board; mpm_port.c and the EEPROM
+# are the board's (mpm/mpm_port.h, eeprom.h)
+set(mpm_sources
     mpm/mpm.c
     mpm/mpm_frame.c
-    mpm/mpm_port.c
     mpm/mpm_settings.c
     mpm/protocols.c
     mpm/proto_test.c
@@ -28,6 +20,30 @@ set(firmware_sources
     mpm/upstream/cyrf6936.c
     mpm/upstream/dsm_all.c
     mpm/upstream/telemetry.c
+)
+
+# What a target with the MULTI-Module core needs: its version (the module
+# reports it to the radio), the FrSky frequency plan
+function(target_mpm_definitions target)
+    target_compile_definitions(${target} PRIVATE
+        MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
+    if (FRSKY_CC26XX_PLAN)
+        target_compile_definitions(${target} PRIVATE FRSKY_CC26XX_PLAN)
+    endif()
+endfunction()
+
+
+set(firmware_sources
+    board.c
+    dma.c
+    eeprom.c
+    file_server.c
+    flash_driver.c
+    lfs_driver.c
+    led_rgb.c
+    main.c
+    mpm/mpm_port.c
+    ${mpm_sources}
     log.c
     nor_flash.c
     ppm.c
@@ -130,13 +146,10 @@ function(add_application name file)
     set(elf ${name}_elf)
     add_executable(${elf} ${firmware_sources} ${ARGN})
     target_include_directories(${elf} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-    target_compile_definitions(${elf} PRIVATE ${board_definitions}
-        MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
+    target_compile_definitions(${elf} PRIVATE ${board_definitions})
+    target_mpm_definitions(${elf})
     if (DEBUG)
         target_compile_definitions(${elf} PRIVATE DEBUG)
-    endif()
-    if (FRSKY_CC26XX_PLAN)
-        target_compile_definitions(${elf} PRIVATE FRSKY_CC26XX_PLAN)
     endif()
     target_link_libraries(${elf}
         driverlib_cc13x2_cc26x2

@@ -62,19 +62,9 @@ target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 # cc27/mpm_port.c), the protocols of the MPM v2 build
 add_cc27_application(cc27-mpm cc27/main_mpm.c cc27/mpm_port.c cc27/eeprom.c cc27/radio.c
     cc27/timer.c cc27/rf.c cc27/lrf_hal.c cc27/phy_nesb.c cc27/phy_fsk250.c cc27/phy_fsk.c
-    frame.c log.c
-    mpm/mpm.c mpm/mpm_frame.c mpm/mpm_settings.c mpm/protocols.c mpm/proto_test.c
-    mpm/upstream/mpm_compat.c mpm/upstream/xn297.c mpm/upstream/Bayang_nrf24l01.c
-    mpm/upstream/nrf24l01.c mpm/upstream/V2X2_nrf24l01.c mpm/upstream/XK_ccnrf.c
-    mpm/upstream/cc2500.c mpm/upstream/frsky.c mpm/upstream/a7105.c mpm/upstream/FlySky_a7105.c
-    mpm/upstream/AFHDS2A_a7105.c mpm/upstream/cyrf6936.c mpm/upstream/dsm_all.c
-    mpm/upstream/telemetry.c)
+    frame.c log.c ${mpm_sources})
 target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
-target_compile_definitions(cc27-mpm_elf PRIVATE
-    MPM_PORT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MPM_PORT_VERSION_MINOR=${PROJECT_VERSION_MINOR})
-if (FRSKY_CC26XX_PLAN)
-    target_compile_definitions(cc27-mpm_elf PRIVATE FRSKY_CC26XX_PLAN)
-endif()
+target_mpm_definitions(cc27-mpm_elf)
 # Another module's ID (e.g. 0x2bf3be8e, an MPM v2's): its bound receivers
 set(CC27_MODULE_ID "" CACHE STRING "MPM module ID of the CC27 port (empty: the chip's)")
 if (CC27_MODULE_ID)
