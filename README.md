@@ -146,3 +146,8 @@ Options (`-D<option>=<value>`; the build type is Release unless
 
 Core code may use `src/hal` and `src/drivers`, the drivers use `src/hal`, and
 the host tests (`tests/`) build the core and `src/mpm` without a platform.
+
+The MULTI-Module repo (its `platforms` branch) builds the same `src/`
+(but `src/mpm/upstream`), `lib/`, `tools/` and `tests/`, with the
+protocol files `Multiprotocol/*.ino` themselves (its `src/mpm/sketch`):
+`tools/multi_sync.sh <checkout>` copies them there from HEAD.
