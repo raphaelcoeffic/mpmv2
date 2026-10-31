@@ -927,9 +927,19 @@ data packets, data at full power:
 | DSM (CYRF6936, DSMX) | -72 | -36 | 36 | 33 (34) |
 
 Within the 2 to 3 dB the RSSI moves from channel to channel (bind and
-data are on different channels). The CC2755 LaunchPad's steps are TI's
-dBm (not measured, down to -20 dBm: 25 dB), the XJT-Lite's FrSky's table
-(down to 10 dB).
+data are on different channels). The XJT-Lite's steps are FrSky's table
+(down to 10 dB). The CC2755 LaunchPad's MPM sends at the levels of the
+MPM v2 with its +20 dBm PA: full power +18 dBm, the steps TI's dBm (not
+measured), down to -20 dBm (38 dB); its FrSky D bind packets reached the
+MPM v2 bench 32 dB below its data (the data at -14 dBm, where the
+MPM v2's RX starts to compress) and at the 4-in-1's bind level (-46 and
+-45 dBm, from different places).
+
+A Lemon-RX DSMP (DSM Auto, bind plug, `dsm_receiver.py bind`, about
+45 cm) binds at the new levels, 3 times out of 3 from each: the CC2652
+LaunchPad (its CYRF6936 bind level about -29 dBm: no PA) and the CC2755
+LaunchPad (about -16 dBm). 500 bind responses each time, DSMX 11 ms,
+7 channels, then 45 pulses/s at 22 ms.
 
 ## Automatic frequency trim
 

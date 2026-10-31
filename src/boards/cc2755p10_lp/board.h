@@ -29,14 +29,23 @@
 #define BL_RADIO_UART0
 
 // TX power: the CC2652's words, the platform's radio.c takes them as their
-// dBm. +5 dBm as the CC2652 LaunchPad
+// dBm, or a dBm value itself (RF_TX_DBM()). The bench: +5 dBm as the CC2652
+// LaunchPad
 #define RF_TX_POWER_DEFAULT 0x7217
-// The words for each level below it, dB (rf_power_word()): TI's dBm, not
-// measured here, down to its PHYs' lowest, -20 dBm
-#define RF_TX_POWER_STEPS                                                       \
-  {0, 0x7217}, {1, 0x4E63}, {2, 0x385D}, {3, 0x3259}, {4, 0x2856}, {5, 0x2853}, \
-  {8, 0x1893}, {10, 0x12D6}, {11, 0x10D4}, {15, 0x0ACF}, {17, 0x0ACC},          \
-  {20, 0x06CA}, {23, 0x06C8}, {25, 0x04C6}
+#define RF_TX_DBM(dbm) ((uint16_t)(uint8_t)(int8_t)(dbm))
+// The MPM: the CC2755P10's +20 dBm PA, full power at +18 dBm as the MPM v2
+// (docs/interop-results.md, TX power), the levels below it in dB
+// (rf_power_word()) at the PHYs' power table entries (TI's dBm, not
+// measured here): 1 dB steps down to 0 dBm, then 4 dB down to -20 dBm
+#define RF_TX_POWER_STEPS                                                   \
+  {0, RF_TX_DBM(18)}, {1, RF_TX_DBM(17)}, {2, RF_TX_DBM(16)},               \
+  {3, RF_TX_DBM(15)}, {4, RF_TX_DBM(14)}, {5, RF_TX_DBM(13)},               \
+  {6, RF_TX_DBM(12)}, {7, RF_TX_DBM(11)}, {8, RF_TX_DBM(10)},               \
+  {9, RF_TX_DBM(9)}, {10, RF_TX_DBM(8)}, {11, RF_TX_DBM(7)},                \
+  {12, RF_TX_DBM(6)}, {13, RF_TX_DBM(5)}, {14, RF_TX_DBM(4)},               \
+  {15, RF_TX_DBM(3)}, {16, RF_TX_DBM(2)}, {17, RF_TX_DBM(1)},               \
+  {18, RF_TX_DBM(0)}, {22, RF_TX_DBM(-4)}, {26, RF_TX_DBM(-8)},             \
+  {30, RF_TX_DBM(-12)}, {34, RF_TX_DBM(-16)}, {38, RF_TX_DBM(-20)}
 
 void board_led(uint32_t dio, bool on);
 void board_led_toggle(uint32_t dio);

@@ -89,7 +89,8 @@ static const struct {
     {0x2856, 1},   {0x3259, 2},   {0x385D, 3},   {0x4E63, 4},   {0x7217, 5},
 };
 
-// Unknown words: the lowest (the bench's custom words lower the power)
+// Words under 0x100: dBm themselves (int8_t). Unknown words: the lowest (the
+// bench's custom words lower the power)
 static int8_t _dbm(uint16_t word)
 {
   if (word < 0x100) return (int8_t)word;

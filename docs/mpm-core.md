@@ -196,7 +196,8 @@ own full power, measured on air with the 4-in-1's PAs
 emulation (`_power_word()`). `rf_power_word()` (`mpm/multi/mpm_compat.c`)
 turns those dB into the board's RF core word, the closest of
 `RF_TX_POWER_STEPS` (`board.h`): measured on the MPM v2 and the CC2652
-LaunchPad, TI's dBm on the CC2755 LaunchPad, FrSky's table on the XJT-Lite
+LaunchPad, TI's dBm on the CC2755 LaunchPad (its +20 dBm PA: full power
++18 dBm as the MPM v2, down to -20 dBm), FrSky's table on the XJT-Lite
 (down to 10 dB). Below full power:
 
 | Chip | Bind | Range check | Low power | Others |
