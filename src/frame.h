@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "platform.h"
+
 // On-air packet formats of the MULTI-Module 2.4 GHz chips (NRF24L01, XN297,
 // CC2500, A7105, CYRF6936, and the HS6200 / RF2500 chips the CYRF6936
 // emulates in its GFSK mode), emulated on top of the raw radio (preamble + sync
@@ -21,15 +23,11 @@
 #define FRAME_NRF_PAYLOAD_MAX 32  // NRF and XN297
 #define FRAME_FEC_DATA_MAX 64     // CC2500 FEC: payload + CRC + padding, 2 air bytes each
 #define FRAME_HDR_MAX 66  // FrSky L: 6 header bytes, 11 chips per bit
-// Longest frame on air (RADIO_MAX_PKT_LEN): CYRF6936 SDR. CC26x0 (20 KB of
-// RAM): no CYRF6936 frames (FRAME_CYRF), their symbol tables take 2 KB
-#if defined(MCU_CC26X0)
-#define FRAME_CYRF_SUPPORT 0
-#define FRAME_AIR_MAX 255
-#else
-#define FRAME_CYRF_SUPPORT 1
-#define FRAME_AIR_MAX 1100
-#endif
+// Longest frame on air: the radio's longest packet (platform.h), CYRF6936
+// SDR. CYRF6936 frames (FRAME_CYRF) only with packets above 255 bytes (not
+// on the CC2650: 20 KB of RAM, their symbol tables take 2 KB)
+#define FRAME_AIR_MAX RADIO_MAX_PKT_LEN
+#define FRAME_CYRF_SUPPORT (RADIO_MAX_PKT_LEN > 255)
 
 typedef enum {
   FRAME_RAW,    // sync word + payload

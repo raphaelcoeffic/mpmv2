@@ -3,28 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(BOARD_CC2755P10_LP)
-  #include <ti/drivers/dpl/HwiP.h>
-  #define IntMasterDisable() (HwiP_disable() != 0)
-  #define IntMasterEnable() HwiP_restore(0)
-  #define BENCH_DEV "cc2755"
-#else
-  #include <driverlib/gpio.h>
-  #include <driverlib/interrupt.h>
-  #define BENCH_DEV "cc2652"
-#endif
-
 #include "bench.h"
+#include "bench_port.h"
 #include "board.h"
 #include "frame.h"
 #include "radio.h"
 #include "sx1281.h"
 #include "timer.h"
 #include "uart.h"
-
-#if defined(LED_SPI) && defined(LED_DIN)
-  #include "led_rgb.h"
-#endif
 
 // Commands (one per line, numbers in decimal or 0x hex):
 //
@@ -193,51 +179,27 @@ static uint32_t _stat_tx;
 static uint32_t _stat_rx;
 static uint32_t _stat_err;
 
-// RF activity LED: each packet sent or received lights it for LED_HOLD_US,
-// so that a packet stream looks steady and a single packet still shows.
-// MPM v2 RGB LED: TX orange, RX green, RX with a bad CRC red, idle dim blue
-// (as at boot). LaunchPad: TX red, RX green, bad CRC both.
+// RF activity LED (bench_port_led()): each packet sent or received lights it
+// for LED_HOLD_US, so that a packet stream looks steady and a single packet
+// still shows
 #define LED_HOLD_US 20000
 
-typedef enum { LED_IDLE, LED_TX, LED_RX, LED_RX_BAD } led_state_t;
-
-static led_state_t _led_state;
+static bench_led_t _led_state;
 static uint32_t _led_until;
 
-static void _led_show(led_state_t state)
-{
-#if defined(LED_SPI) && defined(LED_DIN)
-  static const uint32_t colors[] = {
-      [LED_IDLE] = LED_COLOR(0x00, 0x00, 0x60),
-      [LED_TX] = LED_COLOR(0x60, 0x20, 0x00),
-      [LED_RX] = LED_COLOR(0x00, 0x60, 0x00),
-      [LED_RX_BAD] = LED_COLOR(0x60, 0x00, 0x00),
-  };
-  led_rgb_set_color(colors[state]);
-#elif defined(LED_GREEN) && defined(LED_RED)
-  GPIO_writeDio(LED_RED, state == LED_TX || state == LED_RX_BAD);
-  GPIO_writeDio(LED_GREEN, state == LED_RX || state == LED_RX_BAD);
-#elif defined(BOARD_LED_RED) && defined(BOARD_LED_GREEN)
-  board_led(BOARD_LED_RED, state == LED_TX || state == LED_RX_BAD);
-  board_led(BOARD_LED_GREEN, state == LED_RX || state == LED_RX_BAD);
-#else
-  (void)state;
-#endif
-}
-
-static void _led_event(led_state_t state)
+static void _led_event(bench_led_t state)
 {
   _led_until = micros() + LED_HOLD_US;
   if (state == _led_state) return;
   _led_state = state;
-  _led_show(state);
+  bench_port_led(state);
 }
 
 static void _led_poll()
 {
-  if (_led_state == LED_IDLE || micros_before(_led_until)) return;
-  _led_state = LED_IDLE;
-  _led_show(LED_IDLE);
+  if (_led_state == BENCH_LED_IDLE || micros_before(_led_until)) return;
+  _led_state = BENCH_LED_IDLE;
+  bench_port_led(BENCH_LED_IDLE);
 }
 
 // Acknowledgments (ESB): same framing as the data, empty or with a payload
@@ -470,7 +432,7 @@ static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
     return false;
   }
   _stat_tx++;
-  _led_event(LED_TX);
+  _led_event(BENCH_LED_TX);
   if (_ack_on) {
     _stat_retries += ack->tries - 1;
     if (ack->acked) _stat_acked++;
@@ -487,7 +449,7 @@ static bool _report_packet(const radio_packet_t* pkt)
   frame_result_t res =
       frame_decode_pcf(&_frame, pkt->data, pkt->len, _rx_len, payload, &len, &pcf);
 
-  _led_event(_frame.crc_len && res != FRAME_OK ? LED_RX_BAD : LED_RX);
+  _led_event(_frame.crc_len && res != FRAME_OK ? BENCH_LED_RX_BAD : BENCH_LED_RX);
   _printf("@rx %lu %d ", pkt->timestamp_us, _channel);
   _print_hex(payload, len);
   if (_frame.crc_len) _printf(" crc=%s", res == FRAME_OK ? "ok" : "bad");
@@ -522,94 +484,35 @@ static bool _rx_start()
 }
 
 //
-// Timing: RF core latencies, from its PA and LNA enable outputs (RFC_GPO1,
-// RFC_GPO0). Their edges are timestamped in the GPIO edge interrupt
-// (get_ticks(), 48 MHz): the CPU may be waiting in a radio call then
+// Timing: RF core latencies, from its PA and LNA enable outputs. Their edges
+// are timestamped in the board's interrupt (bench_port.h, get_ticks(), 48
+// MHz): the CPU may be waiting in a radio call then
 //
 
-#if defined(PA_CTX)
-  #define TIMING_PINS
-  #define TIMING_PA PA_CTX  // the PA/LNA's CTX (board.c), no LNA enable pin
-#elif defined(LED_RED) && defined(LED_GREEN)
-  #define TIMING_PINS
-  #define TIMING_PA LED_RED
-  #define TIMING_LNA LED_GREEN
-#else
-  #define TIMING_PA 0  // none: no edges (timing refused)
-#endif
 #define TIMING_EDGES 16
 #define TIMING_NONE 0  // no edge found
 
 typedef struct {
   uint32_t ticks;
-  uint8_t pin;
+  uint8_t signal;  // BENCH_EDGE_PA, BENCH_EDGE_LNA
   uint8_t level;
 } edge_t;
 
 static volatile edge_t _edges[TIMING_EDGES];
 static volatile uint8_t _n_edges;
 
-#if defined(TIMING_PINS)
-static void _edge_pin(uint32_t pin, uint32_t ticks)
+void bench_edge(uint32_t ticks, uint8_t signal, uint8_t level)
 {
-  if (!GPIO_getEventDio(pin)) return;
-  GPIO_clearEventDio(pin);
-  if (_n_edges < TIMING_EDGES) _edges[_n_edges++] = (edge_t){ticks, pin, GPIO_readDio(pin)};
-}
-
-static void _edge_isr()
-{
-  uint32_t t = get_ticks();
-  _edge_pin(TIMING_PA, t);
-  #if defined(TIMING_LNA)
-  _edge_pin(TIMING_LNA, t);
-  #endif
-}
-#endif
-
-// Edge capture on (the RF core outputs, input buffer and edge interrupt on)
-// or off (the pins as before)
-static bool _timing_pins(bool on)
-{
-#if defined(TIMING_PINS)
-  static bool isr;
-  if (!isr) {
-    isr = true;
-    IntRegister(INT_AON_GPIO_EDGE, _edge_isr);
-  }
-  uint32_t capture = IOC_STD_OUTPUT | IOC_INPUT_ENABLE | IOC_BOTH_EDGES | IOC_INT_ENABLE;
-  if (on) {
-    IOCPortConfigureSet(TIMING_PA, IOC_PORT_RFC_GPO1, capture);
-  #if defined(TIMING_LNA)
-    IOCPortConfigureSet(TIMING_LNA, IOC_PORT_RFC_GPO0, capture);
-  #endif
-    GPIO_clearEventDio(TIMING_PA);
-    IntPendClear(INT_AON_GPIO_EDGE);
-    IntEnable(INT_AON_GPIO_EDGE);
-    return true;
-  }
-  IntDisable(INT_AON_GPIO_EDGE);
-  #if defined(PA_CTX)
-  IOCPortConfigureSet(PA_CTX, IOC_PORT_RFC_GPO1, IOC_STD_OUTPUT);
-  #else
-  IOCPinTypeGpioOutput(LED_RED);
-  IOCPinTypeGpioOutput(LED_GREEN);
-  _led_show(_led_state);
-  #endif
-  return true;
-#else
-  (void)on;
-  return false;
-#endif
+  if (_n_edges < TIMING_EDGES) _edges[_n_edges++] = (edge_t){ticks, signal, level};
 }
 
 static void _edges_clear() { _n_edges = 0; }
 
-// First edge of pin to level at or after ticks, TIMING_NONE if none
-static uint32_t _edge(uint32_t pin, uint8_t level, uint32_t after)
+// First edge of signal to level at or after ticks, TIMING_NONE if none
+static uint32_t _edge(uint8_t signal, uint8_t level, uint32_t after)
 {
   for (uint8_t i = 0; i < _n_edges; i++)
-    if (_edges[i].pin == pin && _edges[i].level == level &&
+    if (_edges[i].signal == signal && _edges[i].level == level &&
         _timer_diff(_edges[i].ticks, after) >= 0)
       return _edges[i].ticks;
   return TIMING_NONE;
@@ -649,8 +552,8 @@ static void _print_edges(const char* name, uint32_t t0)
   _printf("@edges %s", name);
   for (uint8_t i = 0; i < _n_edges; i++) {
     uint32_t t10 = _timer_diff(_edges[i].ticks, t0) * 10 / 48;
-    _printf(" %s%c%lu.%lu", _edges[i].pin == TIMING_PA ? "pa" : "lna", _edges[i].level ? '+' : '-',
-            t10 / 10, t10 % 10);
+    _printf(" %s%c%lu.%lu", _edges[i].signal == BENCH_EDGE_PA ? "pa" : "lna",
+            _edges[i].level ? '+' : '-', t10 / 10, t10 % 10);
   }
   _print("\r\n");
 }
@@ -724,7 +627,7 @@ static bool _need_phy()
 
 static void _print_chip()
 {
-  _printf("chip=%s", _sx ? "sx1281" : BENCH_DEV);
+  _printf("chip=%s", _sx ? "sx1281" : bench_port_dev);
   if (_sx && _phy_ok) {
     const sx1281_mod_t* m = sx1281_mod();
     _printf(" dbm=%d sx_rate=%lu sx_bw=%lu sx_dev=%lu sx_bt=%s", _sx_dbm, m->rate, m->bw, m->dev,
@@ -734,10 +637,10 @@ static void _print_chip()
 
 static void _cmd_info()
 {
-  _printf("@ok bench=1 dev=" BENCH_DEV " phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
+  _printf("@ok bench=1 dev=%s phy=%s rate=%lu dev_hz=%lu rx_bw=%u fsk=%d ch=%d freq=%lu "
           "chplan=%lu/%lu framing=%s esb=%d ack=%d pwr=0x%04x trim=%ld autotrim=%s hposc=%d ",
-          _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk, _channel,
-          _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
+          bench_port_dev, _phy_name, _phy.symbol_rate, _phy.deviation, _phy.rx_bw, _phy.fsk,
+          _channel, _freq_khz, _ch_base_hz, _ch_spacing_hz, _frame_names[_frame.type],
           _frame.type == FRAME_NRF && _frame.esb, _ack_on, _tx_power, _trim_khz,
           _autotrim ? "on" : "off", radio_hposc_offset());
   _print_chip();
@@ -750,8 +653,8 @@ static void _cmd_chip(char* args)
   char* name = _next_arg(&args);
   bool sx = name && !strcmp(name, "sx1281");
   uint32_t dbm = _number_or(&args, SX1281_TX_DBM_DEFAULT);
-  if (!name || (!sx && strcmp(name, "cc2652") && strcmp(name, BENCH_DEV)) || (int32_t)dbm < -18 ||
-      (int32_t)dbm > SX1281_TX_DBM_MAX) {
+  if (!name || (!sx && strcmp(name, "cc2652") && strcmp(name, bench_port_dev)) ||
+      (int32_t)dbm < -18 || (int32_t)dbm > SX1281_TX_DBM_MAX) {
     _printf("@err usage: chip <cc2652|sx1281> [dbm -18..%d]\r\n", SX1281_TX_DBM_MAX);
     return;
   }
@@ -1664,7 +1567,7 @@ static void _cmd_timing(char* args)
   }
   if (!_need_phy()) return;
   _job_stop();
-  if (!_timing_pins(true)) {
+  if (!bench_port_timing(true)) {
     _print("@err timing: no PA enable pin on this board\r\n");
     return;
   }
@@ -1677,7 +1580,7 @@ static void _cmd_timing(char* args)
   uint16_t air_len = frame_tx_data(&_frame, payload, len, buf);
   uint16_t rx_len = frame_rx_len(&_frame, len);
   if (!air_len) {
-    _timing_pins(false);
+    bench_port_timing(false);
     _print("@err timing: payload length not valid for the framing\r\n");
     return;
   }
@@ -1724,8 +1627,8 @@ static void _cmd_timing(char* args)
     radio_tx_wait();
     t2 = get_ticks();
     delay_us(TIMING_SETTLE_US);
-    on = _edge(TIMING_PA, 1, t0);
-    off = on == TIMING_NONE ? TIMING_NONE : _edge(TIMING_PA, 0, on);
+    on = _edge(BENCH_EDGE_PA, 1, t0);
+    off = on == TIMING_NONE ? TIMING_NONE : _edge(BENCH_EDGE_PA, 0, on);
     _tstat_add(&tx_call, t0, t1);
     _tstat_add(&tx_start, t0, on);
     _tstat_add(&tx_pa, on, off);
@@ -1742,7 +1645,7 @@ static void _cmd_timing(char* args)
     radio_tx_start(buf, air_len);
     radio_tx_wait();
     delay_us(TIMING_SETTLE_US);
-    _tstat_add(&hop_tx, t0, _edge(TIMING_PA, 1, t0));
+    _tstat_add(&hop_tx, t0, _edge(BENCH_EDGE_PA, 1, t0));
   }
   radio_set_frequency(f0);
 
@@ -1756,7 +1659,7 @@ static void _cmd_timing(char* args)
     radio_tx_start(buf, air_len);
     radio_tx_wait();
     delay_us(TIMING_SETTLE_US);
-    _tstat_add(&rx_tx, t0, _edge(TIMING_PA, 1, t0));
+    _tstat_add(&rx_tx, t0, _edge(BENCH_EDGE_PA, 1, t0));
   }
 
   // TX at an absolute time (radio_tx_start_at(), 1 ms ahead): the PA enable
@@ -1764,14 +1667,14 @@ static void _cmd_timing(char* args)
   tstat_t tx_at = {"tx_at"};
   for (uint32_t i = 0; i < n; i++) {
     _edges_clear();
-    bool masked = IntMasterDisable();
+    bool masked = bench_port_irq_disable();
     t0 = get_ticks();
     uint32_t at = micros() + 1000;
-    if (!masked) IntMasterEnable();
+    if (!masked) bench_port_irq_enable();
     radio_tx_start_at(buf, air_len, at);
     radio_tx_wait();
     delay_us(TIMING_SETTLE_US);
-    _tstat_add(&tx_at, t0 + us2ticks(1000), _edge(TIMING_PA, 1, t0));
+    _tstat_add(&tx_at, t0 + us2ticks(1000), _edge(BENCH_EDGE_PA, 1, t0));
   }
 
   // Instant RSSI: radio_rx_start() to the first valid radio_rssi(), one call
@@ -1810,60 +1713,58 @@ static void _cmd_timing(char* args)
     delay_us(TIMING_SETTLE_US);
     _tstat_add(&rx_call, t0, t1);
     _tstat_add(&rx_stop, t2, t3);
-#if defined(TIMING_LNA)
-    _tstat_add(&rx_on, t0, _edge(TIMING_LNA, 1, t0));
-    _tstat_add(&rx_off, t2, _edge(TIMING_LNA, 0, t2));
-    if (!i) _print_edges("rx", t0);
-#endif
+    if (bench_port_timing_lna()) {
+      _tstat_add(&rx_on, t0, _edge(BENCH_EDGE_LNA, 1, t0));
+      _tstat_add(&rx_off, t2, _edge(BENCH_EDGE_LNA, 0, t2));
+      if (!i) _print_edges("rx", t0);
+    }
   }
-#if defined(TIMING_LNA)
-  // RX hop: RX running, radio_set_frequency() + radio_rx_start() to RX on
-  radio_rx_start(rx_len);
-  for (uint32_t i = 0; i < n; i++) {
-    delay_us(TIMING_SETTLE_US);
-    _edges_clear();
-    t0 = get_ticks();
-    radio_set_frequency(i & 1 ? f0 : f1);
+  if (bench_port_timing_lna()) {
+    // RX hop: RX running, radio_set_frequency() + radio_rx_start() to RX on
     radio_rx_start(rx_len);
-    delay_us(TIMING_SETTLE_US);
-    _tstat_add(&hop_rx, t0, _edge(TIMING_LNA, 1, t0));
-  }
-  radio_rx_stop();
-  radio_set_frequency(f0);
-
-  // TX then RX, as a protocol would: radio_tx_wait() + radio_rx_start(), from
-  // the end of the PA enable to RX on
-  for (uint32_t i = 0; i < n; i++) {
-    _edges_clear();
-    t0 = get_ticks();
-    radio_tx_start(buf, air_len);
-    radio_tx_wait();
-    radio_rx_start(rx_len);
-    delay_us(TIMING_SETTLE_US);
+    for (uint32_t i = 0; i < n; i++) {
+      delay_us(TIMING_SETTLE_US);
+      _edges_clear();
+      t0 = get_ticks();
+      radio_set_frequency(i & 1 ? f0 : f1);
+      radio_rx_start(rx_len);
+      delay_us(TIMING_SETTLE_US);
+      _tstat_add(&hop_rx, t0, _edge(BENCH_EDGE_LNA, 1, t0));
+    }
     radio_rx_stop();
-    off = _edge(TIMING_PA, 0, t0);
-    _tstat_add(&tx_rx, off, off == TIMING_NONE ? TIMING_NONE : _edge(TIMING_LNA, 1, off));
-    if (!i) _print_edges("tx_rx", t0);
+    radio_set_frequency(f0);
+
+    // TX then RX, as a protocol would: radio_tx_wait() + radio_rx_start(),
+    // from the end of the PA enable to RX on
+    for (uint32_t i = 0; i < n; i++) {
+      _edges_clear();
+      t0 = get_ticks();
+      radio_tx_start(buf, air_len);
+      radio_tx_wait();
+      radio_rx_start(rx_len);
+      delay_us(TIMING_SETTLE_US);
+      radio_rx_stop();
+      off = _edge(BENCH_EDGE_PA, 0, t0);
+      _tstat_add(&tx_rx, off, off == TIMING_NONE ? TIMING_NONE : _edge(BENCH_EDGE_LNA, 1, off));
+      if (!i) _print_edges("tx_rx", t0);
+    }
+
+    // Chained TX -> RX (radio_send_rx(), ESB acks), 200 us window, no answer
+    for (uint32_t i = 0; i < n && air_len <= 255 && rx_len <= 255; i++) {
+      _edges_clear();
+      t0 = get_ticks();
+      radio_send_rx(buf, air_len, sync, rx_len, 200, &pkt);
+      delay_us(TIMING_SETTLE_US);
+      off = _edge(BENCH_EDGE_PA, 0, t0);
+      on = off == TIMING_NONE ? TIMING_NONE : _edge(BENCH_EDGE_LNA, 1, off);
+      _tstat_add(&chain_tx_rx, off, on);
+      _tstat_add(&chain_window, on,
+                 on == TIMING_NONE ? TIMING_NONE : _edge(BENCH_EDGE_LNA, 0, on));
+      if (!i) _print_edges("chain", t0);
+    }
   }
 
-  // Chained TX -> RX (radio_send_rx(), ESB acks), 200 us window, no answer
-  for (uint32_t i = 0; i < n && air_len <= 255 && rx_len <= 255; i++) {
-    _edges_clear();
-    t0 = get_ticks();
-    radio_send_rx(buf, air_len, sync, rx_len, 200, &pkt);
-    delay_us(TIMING_SETTLE_US);
-    off = _edge(TIMING_PA, 0, t0);
-    on = off == TIMING_NONE ? TIMING_NONE : _edge(TIMING_LNA, 1, off);
-    _tstat_add(&chain_tx_rx, off, on);
-    _tstat_add(&chain_window, on, on == TIMING_NONE ? TIMING_NONE : _edge(TIMING_LNA, 0, on));
-    if (!i) _print_edges("chain", t0);
-  }
-#else
-  (void)sync;
-  (void)pkt;
-#endif
-
-  _timing_pins(false);
+  bench_port_timing(false);
   const tstat_t* all[] = {&init,    &fs,          &fs_same,      &tx_call,    &tx_start,
                           &tx_pa,   &tx_end,      &hop_tx,       &rx_tx,      &tx_at,
                           &rx_call, &rx_stop,     &rx_on,        &rx_off,     &hop_rx,

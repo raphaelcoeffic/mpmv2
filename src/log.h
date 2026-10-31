@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "platform.h"
+
 // Debug log, for users without a debugger: debug() / debugln() (debug.h)
 // and the MPM's own debug lines into a ring of LOG_SIZE bytes, each line
 // starting with the time ("  12.345 ", s and ms), read out by the board
@@ -13,11 +15,7 @@
 // out of the busy paths), sent from power up with debug.txt ("usb = on",
 // settings.c) or while a host asks for it, from the oldest line kept: the
 // lines before a problem too. From the main loop only, not from interrupts.
-#if defined(MCU_CC26X0)
-#define LOG_SIZE 1024  // power of 2; 20 KB of RAM
-#else
-#define LOG_SIZE 4096  // power of 2
-#endif
+// LOG_SIZE: the platform's (platform.h), 4 KB, 1 KB on the CC2650
 
 #define LOG_FILE 0x01  // debug.txt
 #define LOG_HOST 0x02  // a host's request

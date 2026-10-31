@@ -18,9 +18,9 @@
 // listens (X8R, S8R, V8R4-II: docs/frsky-frequency.md)
 #define FRSKY_FSCTRL0_OFFSET -25
 
-#if defined(MCU_CC26X0)
-// FrSky XJT-Lite (CC2650, 20 KB of RAM): FrSky D and X, and the WLtoys
-// cars' V2x2 and XK
+#if defined(MPM_REDUCED)
+// The reduced MPM (the XJT-Lite's board.cmake; CC2650, 20 KB of RAM): FrSky
+// D and X, and the WLtoys cars' V2x2 and XK
 #define NRF24L01_INSTALLED
 #define NRF24L01_ENABLE_LOW_POWER
 #define V2X2_NRF24L01_INO

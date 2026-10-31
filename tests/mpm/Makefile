@@ -12,8 +12,8 @@ CORE := $(SRC)/mpm/mpm.c $(SRC)/mpm/mpm_frame.c $(SRC)/mpm/mpm_settings.c $(SRC)
 all: $(TESTS:%=$(BUILD)/%)
 	@fail=0; for t in $^; do echo "== $$t"; ./$$t > $$t.log 2>&1 || { cat $$t.log; fail=1; }; tail -1 $$t.log; done; exit $$fail
 
-$(BUILD)/%: %.c $(CORE) $(wildcard $(SRC)/mpm/*.h) | $(BUILD)
-	$(CC) $(CFLAGS) $(DEFS) -I$(SRC) -o $@ $< $(CORE)
+$(BUILD)/%: %.c $(CORE) $(wildcard $(SRC)/mpm/*.h) ../platform.h | $(BUILD)
+	$(CC) $(CFLAGS) $(DEFS) -I$(SRC) -I.. -o $@ $< $(CORE)
 
 $(BUILD):
 	mkdir -p $@

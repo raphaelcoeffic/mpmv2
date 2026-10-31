@@ -13,8 +13,8 @@ CODE := $(SRC)/lfs_driver.c $(SRC)/eeprom.c $(SRC)/file_server.c $(SRC)/settings
 all: $(TESTS:%=$(BUILD)/%)
 	@fail=0; for t in $^; do echo "== $$t"; ./$$t > $$t.log 2>&1 || { cat $$t.log; fail=1; }; tail -1 $$t.log; done; exit $$fail
 
-$(BUILD)/%: %.c $(CODE) $(wildcard $(SRC)/*.h) | $(BUILD)
-	$(CC) $(CFLAGS) $(DEFS) -I$(SRC) -I$(LFS) -o $@ $< $(CODE)
+$(BUILD)/%: %.c $(CODE) $(wildcard $(SRC)/*.h) ../platform.h | $(BUILD)
+	$(CC) $(CFLAGS) $(DEFS) -I$(SRC) -I.. -I$(LFS) -o $@ $< $(CODE)
 
 $(BUILD):
 	mkdir -p $@

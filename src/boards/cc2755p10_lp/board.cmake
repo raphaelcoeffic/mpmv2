@@ -57,8 +57,8 @@ target_link_libraries(cc27-radio_elf lrf_cc27xxx10)
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)
-add_cc27_application(cc27-bench ${board_dir}/main.c bench.c frame.c sx1281.c
-    ${cc27xx_hal_sources} ${cc27xx_rf_sources})
+add_cc27_application(cc27-bench ${board_dir}/main.c bench.c ${board_dir}/bench_port.c frame.c
+    sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
 target_compile_definitions(cc27-bench_elf PRIVATE BENCH)
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 

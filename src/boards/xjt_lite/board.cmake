@@ -8,7 +8,8 @@ message("## Target is FrSky XJT-Lite (CC2650F128): reduced MPM")
 set(XJT_OPENOCD openocd CACHE STRING "OpenOCD with J-Link cJTAG support")
 
 include(platforms/cc26xx/platform.cmake)
-list(APPEND board_definitions MCU_CC26X0)
+# The reduced MPM: its protocols (mpm/upstream/mpm_config.h, xjt_mpm_sources)
+list(APPEND board_definitions MCU_CC26X0 MPM_REDUCED)
 
 # Target <name>: <name>.elf and <name>.bin in the build directory, with
 # board_init(). flash-<name>: the application only, at 0x8000

@@ -3,18 +3,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "platform.h"
+
 // Raw 2-GFSK / 2-FSK packet radio on top of the RF core proprietary mode:
 // preamble + sync word + fixed length payload, no HW CRC and no whitening.
 // Protocol framing (address bytes, CRC, scrambling) is left to the caller.
 
-// Packets of up to 255 bytes use the basic RF core commands, longer ones the
-// advanced ones (CYRF6936 SDR emulation: 1 KB for 16 bytes). CC26x0 (20 KB of
-// RAM): no CYRF6936 emulation, 255 bytes
-#if defined(MCU_CC26X0)
-#define RADIO_MAX_PKT_LEN 255
-#else
-#define RADIO_MAX_PKT_LEN 1100
-#endif
+// Longest packet, RADIO_MAX_PKT_LEN: the platform's (platform.h), 1100
+// bytes (CYRF6936 SDR emulation: 1 KB for 16 bytes), 255 on the CC2650
 
 typedef struct {
   uint32_t symbol_rate;   // bps

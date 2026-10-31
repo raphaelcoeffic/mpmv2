@@ -144,5 +144,5 @@ endfunction()
 add_application(firmware mpm-v2)
 
 # Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
-add_application(bench mpm-v2-bench bench.c sx1281.c)
+add_application(bench mpm-v2-bench bench.c ${board_dir}/bench_port.c sx1281.c)
 target_compile_definitions(bench_elf PRIVATE BENCH)
