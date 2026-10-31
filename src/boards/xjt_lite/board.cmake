@@ -74,3 +74,8 @@ add_xjt_application(firmware
     ${xjt_chip_sources}
 )
 target_mpm(firmware_elf)
+
+# cmake --build <dir> --target flash: the MPM port, with the patched OpenOCD
+mpm_flash_method(flash_method debugger)
+add_custom_target(flash)
+add_dependencies(flash flash-firmware)

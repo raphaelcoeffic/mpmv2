@@ -23,9 +23,8 @@ and the inspiration.
 ## Trying it
 
 What it takes: the MPM v2 board, a USB-C cable, and Python 3.10 or later
-with [uv](https://docs.astral.sh/uv/) (the tools declare their packages,
-`uv run` installs them; without uv: `pip install pyserial` and
-`python3 tools/<script>`). No debugger needed. Linux and macOS see the
+(pyserial comes with the tools, `lib/pyserial`; `uv run tools/<script>`
+works too). No debugger needed. Linux and macOS see the
 board's CH343 as a standard USB serial port; on Windows, if no COM port
 appears, install WCH's CH343 driver.
 
@@ -39,7 +38,7 @@ The firmware files (from a release, or [built](#building) in `build/`):
 ### First install, over USB-C
 
 ```bash
-uv run tools/rom_flash.py mpm-v2-full.bin
+python3 tools/rom_flash.py mpm-v2-full.bin
 ```
 
 `rom_flash.py` opens the CC2652's ROM boot loader through the CH343 (a blank
@@ -57,8 +56,8 @@ too, through a debugger or the ROM boot loader (not tried).
 ### Is it running?
 
 ```bash
-uv run tools/mpm_fs.py log -t 2      # the module's debug log since power up
-uv run tools/mpm_fs.py info          # its file system (the external flash)
+python3 tools/mpm_fs.py log -t 2      # the module's debug log since power up
+python3 tools/mpm_fs.py info          # its file system (the external flash)
 ```
 
 The log starts with `## Boot completed ##`, the file system and the
@@ -68,7 +67,7 @@ they come. What the module does, its settings files (`ppm.txt`,
 
 ### Updates
 
-- **Over USB-C:** `uv run tools/stk500_flash.py mpm-v2.bin --verify`
+- **Over USB-C:** `python3 tools/stk500_flash.py mpm-v2.bin --verify`
   (about 30 s; through the MPM v2 boot loader, as a radio does it), or
   `rom_flash.py mpm-v2-full.bin` again (faster, the same result).
 - **From the radio** ("Flash External Multi" with `mpm-v2.bin`): needs an
@@ -77,7 +76,7 @@ they come. What the module does, its settings files (`ppm.txt`,
   (EdgeTX 2.12 with the MPM v2 files and the pass-through below). Tested on
   a TX15: see [docs/update.md](docs/update.md#tested-on-a-radio).
 - **Through the radio's USB** (the same EdgeTX branch, CLI on the radio's
-  USB serial): `uv run tools/stk500_flash.py mpm-v2.bin --port <radio port>
+  USB serial): `python3 tools/stk500_flash.py mpm-v2.bin --port <radio port>
   --radio --verify`, the radio passing the bytes to the external bay.
 
 ## Building
@@ -96,6 +95,7 @@ cmake -S . -B build -G Ninja      # MPM v2 board
 ninja -C build                    # boot loader, firmware and bench
 ninja -C build flash-firmware     # J-Link on J10: boot loader and MPM firmware
 ninja -C build flash-bench        # J-Link on J10: boot loader and radio bench
+ninja -C build flash              # MPM firmware by MULTI_FLASH_METHOD (MPM v2: USB-C)
 ```
 
 | Target | Files (in the build directory) |
@@ -129,6 +129,8 @@ Options (`-D<option>=<value>`; the build type is Release unless
 | `DEBUG` | Debug output via Segger RTT as well (the USB log is always there). | OFF |
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
 | `FRSKY_CC26XX_PLAN` | FrSky X/X2 on FrSky's own CC26xx frequency plan (30 kHz below the CC2500 plan, 300 kHz spacing); OFF: the CC2500 plan 25 steps lower, as FrSky D/V ([docs/frsky-frequency.md](docs/frsky-frequency.md)). | ON |
+| `MULTI_FLASH_METHOD` | `flash` target: `usb` (MPM v2 boot loader over USB-C, `mpm-v2.bin`), `usb-rom` (ROM boot loader over USB-C, `mpm-v2-full.bin`), `radio` (through the radio's USB, EdgeTX pass-through), `debugger` (`flash-firmware`); the other boards: `debugger` only. | the board's first |
+| `MULTI_FLASH_PORT` | Serial port for `flash`: the MPM v2's USB-C (empty: the first CH343, or `$V2_PORT`), the radio's for `radio`. | |
 | `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |
 
 ## Source tree

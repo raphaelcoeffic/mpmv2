@@ -56,6 +56,25 @@ function(target_mpm target)
     endif()
 endfunction()
 
+# cmake --build <dir> --target flash: the board's MPM firmware, by
+# MULTI_FLASH_METHOD (the board's methods, board.cmake; empty: its first).
+# mpm_flash_method(<var> <methods>...): the method, checked
+set(MULTI_FLASH_METHOD "" CACHE STRING
+  "Flash method: usb, usb-rom, radio, debugger (empty: the board's first)")
+set(MULTI_FLASH_PORT "" CACHE STRING
+  "Serial port: the MPM v2's USB-C (empty: the first CH343, or V2_PORT in the environment), the radio's for radio")
+function(mpm_flash_method var)
+    if (MULTI_FLASH_METHOD)
+        set(method ${MULTI_FLASH_METHOD})
+    else()
+        list(GET ARGN 0 method)
+    endif()
+    if (NOT method IN_LIST ARGN)
+        message(FATAL_ERROR "MULTI_FLASH_METHOD=${method}: one of ${ARGN} for ${BOARD}")
+    endif()
+    set(${var} ${method} PARENT_SCOPE)
+endfunction()
+
 # Release builds are -Os; the code on the radio's time-critical paths gets
 # -O2: RF core commands and interrupts, the frame encoders and decoders
 # (CYRF6936 sync search, DSM telemetry decoded between callbacks), the

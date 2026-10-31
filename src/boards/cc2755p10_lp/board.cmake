@@ -104,3 +104,8 @@ set(CC27_MODULE_ID "" CACHE STRING "MPM module ID of the CC27 port (empty: the c
 if (CC27_MODULE_ID)
     target_compile_definitions(cc27-mpm_elf PRIVATE MPM_MODULE_ID=${CC27_MODULE_ID})
 endif()
+
+# cmake --build <dir> --target flash: the MPM port, through the XDS110
+mpm_flash_method(flash_method debugger)
+add_custom_target(flash)
+add_dependencies(flash flash-cc27-mpm)

@@ -148,3 +148,40 @@ add_application(firmware mpm-v2 core/main_mpm.c)
 # Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
 add_application(bench mpm-v2-bench core/main_bench.c core/bench.c ${board_dir}/bench_port.c
     drivers/sx1281.c)
+
+# cmake --build <dir> --target flash: the MPM firmware.
+#   usb       MPM v2: through its USB-C port and the MPM v2 boot loader, as
+#             the radio flashes it (tools/stk500_flash.py, mpm-v2.bin)
+#   usb-rom   MPM v2: through its USB-C port and the chip's ROM boot loader,
+#             boot loader and firmware (tools/rom_flash.py, mpm-v2-full.bin):
+#             the first install, or a module that no longer starts
+#   radio     MPM v2 in the radio's bay, through the radio's USB (EdgeTX
+#             with the external module pass-through, its CLI on
+#             MULTI_FLASH_PORT)
+#   debugger  flash-firmware: MPM v2 with a J-Link, LaunchPad with its XDS110
+if (BOARD STREQUAL "MPM_V2")
+    mpm_flash_method(flash_method usb usb-rom radio debugger)
+else()
+    mpm_flash_method(flash_method debugger)
+endif()
+if (flash_method STREQUAL "debugger")
+    add_custom_target(flash)
+    add_dependencies(flash flash-firmware)
+elseif (Python3_Interpreter_FOUND)
+    if (MULTI_FLASH_PORT)
+        set(port --port ${MULTI_FLASH_PORT})
+    endif()
+    if (flash_method STREQUAL "usb-rom")
+        set(flash_cmd ${CMAKE_SOURCE_DIR}/tools/rom_flash.py ${CMAKE_BINARY_DIR}/mpm-v2-full.bin ${port})
+    elseif (flash_method STREQUAL "radio")
+        set(flash_cmd ${CMAKE_SOURCE_DIR}/tools/stk500_flash.py ${CMAKE_BINARY_DIR}/mpm-v2.bin ${port} --radio)
+    else()
+        set(flash_cmd ${CMAKE_SOURCE_DIR}/tools/stk500_flash.py ${CMAKE_BINARY_DIR}/mpm-v2.bin ${port})
+    endif()
+    add_custom_target(flash
+        COMMAND ${Python3_EXECUTABLE} ${flash_cmd}
+        DEPENDS firmware
+        USES_TERMINAL
+        VERBATIM
+    )
+endif()

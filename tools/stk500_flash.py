@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --script
+#!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["pyserial>=3.5"]
@@ -48,8 +48,12 @@ import os
 import sys
 import time
 
-import serial
-from serial.tools import list_ports
+# pyserial: lib/pyserial (vendored, Python alone runs the script), else the
+# installed one (uv run: the script's dependencies above)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "lib", "pyserial"))
+import serial  # noqa: E402
+from serial.tools import list_ports  # noqa: E402
 
 STK_OK, STK_FAILED, STK_INSYNC, CRC_EOP = 0x10, 0x11, 0x14, 0x20
 GET_SYNC, LEAVE_PROGMODE, LOAD_ADDRESS, PROG_PAGE, READ_PAGE, READ_SIGN = 0x30, 0x51, 0x55, 0x64, 0x74, 0x75
@@ -64,7 +68,7 @@ def find_port() -> str:
     for p in list_ports.comports():
         if (p.vid, p.pid) == CH343:
             return p.device
-    raise SystemExit("No CH343 found, use --port")
+    raise SystemExit("No MPM v2 (CH343) found: connect its USB-C, or give the port (--port, $V2_PORT; MULTI_FLASH_PORT in CMake)")
 
 
 def check_signature(data: bytes) -> str:
