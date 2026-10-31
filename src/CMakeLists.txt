@@ -1,3 +1,16 @@
+# The code shared by the boards: core (no MCU code: frames, log, storage,
+# the radio bench), hal (the interfaces a platform or board implements:
+# radio.h, timer.h, uart.h...), drivers (chips on hal's spi.h) and mpm (the
+# MULTI-Module core). platforms/<family> implements hal for an MCU family,
+# boards/<name> holds a board's pins, applications and flashing
+set(src_include_dirs
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/hal
+    ${CMAKE_CURRENT_SOURCE_DIR}/drivers
+    # "mpm/..."
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 # The MULTI-Module core, the same on every board; mpm_port.c and the EEPROM
 # are the board's (mpm/mpm_port.h, eeprom.h)
 set(mpm_sources
@@ -38,7 +51,7 @@ endfunction()
 # scheduler's alarms, and the bench's measurements (bench.c). -O3 measured
 # the same (timing.py within 1 us, DSM telemetry 45.5 frames/s) for 9 KB more.
 # The platforms' files: their platform.cmake
-set_source_files_properties(frame.c bench.c
+set_source_files_properties(core/frame.c core/bench.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )
 

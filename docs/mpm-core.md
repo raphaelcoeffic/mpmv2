@@ -349,7 +349,7 @@ sending each with different servo positions.
 
 littlefs (`lib/littlefs`, v2.10) on the whole external NOR flash
 (MX25R8035F, 1 MB, 256 blocks of 4 KB), mounted at power up
-(`file_system_init()`, `src/lfs_driver.c`). Formatted only when there is no
+(`file_system_init()`, `src/core/lfs_driver.c`). Formatted only when there is no
 file system (`LFS_ERR_CORRUPT`: blank or foreign data), not on a bus or
 version error; a smaller one (the 256 KB of the 2025 tests) is grown to the
 flash size. Caches of a flash page (256 bytes), no malloc
@@ -358,13 +358,13 @@ power loss safety (a file is replaced at close: the old content or the new
 one) and dynamic wear levelling (copy on write into free blocks, the
 metadata moved after 500 erases); static data is not moved.
 
-The NOR driver (`src/nor_flash.c`) splits writes at the 256 byte pages,
+The NOR driver (`src/drivers/nor_flash.c`) splits writes at the 256 byte pages,
 switches an MX25R to its high performance mode (JEDEC ID `C2 28`: 4 KB erase
 40 ms typical instead of 58, page program 0.85 ms instead of 3.2), and reports
 the program and erase failures of the security register (littlefs then
 moves the data to another block).
 
-The EEPROM (`src/eeprom.c`): a 2 KB RAM copy of the file `eeprom`, read at
+The EEPROM (`src/core/eeprom.c`): a 2 KB RAM copy of the file `eeprom`, read at
 power up. `eeprom_write()` changes the copy only (a byte written with its
 value: nothing to do); `mpm_port_idle()`, after each `mpm_poll()`, writes
 the file back as soon as it changed (a CYRF ID created, an AFHDS2A bind).
@@ -421,7 +421,7 @@ settings, all optional.
 ### Files over USB
 
 `tools/mpm_fs.py` reads and writes the files over USB-C while the MPM core
-runs (`src/file_server.c`, protocol in `file_server.h`): `info`, `ls [-r]`,
+runs (`src/core/file_server.c`, protocol in `file_server.h`): `info`, `ls [-r]`,
 `get`, `put`, `rm`, `mv`, `mkdir`, `eeprom`, `log` (the [debug
 log](#debug-log)). For debugging: the `eeprom` file
 decoded (`mpm_fs.py eeprom`, or `tools/mpm_eeprom.py FILE` for a copy or an
@@ -453,7 +453,7 @@ file at the next EEPROM write), the [settings](#settings).
 
 ### Settings
 
-Text files at the root, all optional (`src/settings.c`): without one, the
+Text files at the root, all optional (`src/core/settings.c`): without one, the
 build's defaults. Read at power up and again when the file server replaces,
 removes or renames one: applied at once, the protocol restarted if it
 changed. A file's bad lines keep their default and are listed in an error
@@ -494,9 +494,9 @@ ANT_SEL, default 1), for comparing the two antennas.
 
 ### Debug log
 
-For users without a debugger: `debug()` / `debugln()` (`src/debug.h`, also
+For users without a debugger: `debug()` / `debugln()` (`src/core/debug.h`, also
 the MPM's own `DEBUG_SERIAL` lines in the protocols) go to a 4 KB ring in
-RAM (`src/log.c`), each line with the time since power up, always: the last
+RAM (`src/core/log.c`), each line with the time since power up, always: the last
 lines before a problem are there when someone looks. Sent on the USB link
 as telemetry frames of type 0x41 (USB only, like the file replies), from
 the oldest line kept, while `tools/mpm_fs.py log` runs (request `LOG`), or

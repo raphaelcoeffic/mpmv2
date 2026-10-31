@@ -1,6 +1,6 @@
 # Radio interface
 
-The contract between the radio driver (`src/radio.h`: the CC2652 RF core
+The contract between the radio driver (`src/hal/radio.h`: the CC2652 RF core
 today, the SX1281 and a CC27xx later) and what runs on it: the framing layer
 (`frame.c`), the virtual chips that will stand in for the CC2500, NRF24L01,
 A7105 and CYRF6936, and the MPM scheduler. It is set from what the MPM
@@ -127,7 +127,7 @@ LaunchPad. October 2026, NRF 1 Mbps, average (maximum) in us:
 
 ## The interface
 
-`src/radio.h`. Times are `micros()`. One operation runs at a time: each call
+`src/hal/radio.h`. Times are `micros()`. One operation runs at a time: each call
 first waits for a TX started before, and stops RX.
 
 **Setup.**
@@ -197,7 +197,7 @@ first waits for a TX started before, and stops RX.
    (FrSky X telemetry at 8.6 ms): the variable length RX entries fill as the
    data arrives, `radio_receive()` could hand them out early.
 
-**The scheduler** (`src/timer.h`, for the MPM core port):
+**The scheduler** (`src/hal/timer.h`, for the MPM core port):
 `timer_set_alarm(at_ticks, callback)`, an alarm at an absolute time of the
 48 MHz free-running timer (GPT3 match interrupt), up to 44 s ahead. A
 periodic task adds its period to the last deadline (no drift), as the MPM
@@ -215,7 +215,7 @@ delays the alarm by its length (the RX interrupt: about 12 us). The MPM port
 can raise the alarm's priority, and start TX on the RF core's clock
 (`radio_tx_start_at()`) one callback ahead.
 
-The SX1281 driver (`src/sx1281.h`, bench `chip sx1281`) has functions of the
-same shape (`sx1281_send()`, `sx1281_rx_start()`, ...), without the ones added
-here (`radio_tx_start()` and `radio_tx_start_at()`, `radio_rssi()`): a common
-interface over both chips is for when the chip is chosen.
+The SX1281 driver (`src/drivers/sx1281.h`, bench `chip sx1281`) has functions of
+the same shape (`sx1281_send()`, `sx1281_rx_start()`, ...), without the ones
+added here (`radio_tx_start()` and `radio_tx_start_at()`, `radio_rssi()`): a
+common interface over both chips is for when the chip is chosen.

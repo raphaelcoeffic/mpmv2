@@ -39,8 +39,8 @@ grounded: CTX alone switches between RX (LNA, 11 dB) and TX high-power mode
 input is +5 dBm max: see `RF_TX_POWER_DEFAULT` in `src/boards/mpm_v2/board.h`
 and `doc/SKY66112-11_203225P.pdf`.
 
-With the SX1281 (`src/sx1281.c`, `doc/SX1280-81_Rev3.2_Mar2020.pdf`), U3 is
-switched to RF2 and CTX becomes a GPIO, high only while the SX1281 sends
+With the SX1281 (`src/drivers/sx1281.c`, `doc/SX1280-81_Rev3.2_Mar2020.pdf`), U3
+is switched to RF2 and CTX becomes a GPIO, high only while the SX1281 sends
 (nothing on the SX1281 drives it). The SX1281 goes up to +12.5 dBm: the driver
 caps it at +2 dBm into the PA (default 0 dBm, as the CC2652). Its GFSK sync
 word sits right aligned in the 5 byte registers (checked on air). DIO1

@@ -102,7 +102,7 @@ ninja -C build flash-bench        # J-Link on J10: boot loader and radio bench
 |---|---|
 | `bootloader` | `bootloader.elf`, `bootloader.bin` |
 | `firmware` | the MULTI-Module core: `firmware.elf`, `firmware.bin` (with the image header), `mpm-v2-full.bin` / `.hex` (the whole flash), `mpm-v2.bin` (for the radio, needs Python) |
-| `bench` | the radio bench (`src/bench.c` command shell instead of the MPM, see [docs/bench.md](docs/bench.md)): `bench.elf`, `bench.bin`, `mpm-v2-bench.bin`, `mpm-v2-bench-full.bin` / `.hex` |
+| `bench` | the radio bench (`src/core/bench.c` command shell instead of the MPM, see [docs/bench.md](docs/bench.md)): `bench.elf`, `bench.bin`, `mpm-v2-bench.bin`, `mpm-v2-bench-full.bin` / `.hex` |
 | `flash-firmware`, `flash-bench` | boot loader and application through the board's probe: J-Link on the MPM v2, XDS110 (OpenOCD) on the LaunchPad |
 
 The CC2652R1 LaunchPad (bench console on UART0 at 921600 baud):
@@ -130,3 +130,17 @@ Options (`-D<option>=<value>`; the build type is Release unless
 | `USE_CCFG` | Include the MCU user configuration (CCFG). | ON |
 | `FRSKY_CC26XX_PLAN` | FrSky X/X2 on FrSky's own CC26xx frequency plan (30 kHz below the CC2500 plan, 300 kHz spacing); OFF: the CC2500 plan 25 steps lower, as FrSky D/V ([docs/frsky-frequency.md](docs/frsky-frequency.md)). | ON |
 | `DRIVERLIB_NOROM` | Use the compiled driverlib instead of the ROM's. | OFF |
+
+## Source tree
+
+| Directory | Content |
+|---|---|
+| `src/core` | the code without MCU code: the framings (`frame.c`), the radio bench (`bench.c`), log, file system, EEPROM file, file server, settings |
+| `src/hal` | the interfaces a platform or a board implements: `radio.h`, `timer.h`, `uart.h`, `spi.h`, `ppm.h`, `flash_driver.h`, `antenna.h`, `bench_port.h` |
+| `src/drivers` | external chips on `spi.h`: SX1281, NOR flash, RGB LED |
+| `src/mpm` | the MULTI-Module core and the protocols taken from the MULTI-Module (`src/mpm/upstream`) |
+| `src/platforms/<family>` | `src/hal` for an MCU family: `cc26xx` (CC2652 and CC2650), `cc27xx` (CC2755) |
+| `src/boards/<board>` | a board's pins, applications and flashing: `mpm_v2` (and the CC2652R1 LaunchPad), `xjt_lite`, `cc2755p10_lp` |
+
+Core code may use `src/hal` and `src/drivers`, the drivers use `src/hal`, and
+the host tests (`tests/`) build the core and `src/mpm` without a platform.

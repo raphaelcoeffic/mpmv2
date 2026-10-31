@@ -25,23 +25,22 @@ set(firmware_sources
     ${board_dir}/main.c
     ${board_dir}/mpm_port.c
     ${mpm_sources}
-    eeprom.c
-    file_server.c
-    frame.c
-    led_rgb.c
-    lfs_driver.c
-    log.c
-    nor_flash.c
-    serial.c
-    settings.c
-    syscalls.c
+    core/eeprom.c
+    core/file_server.c
+    core/frame.c
+    drivers/led_rgb.c
+    core/lfs_driver.c
+    core/log.c
+    drivers/nor_flash.c
+    core/settings.c
+    core/syscalls.c
 )
 
 # Boot loader in sector 0 with CCFG, applications at 0x2000 (docs/update.md)
 add_executable(bootloader ${board_dir}/bootloader/main.c ${cc26xx_dir}/board.c ${board_dir}/board.c)
 target_compile_definitions(bootloader PRIVATE ${board_definitions})
 target_compile_options(bootloader PRIVATE -Os)
-target_include_directories(bootloader PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(bootloader PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
 target_link_libraries(bootloader ${cc26xx_driverlib})
 target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
 set_target_properties(bootloader PROPERTIES
@@ -75,7 +74,7 @@ endif()
 function(add_application name file)
     set(elf ${name}_elf)
     add_executable(${elf} ${firmware_sources} ${ARGN})
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
     target_mpm_definitions(${elf})
     if (DEBUG)
@@ -144,5 +143,5 @@ endfunction()
 add_application(firmware mpm-v2)
 
 # Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
-add_application(bench mpm-v2-bench bench.c ${board_dir}/bench_port.c sx1281.c)
+add_application(bench mpm-v2-bench core/bench.c ${board_dir}/bench_port.c drivers/sx1281.c)
 target_compile_definitions(bench_elf PRIVATE BENCH)

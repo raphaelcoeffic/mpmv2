@@ -4,7 +4,7 @@
 # dependencies = ["pyserial>=3.5"]
 # ///
 """Host side of the bench mode of the MULTI-Module (Multiprotocol/_Bench.ino,
-branch mpm-bench) and of mpm-v2 (src/bench.c), see docs/bench.md.
+branch mpm-bench) and of mpm-v2 (src/core/bench.c), see docs/bench.md.
 
 Any device speaking the same line protocol can be driven by this tool, so the
 same commands work against a 4-in-1 module and a CC2652 based module.

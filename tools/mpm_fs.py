@@ -4,7 +4,8 @@
 # dependencies = ["pyserial>=3.5"]
 # ///
 """Files of the MPM v2's file system (littlefs on the external flash) over
-USB-C, while the MPM core runs: the protocols keep running (src/file_server.h).
+USB-C, while the MPM core runs: the protocols keep running
+(src/core/file_server.h).
 
   mpm_fs.py info                   file system size and use
   mpm_fs.py ls [DIR] [-r]          entries: size, name (dirs end with /)
@@ -17,7 +18,7 @@ USB-C, while the MPM core runs: the protocols keep running (src/file_server.h).
                                    put, rm and mv print the module's errors
   mpm_fs.py eeprom [FILE] [--all]  the EEPROM decoded (mpm_eeprom.py), from the
                                    module or from FILE (a copy got earlier)
-  mpm_fs.py log [-t SECONDS]       the module's debug log (src/log.h): the
+  mpm_fs.py log [-t SECONDS]       the module's debug log (src/core/log.h): the
                                    lines it kept (boot included), then live
                                    until Ctrl-C; debug.txt ("usb = on") turns
                                    it on from power up, no tool needed

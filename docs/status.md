@@ -41,8 +41,8 @@ module inverters idle. TX power default `0x2853` (0 dBm into the PA, about
 +20 dBm out, within the SKY66112 input limit). Pins, RF chain and the changes
 for the next revision: [hardware.md](hardware.md).
 
-**Framing layer** (`src/frame.c`): the packet formats of the MPM chips, built
-and decoded in software over the raw radio:
+**Framing layer** (`src/core/frame.c`): the packet formats of the MPM chips,
+built and decoded in software over the raw radio:
 
 - NRF24L01, with Enhanced ShockBurst (auto-ack, retransmissions, ack
   payloads).
@@ -127,7 +127,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 
 | Repository, branch | Content |
 |---|---|
-| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/platforms/cc26xx/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (the `bench` target), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
+| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/platforms/cc26xx/radio.c`, `src/core/frame.c`, `src/mpm/` (MPM core), `src/core/bench.c` (the `bench` target), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
 | [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`), plus the two fixes below |
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix alone |
 | same, `e010r5-hop-fix` | The E010R5 fix alone, PR #1197 |

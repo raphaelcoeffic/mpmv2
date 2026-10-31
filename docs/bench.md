@@ -105,7 +105,7 @@ flash. The board itself is described in [hardware.md](hardware.md).
 
 ### CC2755P10 LaunchPad
 
-The bench (`src/bench.c`, `frame.c`) runs on the LP-EM-CC2755P10 over a
+The bench (`src/core/bench.c`, `frame.c`) runs on the LP-EM-CC2755P10 over a
 `radio.h` of its own (`src/platforms/cc27xx/radio.c`, `timer.c`, `uart.c`:
 the CC2652's file names; `src/boards/cc2755p10_lp/main.c`), UART on the
 XDS110 back channel at 921600, `info` says `dev=cc2755`. The suites run unchanged with
@@ -328,10 +328,10 @@ erase without retaining the HSM firmware ("HSM failed to boot" in UniFlash):
 `dslite.sh -s HsmImagePath=<sdk>/bin/hsm/CC2755R10_hsm_fw_v3.5.0.bin -b
 ProgramHsmImage` puts it back without touching the rest.
 
-`src/bench.c` is the command interpreter, `src/platforms/cc26xx/radio.c` the
-RF core driver (bare-metal proprietary mode: `rfc.c`/`rfc.h` and the
-proprietary CPE patch are the only TI radio files), `src/frame.c` the framings
-of the MPM chips.
+`src/core/bench.c` is the command interpreter, `src/platforms/cc26xx/radio.c`
+the RF core driver (bare-metal proprietary mode: `rfc.c`/`rfc.h` and the
+proprietary CPE patch are the only TI radio files), `src/core/frame.c` the
+framings of the MPM chips.
 
 ## Host tools
 
@@ -460,7 +460,7 @@ tools/bench/link.py --mpm "preset hubsan" --cc "trim 90;preset hubsan" --len 16 
 tools/bench/proto_capture.py e012
 ```
 
-Unit tests of `src/frame.c` on the host: each framing against the MPM code
+Unit tests of `src/core/frame.c` on the host: each framing against the MPM code
 (XN297, HS6200, RF2500, FrSky L encoders, copied or ported from the MPM) and
 against raw captures of the MPM chips (ESB, HoTT, A7105, DSM, Devo, Kyosho3).
 

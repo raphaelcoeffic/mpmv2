@@ -17,7 +17,7 @@ list(APPEND board_definitions MPM_REDUCED)
 function(add_xjt_application name)
     set(elf ${name}_elf)
     add_executable(${elf} ${ARGN} ${cc26xx_dir}/board.c ${board_dir}/board.c)
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
+    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
     target_link_libraries(${elf} ${cc26xx_driverlib})
     target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
@@ -52,11 +52,11 @@ add_xjt_application(xjtl-test ${board_dir}/xjtl_test.c ${cc26xx_dir}/timer.c)
 
 # Radio bring-up: a shell on the bay link driving the RF core
 add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c
-    ${cc26xx_radio_sources} syscalls.c)
+    ${cc26xx_radio_sources} core/syscalls.c)
 
 # EEPROM pin probe
 add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${cc26xx_dir}/timer.c
-    log.c syscalls.c)
+    core/log.c core/syscalls.c)
 
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h), without
 # the A7105 and CYRF6936 emulations (RAM)
@@ -75,9 +75,9 @@ add_xjt_application(firmware
     ${board_dir}/eeprom.c
     ${board_dir}/mpm_port.c
     ${cc26xx_hal_sources}
-    frame.c
-    log.c
-    syscalls.c
+    core/frame.c
+    core/log.c
+    core/syscalls.c
     ${xjt_mpm_sources}
 )
 target_mpm_definitions(firmware_elf)

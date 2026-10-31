@@ -8,7 +8,7 @@ Lite running the MPM bench firmware, 200 to 250 packets per test, signal around
 -24 dBm. Test rig: [bench.md](bench.md), per-test results:
 [interop-results.md](interop-results.md), status and next steps:
 [status.md](status.md). CC2652 code: `src/platforms/cc26xx/radio.c`
-(RF core driver) and `src/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
+(RF core driver) and `src/core/frame.c` (NRF24L01 / XN297 / CC2500 / A7105 /
 CYRF6936 / HS6200 / RF2500 / FrSky L framing), the `bench` application.
 
 The same suites later ran on the MPM v2 prototype (CC2652RB with a SKY66112

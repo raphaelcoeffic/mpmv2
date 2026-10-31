@@ -7,14 +7,17 @@ LFS := ../../lib/littlefs
 BUILD := build
 TESTS := storage
 DEFS := -DLFS_NO_MALLOC -DLFS_NO_DEBUG -DLFS_NO_WARN -DLFS_NO_ERROR
-CODE := $(SRC)/lfs_driver.c $(SRC)/eeprom.c $(SRC)/file_server.c $(SRC)/settings.c \
-	$(SRC)/mpm/mpm_settings.c $(SRC)/log.c $(LFS)/lfs.c $(LFS)/lfs_util.c
+CODE := $(SRC)/core/lfs_driver.c $(SRC)/core/eeprom.c $(SRC)/core/file_server.c \
+	$(SRC)/core/settings.c $(SRC)/mpm/mpm_settings.c $(SRC)/core/log.c $(LFS)/lfs.c \
+	$(LFS)/lfs_util.c
+INC := -I$(SRC) -I$(SRC)/core -I$(SRC)/hal -I$(SRC)/drivers -I.. -I$(LFS)
 
 all: $(TESTS:%=$(BUILD)/%)
 	@fail=0; for t in $^; do echo "== $$t"; ./$$t > $$t.log 2>&1 || { cat $$t.log; fail=1; }; tail -1 $$t.log; done; exit $$fail
 
-$(BUILD)/%: %.c $(CODE) $(wildcard $(SRC)/*.h) ../platform.h | $(BUILD)
-	$(CC) $(CFLAGS) $(DEFS) -I$(SRC) -I.. -I$(LFS) -o $@ $< $(CODE)
+$(BUILD)/%: %.c $(CODE) $(wildcard $(SRC)/core/*.h $(SRC)/hal/*.h $(SRC)/drivers/*.h) \
+		../platform.h | $(BUILD)
+	$(CC) $(CFLAGS) $(DEFS) $(INC) -o $@ $< $(CODE)
 
 $(BUILD):
 	mkdir -p $@

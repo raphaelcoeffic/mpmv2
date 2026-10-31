@@ -18,8 +18,8 @@ include(platforms/cc27xx/platform.cmake)
 # and the CCFG, then a reset
 function(add_cc27_application name)
     set(elf ${name}_elf)
-    add_executable(${elf} ${ARGN} ${board_dir}/board.c ${board_dir}/ccfg.c syscalls.c)
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc27xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
+    add_executable(${elf} ${ARGN} ${board_dir}/board.c ${board_dir}/ccfg.c core/syscalls.c)
+    target_include_directories(${elf} PRIVATE ${board_dir} ${cc27xx_dir} ${src_include_dirs})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
     target_link_libraries(${elf} driverlib_cc27xxx10)
     target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
@@ -57,15 +57,15 @@ target_link_libraries(cc27-radio_elf lrf_cc27xxx10)
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)
-add_cc27_application(cc27-bench ${board_dir}/main.c bench.c ${board_dir}/bench_port.c frame.c
-    sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
+add_cc27_application(cc27-bench ${board_dir}/main.c core/bench.c ${board_dir}/bench_port.c
+    core/frame.c drivers/sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
 target_compile_definitions(cc27-bench_elf PRIVATE BENCH)
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 
 # The MPM port (main_mpm.c): the radio's link on UART0 (100000 8E2,
 # mpm_port.c), the protocols of the MPM v2 build
 add_cc27_application(cc27-mpm ${board_dir}/main_mpm.c ${board_dir}/mpm_port.c ${board_dir}/eeprom.c
-    ${cc27xx_hal_sources} ${cc27xx_rf_sources} frame.c log.c ${mpm_sources})
+    ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/frame.c core/log.c ${mpm_sources})
 target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
 target_mpm_definitions(cc27-mpm_elf)
 # Another module's ID (e.g. 0x2bf3be8e, an MPM v2's): its bound receivers

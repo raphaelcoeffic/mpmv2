@@ -221,9 +221,9 @@ Mbps). Not measured: the sensitivity of either PHY (no attenuator).
 
 ### SX1281 (MPM v2)
 
-The MPM v2's second radio, behind U3 (`chip sx1281`, `src/sx1281.c`): GFSK
-packet mode, 125 kbps to 2 Mbps, used as a raw radio under `frame.c` like the
-RF core (sync word up to 4 bytes, fixed length, CRC and whitening off).
+The MPM v2's second radio, behind U3 (`chip sx1281`, `src/drivers/sx1281.c`):
+GFSK packet mode, 125 kbps to 2 Mbps, used as a raw radio under `frame.c` like
+the RF core (sync word up to 4 bytes, fixed length, CRC and whitening off).
 October 2026, the NRF setups (`losses.py nrf`):
 
 - **2 Mbps RX, which the CC2652 can't do:** NRF -> SX1281 at ch 2 / 40 / 80:
@@ -315,9 +315,9 @@ for 32 bytes at 250 kbps (500 us: 24% retransmissions).
 
 XN297 needs no prefix (3 byte preamble). The unscrambled enhanced mode CRC
 xorout (a table from the XN297 dump until upstream #1199, computed since, as in
-`src/frame.c`) is applied only by `XN297_ReadEnhancedPayload()` in XN297Dump
-builds of the MPM: the branch `xn297-enhanced-xorout` applies it on TX and RX
-in all builds. No MPM protocol
+`src/core/frame.c`) is applied only by `XN297_ReadEnhancedPayload()` in
+XN297Dump builds of the MPM: the branch `xn297-enhanced-xorout` applies it on TX
+and RX in all builds. No MPM protocol
 uses this mode, and it is checked against the CC2652 only, not against a real
 XN297.
 
