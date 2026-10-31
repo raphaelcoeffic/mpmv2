@@ -30,7 +30,9 @@ boot loader listens on the console for at least 20 ms after reset.
 line on its UART), given as the openocd command and its options (board,
 adapter serial): a reset that leaves the chip halted, then the sync every
 10 ms, started before a second openocd lets it run (a boot loader already
-in a session would answer a sync sent before the reset).
+in a session would answer a sync sent before the reset). It halts before
+resuming: the CC27xx's second OpenOCD finds the core in an unknown state,
+where resume alone does nothing.
 
 --radio: "serialpassthrough rfmod 1 57600 ppm hangup" to the EdgeTX CLI, which stops
 the pulses, powers the bay off for 500 ms and on again with the ports open
@@ -180,7 +182,7 @@ def main():
         ocd = shlex.split(a.openocd)
         quiet = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
         subprocess.run(ocd + ["-c", "init", "-c", "reset halt", "-c", "shutdown"], check=True, **quiet)
-        run = subprocess.Popen(ocd + ["-c", "init", "-c", "resume", "-c", "shutdown"], **quiet)
+        run = subprocess.Popen(ocd + ["-c", "init", "-c", "halt", "-c", "resume", "-c", "shutdown"], **quiet)
         ok = stk.sync(0.01, 5)
         run.wait()
     elif a.no_reset:

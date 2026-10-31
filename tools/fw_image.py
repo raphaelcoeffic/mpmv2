@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File for the radio from an MPM v2 application (docs/update.md).
+"""File for the radio from an application behind the boot loader (docs/update.md).
 
   fw_image.py build/firmware.bin --version 0.1.0.0 --out build/mpm-v2.bin
 
@@ -11,7 +11,7 @@ the CRC32 and `checked` 0xFFFFFFFF (the boot loader checks the CRC at the
 first start after an update), followed by the 24 byte MULTI signature EdgeTX
 reads, multi-x<flags>-<version>.
 
-Layout: src/boards/mpm_v2/bootloader/layout.h.
+Layout: src/platforms/<family>/bl_layout.h.
 """
 
 import argparse
@@ -24,7 +24,10 @@ HDR_MAGIC = 0x494D504D  # "MPMI"
 HDR_MIN, HDR_SEARCH = 0x40, 0x200
 HDR = struct.Struct("<IIIII")  # magic, chip, length, crc, checked
 # Chip (PLATFORM_CHIP_ID): the application's end (APP_END), its SRAM
-CHIPS = {0x2652: (0x56000, (0x20000000, 0x20014000))}
+CHIPS = {
+    0x2652: (0x56000, (0x20000000, 0x20014000)),
+    0x2755: (0xE8000, (0x20000000, 0x20024000)),
+}
 
 # MULTI signature flags (Multiprotocol/Binary_Signature.ino): module type
 # 3 (CC2652, new), boot loader support, CHECK_FOR_BOOTLOADER, MULTI_TELEMETRY

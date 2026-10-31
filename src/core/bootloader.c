@@ -1,39 +1,30 @@
-// MPM v2 boot loader (flash sector 0): the application update from the radio
+// Boot loader (flash from 0 to APP_START): the application update from the
+// radio
 //
 // Speaks the STK500v1 subset EdgeTX uses to flash a MULTI-Module
 // (radio/src/io/multi_firmware_update.cpp), at 57600 8N1, on the radio link
-// (BL_RADIO_*, board.h) and on the console UART (USB serial; the LaunchPad's
-// radio link, BL_RADIO_UART0). See docs/update.md.
+// and on the console UART (bl_port.h: the chip's part, platforms/<family>/
+// bl_port.c; the board's pins in its board.h). See docs/update.md.
 //
 // At power up: no valid application -> serve STK500 until one is written.
 // Otherwise listen for STK_GET_SYNC for up to BL_WINDOW_MS, and start the
 // application as soon as the radio link shows normal traffic (serial frames
 // or PPM at another rate: framing errors, other bytes) or no radio at all
-// (BL_RADIO_ABSENT_LEVEL): a radio rebooting with the model in the air gets
+// (bl_radio_absent()): a radio rebooting with the model in the air gets
 // its module back with its first frames. The full window only runs out with
 // the line idle and driven, as EdgeTX does when it flashes (it powers the
 // module up and syncs at once for an MPM v2 file).
 //
 // The image CRC is checked once, at the first start after an update (it
-// takes about 0.3 ms per KB): the header's `checked` word is then cleared.
+// takes about 0.3 ms per KB on the CC2652): the header's `checked` word is
+// then cleared.
 
 #include <stdbool.h>
 #include <string.h>
 
-#include <driverlib/cpu.h>
-#include <driverlib/flash.h>
-#include <driverlib/gpio.h>
-#include <driverlib/ioc.h>
-#include <driverlib/prcm.h>
-#include <driverlib/uart.h>
-#include <driverlib/vims.h>
-#include <inc/hw_nvic.h>
-
-#include "board.h"
-#include "layout.h"
-
-#define BAUDRATE 57600
-#define SYS_CLK  48000000
+#include "app_image.h"
+#include "bl_layout.h"
+#include "bl_port.h"
 
 #define BL_WINDOW_MS       300   // longest wait for a sync at power up
 #define BL_CONSOLE_MS      20    // shortest wait (host tools reset, then sync)
@@ -41,6 +32,13 @@
 #define BL_NOISE_BYTES     8     // radio traffic that isn't STK500
 #define BL_BYTE_TIMEOUT_MS 100   // inside a command
 #define BL_IDLE_MS         10000 // session idle with a valid application
+
+// STK500 device signature: 0x1E (required by EdgeTX), then "U&": the MPM v2
+// boot loader, 256 byte pages from word 0x1000 (the STM32 MULTI boot loader
+// answers 1E 55 AA). The image header gives the chip
+#define BL_SIGNATURE_0 0x1E
+#define BL_SIGNATURE_1 0x55
+#define BL_SIGNATURE_2 0x26
 
 #define STK_OK              0x10
 #define STK_FAILED          0x11
@@ -61,51 +59,12 @@
 
 #define PAGE_MAX 256
 
-#define UART_DR_ERRORS 0xF00  // OE, BE, PE, FE in the data register
+// Cortex-M (ARMv7-M, ARMv8-M): the vector table offset register
+#define SCB_VTOR 0xE000ED08
 
-typedef struct {
-  uint32_t base;
-  bool radio;
-} port_t;
-
-// The radio's link: UART1 on the BL_RADIO_* pins, or UART0 itself
-// (BL_RADIO_UART0: the LaunchPad, whose MPM port talks to the radio there)
-#if defined(BL_RADIO_RX) || defined(BL_RADIO_UART0)
-  #define BL_RADIO 1
-#endif
-#if defined(BL_RADIO_UART0)
-  #define UART0_RADIO true
-#else
-  #define UART0_RADIO false
-#endif
-
-static const port_t _ports[] = {
-    {UART0_BASE, UART0_RADIO},
-#if defined(BL_RADIO_RX)
-    {UART1_BASE, true},
-#endif
-};
-#define N_PORTS (sizeof(_ports) / sizeof(_ports[0]))
-
-static const port_t* _port;  // the one that sent the sync
-
-// --- time: SysTick at 1 ms, polled ---
-
-static uint32_t _ms;
-
-static void tick_init()
-{
-  HWREG(NVIC_ST_RELOAD) = SYS_CLK / 1000 - 1;
-  HWREG(NVIC_ST_CURRENT) = 0;
-  HWREG(NVIC_ST_CTRL) = NVIC_ST_CTRL_CLK_SRC | NVIC_ST_CTRL_ENABLE;
-}
-
-// Ticks are lost while flash is erased: timeouts only get longer
-static uint32_t millis()
-{
-  if (HWREG(NVIC_ST_CTRL) & NVIC_ST_CTRL_COUNT) _ms++;
-  return _ms;
-}
+static uint32_t _n_ports;
+static bool _radio;     // a port is the radio's link
+static uint32_t _port;  // the one that sent the sync
 
 // --- CRC32 (zlib) ---
 
@@ -173,27 +132,11 @@ static bool app_valid()
   return ~crc == h->crc;
 }
 
-static void ports_close()
-{
-  for (uint32_t i = 0; i < N_PORTS; i++) {
-    while (UARTBusy(_ports[i].base)) {}
-    UARTDisable(_ports[i].base);
-  }
-#if defined(BL_RADIO_TX)
-  // Back to the board_init() levels: S.Port released
-  IOCPinTypeGpioOutput(BL_RADIO_TX);
-  GPIO_writeDio(BL_RADIO_TX, 1);
-  #if defined(MODULE_TX_INV)
-  GPIO_writeDio(MODULE_TX_INV, 0);
-  #endif
-#endif
-}
-
+// Cortex-M: the application's vector table, its stack, its reset handler
 static void app_start()
 {
-  ports_close();
-  HWREG(NVIC_ST_CTRL) = 0;
-  HWREG(NVIC_VTABLE) = APP_START;
+  bl_deinit();
+  *(volatile uint32_t*)SCB_VTOR = APP_START;
 
   const uint32_t* vt = (const uint32_t*)APP_START;
   __asm volatile(
@@ -203,128 +146,78 @@ static void app_start()
   while (1) {}
 }
 
-// --- UARTs ---
+// --- serial ---
 
-static void ports_open()
-{
-  PRCMPeripheralRunEnable(PRCM_PERIPH_UART0);
-#if defined(BL_RADIO_RX)
-  PRCMPeripheralRunEnable(PRCM_PERIPH_UART1);
-#endif
-  PRCMLoadSet();
-  while (!PRCMLoadGet()) {}
-
-  IOCPinTypeUart(UART0_BASE, SERIAL_RX_IOD, SERIAL_TX_IOD, IOID_UNUSED,
-                 IOID_UNUSED);
-#if defined(BL_RADIO_RX)
-  // RX only: TX stays as board_init() set it until the radio sends a sync
-  IOCPortConfigureSet(BL_RADIO_RX, IOC_PORT_MCU_UART1_RX,
-                      IOC_STD_INPUT | (BL_RADIO_INVERTED ? IOC_IOMODE_INV : 0));
-#endif
-
-  for (uint32_t i = 0; i < N_PORTS; i++) {
-    uint32_t base = _ports[i].base;
-    UARTDisable(base);
-    UARTConfigSetExpClk(base, SYS_CLK, BAUDRATE,
-                        UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
-                            UART_CONFIG_PAR_NONE);
-    UARTEnable(base);
-  }
-}
-
-static void radio_tx_on()
-{
-#if defined(BL_RADIO_TX)
-  #if defined(MODULE_TX_INV)
-  // U9 inverts with TX1_INV set: set it first, the idle GPIO level then
-  // holds S.Port at the UART's idle level before the UART takes the pin over
-  GPIO_writeDio(MODULE_TX_INV, BL_RADIO_INVERTED);
-  IOCPortConfigureSet(BL_RADIO_TX, IOC_PORT_MCU_UART1_TX, IOC_STD_OUTPUT);
-  #else
-  IOCPortConfigureSet(BL_RADIO_TX, IOC_PORT_MCU_UART1_TX,
-                      IOC_STD_OUTPUT | (BL_RADIO_INVERTED ? IOC_IOMODE_INV : 0));
-  #endif
-#endif
-}
-
-static void put(uint8_t b) { UARTCharPut(_port->base, b); }
+static void put(uint8_t b) { bl_port_write(_port, b); }
 
 static bool get(uint8_t* b)
 {
-  uint32_t start = millis();
-  while (millis() - start < BL_BYTE_TIMEOUT_MS) {
-    if (UARTCharsAvail(_port->base)) {
-      uint32_t v = HWREG(_port->base + UART_O_DR);
-      if (v & UART_DR_ERRORS) continue;
-      *b = v;
-      return true;
-    }
+  uint32_t start = bl_millis();
+  while (bl_millis() - start < BL_BYTE_TIMEOUT_MS) {
+    int v = bl_port_read(_port);
+    if (v < 0 || (v & BL_RX_ERROR)) continue;
+    *b = v;
+    return true;
   }
   return false;
 }
 
-// Power up window: the port that sent a sync, or none (start the application)
-static const port_t* wait_sync(bool forever)
+// Power up window: true when a port sent a sync (_port), false to start
+// the application
+static bool wait_sync(bool forever)
 {
-  uint8_t prev[N_PORTS] = {0};
+  uint8_t prev[BL_PORTS_MAX] = {0};
   uint32_t noise = 0;
-  uint32_t start = millis();
-#if defined(BL_RADIO_ABSENT_LEVEL)
+  uint32_t start = bl_millis();
   uint32_t present = start;
-#endif
 
   while (true) {
-    for (uint32_t i = 0; i < N_PORTS; i++) {
-      uint32_t base = _ports[i].base;
-      while (UARTCharsAvail(base)) {
-        uint32_t v = HWREG(base + UART_O_DR);
+    for (uint32_t i = 0; i < _n_ports; i++) {
+      int v;
+      while ((v = bl_port_read(i)) >= 0) {
         uint8_t b = v;
-        if (!(v & UART_DR_ERRORS) && prev[i] == STK_GET_SYNC && b == CRC_EOP)
-          return &_ports[i];
-        if (_ports[i].radio && ((v & UART_DR_ERRORS) || b != STK_GET_SYNC))
-          noise++;
-        prev[i] = v & UART_DR_ERRORS ? 0 : b;
+        bool error = v & BL_RX_ERROR;
+        if (!error && prev[i] == STK_GET_SYNC && b == CRC_EOP) {
+          _port = i;
+          return true;
+        }
+        if (bl_port_radio(i) && (error || b != STK_GET_SYNC)) noise++;
+        prev[i] = error ? 0 : b;
       }
     }
     if (forever) continue;
 
-    uint32_t t = millis() - start;
+    uint32_t t = bl_millis() - start;
     if (t < BL_CONSOLE_MS) continue;
-#if defined(BL_RADIO)
-    if (noise > BL_NOISE_BYTES) return 0;
-  #if defined(BL_RADIO_ABSENT_LEVEL)
-    // DIN reads the pad after the IOC inversion
-    if ((GPIO_readDio(BL_RADIO_RX) ^ BL_RADIO_INVERTED) != BL_RADIO_ABSENT_LEVEL)
-      present = millis();
-    else if (millis() - present >= BL_ABSENT_MS)
-      return 0;
-  #endif
-    if (t >= BL_WINDOW_MS) return 0;
-#else
-    return 0;
-#endif
+    if (!_radio || noise > BL_NOISE_BYTES) return false;
+    if (!bl_radio_absent())
+      present = bl_millis();
+    else if (bl_millis() - present >= BL_ABSENT_MS)
+      return false;
+    if (t >= BL_WINDOW_MS) return false;
   }
 }
 
 // --- flash ---
 
-static uint64_t _erased;  // sectors erased in this session
+#define N_SECTORS (APP_END / FLASH_SECTOR_SIZE)
+
+static bool _flash_open;
+static uint32_t _erased[(N_SECTORS + 31) / 32];  // sectors erased in this session
 
 static bool flash_write(uint32_t addr, uint8_t* data, uint32_t len)
 {
   if (addr < APP_START || addr + len > APP_END) return false;
 
   bool ok = true;
-  CPUcpsid();
   for (uint32_t s = addr / FLASH_SECTOR_SIZE;
        ok && s <= (addr + len - 1) / FLASH_SECTOR_SIZE; s++) {
-    if (!(_erased & (1ULL << s))) {
-      ok = FlashSectorErase(s * FLASH_SECTOR_SIZE) == FAPI_STATUS_SUCCESS;
-      _erased |= 1ULL << s;
+    if (!(_erased[s / 32] & (1u << s % 32))) {
+      ok = bl_flash_erase(s * FLASH_SECTOR_SIZE);
+      _erased[s / 32] |= 1u << s % 32;
     }
   }
-  if (ok) ok = FlashProgram(data, addr, len) == FAPI_STATUS_SUCCESS;
-  CPUcpsie();
+  if (ok) ok = bl_flash_program(data, addr, len);
   return ok && !memcmp((const void*)addr, data, len);
 }
 
@@ -339,7 +232,7 @@ static void session_reset()
 {
   _addr_set = false;
   _first_ok = false;
-  _erased = 0;
+  memset(_erased, 0, sizeof(_erased));
 }
 
 // EdgeTX sends the low 16 bits of the word address, pages in order: follow
@@ -378,11 +271,10 @@ static uint8_t prog_page(uint8_t* page, uint32_t size)
     return STK_FAILED;
   }
 
-  if (!_erased) {
-    // The cache doesn't see flash writes: off for the session (main() puts
-    // it back)
-    VIMSModeSafeSet(VIMS_BASE, VIMS_MODE_DISABLED, true);
-    VIMSLineBufDisable(VIMS_BASE);
+  // For the session (main() closes it)
+  if (!_flash_open) {
+    bl_flash_open();
+    _flash_open = true;
   }
   return flash_write(addr, page, size) ? STK_OK : STK_FAILED;
 }
@@ -415,16 +307,16 @@ static void serve()
 {
   static uint8_t page[PAGE_MAX];
   uint8_t a[20];
-  uint32_t last = millis();
+  uint32_t last = bl_millis();
 
   session_reset();
   while (true) {
     uint8_t cmd;
     if (!get(&cmd)) {
-      if (millis() - last > BL_IDLE_MS && app_valid()) return;
+      if (bl_millis() - last > BL_IDLE_MS && app_valid()) return;
       continue;
     }
-    last = millis();
+    last = bl_millis();
 
     switch (cmd) {
       case STK_GET_SYNC:
@@ -506,28 +398,21 @@ static void serve()
   }
 }
 
-// Bits only go from 1 to 0: no erase. The cache doesn't see flash writes:
-// off for the write, back through OFF (invalidated, VIMSModeSafeSet()). No
-// system reset: the ROM boot after one waits in a wfi when a debugger is
-// attached (first start after a J-Link flash).
+// Bits only go from 1 to 0: no erase. No system reset: on the CC2652 the
+// ROM boot after one waits in a wfi when a debugger is attached (first
+// start after a J-Link flash).
 static void app_mark_checked()
 {
   uint32_t checked = APP_HDR_CHECKED;
   uint32_t addr = (uint32_t)&app_header()->checked;
-  uint32_t mode = VIMSModeGet(VIMS_BASE);
-  CPUcpsid();
-  VIMSModeSafeSet(VIMS_BASE, VIMS_MODE_DISABLED, true);
-  VIMSLineBufDisable(VIMS_BASE);
-  FlashProgram((uint8_t*)&checked, addr, sizeof(checked));
-  VIMSLineBufEnable(VIMS_BASE);
-  VIMSModeSafeSet(VIMS_BASE, mode, true);
-  CPUcpsie();
+  bl_flash_open();
+  bl_flash_program((const uint8_t*)&checked, addr, sizeof(checked));
+  bl_flash_close();
 }
 
 int main()
 {
-  board_init();
-  tick_init();
+  bl_init();
   crc_init();
 
   bool valid = app_checked();
@@ -536,20 +421,18 @@ int main()
     valid = true;
   }
 
-  ports_open();
-  _port = wait_sync(!valid);
-  if (!_port) app_start();
+  _n_ports = bl_ports_open();
+  for (uint32_t i = 0; i < _n_ports; i++) _radio |= bl_port_radio(i);
+  if (!wait_sync(!valid)) app_start();
 
-  if (_port->radio) radio_tx_on();
-  uint32_t vims = VIMSModeGet(VIMS_BASE);
+  bl_port_take(_port);
   reply(0, 0);  // the sync
   serve();
 
-  // New application written, its CRC matched: cache back on (invalidated),
-  // then marked and started as at power up. No system reset (see
-  // app_mark_checked())
-  VIMSModeSafeSet(VIMS_BASE, vims, true);
-  VIMSLineBufEnable(VIMS_BASE);
+  // New application written, its CRC matched: flash cache back on
+  // (invalidated), then marked and started as at power up. No system reset
+  // (see app_mark_checked())
+  if (_flash_open) bl_flash_close();
   if (!app_checked()) app_mark_checked();
   app_start();
 }

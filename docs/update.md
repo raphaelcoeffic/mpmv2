@@ -4,8 +4,9 @@ The update the STM32 MULTI-Module has: the user picks a `.bin` on the SD
 card ("Flash External Multi" or "Flash Internal Multi" in the SD manager)
 and EdgeTX writes it through the module bay, no USB and no tools.
 
-Status: the boot loader (`src/boards/mpm_v2/bootloader/`, always built, both
-applications run behind it) works over USB with a host tool that does what
+Status: the boot loader (`src/core/bootloader.c`, the chip's part in
+`src/platforms/<family>/bl_port.c`, always built, both applications run
+behind it) works over USB with a host tool that does what
 EdgeTX does; the EdgeTX side is on branch `mpm-v2-flash` (not pushed;
 `mpm-v2-flash-2.12` on EdgeTX 2.12). From a radio: one update on a TX15 over
 the external bay (2026-10-21), one on a GX15 with the boot loader without
@@ -78,17 +79,26 @@ MPM v2 has its own boot loader in flash.
 
 The CC2652R1 / RB flash is 352 KB in 8 KB sectors, CCFG in the last 88
 bytes (0x57FA8, last sector at 0x56000). With the boot loader
-(`src/boards/mpm_v2/`: `app.ld`, `bootloader.ld`, `bootloader/layout.h`):
+(`src/boards/mpm_v2/`: `app.ld`, `bootloader.ld`;
+`src/platforms/cc26xx/bl_layout.h`):
 
 | Range | Content |
 |---|---|
-| 0x00000 - 0x01FFF | Boot loader (sector 0), 3.9 KB today |
+| 0x00000 - 0x01FFF | Boot loader (sector 0), 4.2 KB today |
 | 0x02000 - 0x55FFF | Application (336 KB), vector table at 0x2000 |
 | 0x56000 - 0x57FFF | Last sector: CCFG (boot loader image), never written by the boot loader |
 
 The 8 KB sector matches the STM32 layout, where EdgeTX already writes from
 byte 0x2000. CCFG keeps `IMAGE_VALID_CONF` at 0 (the boot loader) and the
 backdoor on DIO19, so USB recovery through the ROM boot loader always works.
+
+The CC2755 LaunchPad (`src/boards/cc2755p10_lp/`, `src/platforms/cc27xx/
+bl_layout.h`) has the same boot loader and the applications at 0x2000 too:
+2 KB sectors, the boot loader in sectors 0 to 3 (2.8 KB), the application
+up to 0xE8000 (the HSM firmware from there, never written), the CCFG at
+0x4E020000 outside the main flash, in the boot loader's image only, its
+`pAppVtor` the boot loader's vector table. No flash ECC: the `checked`
+word is programmed again as on the CC2652.
 
 **Image header.** Right after the application's vector table (0x20D8 on the
 CC2652: `src/core/app_image.h`, `app_header.c`, the `.img_hdr` section of
@@ -143,10 +153,10 @@ page back right after writing it works.
    - at the latest after `BL_WINDOW_MS` (300 ms), when the line stays idle
      and driven.
 
-   On the CC2652 LaunchPad the radio link is UART0 itself, the XDS110 back
-   channel, where its MPM port talks to the radio (`radio_sim.py`):
-   `BL_RADIO_UART0` gives it the same window, 300 ms on the idle line, the
-   application at once on radio frames.
+   On the LaunchPads (CC2652, CC2755) the radio link is UART0 itself, the
+   XDS110 back channel, where their MPM port talks to the radio
+   (`radio_sim.py`): `BL_RADIO_UART0` gives them the same window, 300 ms on
+   the idle line, the application at once on radio frames.
 
    A radio that reboots (watchdog) with the model in the air gets the module
    back with its first frames: the window only runs its full length when the
@@ -165,7 +175,9 @@ reset to the application answering on USB.
 - `READ_SIGN` answers `1E 55 26` (STM32 boot loader: `1E 55 AA`). EdgeTX
   (`mpm-v2-flash`) refuses an MPM v2 file for a `1E 55 AA` module and the
   other way round, before writing anything; with either signature it writes
-  256 byte pages from word address 0x1000.
+  256 byte pages from word address 0x1000. The signature names this boot
+  loader, not the chip: the CC2755's answers the same, and the image header
+  tells the chips apart.
 - **First page (0x2000) check before any erase:** the image header (for this
   chip) and vectors as at power up. An STM32 MULTI image (reset vector at
   0x0800xxxx), an image for another chip, one with the header of the boot
@@ -271,13 +283,16 @@ file system; then `stk500_flash.py --verify` over it, 48 s.
 syncs every 10 ms, within the 20 ms console window. On a LaunchPad
 (`--openocd "openocd -f board/ti_cc26x2_launchpad.cfg"`, plus `-c "adapter
 serial ..."` with several XDS110) OpenOCD resets the chip and leaves it
-halted, the sync starts, and a second OpenOCD lets it run: a boot loader
-already in a session would answer a sync sent before the reset. Syncs sent
+halted, the sync starts, and a second OpenOCD lets it run (`halt`, then
+`resume`: the CC27xx's second OpenOCD finds the core in an unknown state,
+where `resume` alone does nothing): a boot loader already in a session
+would answer a sync sent before the reset. Syncs sent
 while OpenOCD drives the XDS110 did not reach the 20 ms console window,
 hence the LaunchPad's 300 ms one. Tested on the CC2652 LaunchPad
 (2026-10-31): updates both ways between the firmware and the bench, an
 old-header image refused, half an image (the boot loader then stays) and
-the full one over it.
+the full one over it. The same on the CC2755 LaunchPad, the bench and the
+MPM port (`cc27-*-update.bin`), and a CC2652 image refused there.
 
 With `--no-reset` it syncs for 5 s like EdgeTX; `--invert` drives the
 radio bay through a plain USB serial adapter (TX to the PPM pin, RX from

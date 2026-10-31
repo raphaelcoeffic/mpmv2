@@ -135,8 +135,8 @@ Options (`-D<option>=<value>`; the build type is Release unless
 
 | Directory | Content |
 |---|---|
-| `src/core` | the code without MCU code: the framings (`frame.c`), the radio bench (`bench.c`), log, file system, EEPROM file, file server, settings |
-| `src/hal` | the interfaces a platform or a board implements: `radio.h`, `timer.h`, `uart.h`, `spi.h`, `ppm.h`, `flash_driver.h`, `antenna.h`, `bench_port.h` |
+| `src/core` | the code without MCU code: the framings (`frame.c`), the radio bench (`bench.c`), the boot loader (`bootloader.c`), log, file system, EEPROM file, file server, settings |
+| `src/hal` | the interfaces a platform or a board implements: `radio.h`, `timer.h`, `uart.h`, `spi.h`, `ppm.h`, `flash_driver.h`, `antenna.h`, `bench_port.h`, `bl_port.h` |
 | `src/drivers` | external chips on `spi.h`: SX1281, NOR flash, RGB LED |
 | `src/mpm` | the MULTI-Module core and the protocols taken from the MULTI-Module (`src/mpm/upstream`) |
 | `src/platforms/<family>` | `src/hal` for an MCU family: `cc26xx` (CC2652 and CC2650), `cc27xx` (CC2755) |

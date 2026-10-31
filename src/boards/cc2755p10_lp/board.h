@@ -22,6 +22,12 @@
 #define SERIAL_TX_IOD BOARD_UART_TX
 #define IOID_UNUSED 0xFFFFFFFF
 
+// Boot loader link to the radio: UART0, the XDS110 back channel, where the
+// MPM port talks to the radio (tools/bench/radio_sim.py): the MPM v2's
+// window, up to 300 ms on an idle line, the application at once on radio
+// traffic (docs/update.md)
+#define BL_RADIO_UART0
+
 // TX power: the CC2652's words, the platform's radio.c takes them as their
 // dBm. +5 dBm as the CC2652 LaunchPad
 #define RF_TX_POWER_DEFAULT 0x7217

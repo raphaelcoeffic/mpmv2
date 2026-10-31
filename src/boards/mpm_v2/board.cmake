@@ -38,7 +38,8 @@ set(firmware_sources
 )
 
 # Boot loader in sector 0 with CCFG, applications at 0x2000 (docs/update.md)
-add_executable(bootloader ${board_dir}/bootloader/main.c ${cc26xx_dir}/board.c ${board_dir}/board.c)
+add_executable(bootloader core/bootloader.c ${cc26xx_dir}/bl_port.c ${cc26xx_dir}/board.c
+    ${board_dir}/board.c)
 target_compile_definitions(bootloader PRIVATE ${board_definitions})
 target_compile_options(bootloader PRIVATE -Os)
 target_include_directories(bootloader PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
