@@ -16,6 +16,8 @@ SECTIONS
     {
         _text = .;
         KEEP(*(.resetVecs))
+        /* An application's image header (core/app_image.h) */
+        KEEP(*(.img_hdr))
         *(.text*)
         *(.rodata*)
         *(.init)
@@ -77,13 +79,6 @@ SECTIONS
       . = ALIGN(4);
     } > SRAM
 }
-
-/* Vector table entries 7 to 10: the image header in an application
-   (app.ld), reserved (0) in the boot loader */
-PROVIDE(__img_hdr_magic = 0);
-PROVIDE(__img_hdr_length = 0);
-PROVIDE(__img_hdr_crc = 0);
-PROVIDE(__img_hdr_checked = 0);
 
 PROVIDE(_heap_start = _ebss);
 PROVIDE(_heap_end = _estack);

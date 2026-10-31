@@ -23,6 +23,7 @@ set(firmware_sources
     ${board_dir}/board.c
     ${board_dir}/flash_driver.c
     ${board_dir}/board_app.c
+    core/app_header.c
     ${board_dir}/mpm_port.c
     ${mpm_sources}
     core/eeprom.c

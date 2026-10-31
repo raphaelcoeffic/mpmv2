@@ -12,3 +12,10 @@
 #define RADIO_MAX_PKT_LEN 1100
 #define LOG_SIZE 4096  // power of 2
 #endif
+
+// The chip in an application's image header (app_image.h)
+#if defined(MCU_CC26X0)
+#define PLATFORM_CHIP_ID 0x2650
+#else
+#define PLATFORM_CHIP_ID 0x2652
+#endif

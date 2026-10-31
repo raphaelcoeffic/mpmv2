@@ -124,32 +124,41 @@ static bool vectors_ok(const uint32_t* vt)
          (pc & ~1) >= APP_START + 0x40 && (pc & ~1) < APP_END;
 }
 
-static bool header_ok(const app_header_t* h)
+// The header of an image for this chip in its first len bytes, or 0
+static app_header_t* header_find(uint8_t* img, uint32_t len)
 {
-  return h->magic == APP_HDR_MAGIC && h->length >= APP_HDR_OFFSET + 0x40 &&
-         h->length <= APP_END - APP_START;
+  uint32_t off = app_header_offset(img, len);
+  if (!off) return 0;
+  app_header_t* h = (app_header_t*)(img + off);
+  if (h->chip != PLATFORM_CHIP_ID || h->length < off + sizeof(*h) ||
+      h->length > APP_END - APP_START)
+    return 0;
+  return h;
 }
 
-#define APP_HEADER ((const app_header_t*)(APP_START + APP_HDR_OFFSET))
+static const app_header_t* app_header()
+{
+  return header_find((uint8_t*)APP_START, APP_HDR_SEARCH);
+}
 
 static bool app_checked()
 {
-  return vectors_ok((const uint32_t*)APP_START) && header_ok(APP_HEADER) &&
-         APP_HEADER->checked == APP_HDR_CHECKED;
+  const app_header_t* h = app_header();
+  return vectors_ok((const uint32_t*)APP_START) && h && h->checked == APP_HDR_CHECKED;
 }
 
 static bool app_valid()
 {
   const uint8_t* img = (const uint8_t*)APP_START;
-  const app_header_t* h = APP_HEADER;
-  if (!vectors_ok((const uint32_t*)img) || !header_ok(h)) return false;
+  const app_header_t* h = app_header();
+  if (!vectors_ok((const uint32_t*)img) || !h) return false;
 
   static const uint8_t zeros[sizeof(app_header_t)];
+  uint32_t off = (const uint8_t*)h - img;
   uint32_t crc = 0xFFFFFFFF;
-  crc = crc_update(crc, img, APP_HDR_OFFSET);
+  crc = crc_update(crc, img, off);
   crc = crc_update(crc, zeros, sizeof(zeros));
-  crc = crc_update(crc, img + APP_HDR_OFFSET + sizeof(zeros),
-                   h->length - APP_HDR_OFFSET - sizeof(zeros));
+  crc = crc_update(crc, img + off + sizeof(zeros), h->length - off - sizeof(zeros));
   return ~crc == h->crc;
 }
 
@@ -348,13 +357,11 @@ static uint8_t prog_page(uint8_t* page, uint32_t size)
 
   uint32_t addr = byte_address();
   if (addr == APP_START) {
-    // Before anything is erased: an MPM v2 application?
-    if (size < APP_HDR_OFFSET + sizeof(app_header_t) ||
-        !vectors_ok((const uint32_t*)page) ||
-        !header_ok((const app_header_t*)(page + APP_HDR_OFFSET)))
-      return STK_FAILED;
+    // Before anything is erased: an application for this chip?
+    app_header_t* h = size >= APP_HDR_MIN ? header_find(page, size) : 0;
+    if (!h || !vectors_ok((const uint32_t*)page)) return STK_FAILED;
     // Not checked until the whole image is there and its CRC matched
-    ((app_header_t*)(page + APP_HDR_OFFSET))->checked = 0xFFFFFFFF;
+    h->checked = 0xFFFFFFFF;
     _first_ok = true;
   } else if (!_first_ok) {
     return STK_FAILED;
@@ -495,12 +502,12 @@ static void serve()
 static void app_mark_checked()
 {
   uint32_t checked = APP_HDR_CHECKED;
+  uint32_t addr = (uint32_t)&app_header()->checked;
   uint32_t mode = VIMSModeGet(VIMS_BASE);
   CPUcpsid();
   VIMSModeSafeSet(VIMS_BASE, VIMS_MODE_DISABLED, true);
   VIMSLineBufDisable(VIMS_BASE);
-  FlashProgram((uint8_t*)&checked, (uint32_t)&APP_HEADER->checked,
-               sizeof(checked));
+  FlashProgram((uint8_t*)&checked, addr, sizeof(checked));
   VIMSLineBufEnable(VIMS_BASE);
   VIMSModeSafeSet(VIMS_BASE, mode, true);
   CPUcpsie();

@@ -90,12 +90,18 @@ The 8 KB sector matches the STM32 layout, where EdgeTX already writes from
 byte 0x2000. CCFG keeps `IMAGE_VALID_CONF` at 0 (the boot loader) and the
 backdoor on DIO19, so USB recovery through the ROM boot loader always works.
 
-**Image header.** The reserved vector table entries 7 to 10 (0x201C) hold
-magic `MPV2`, length, CRC32 (zlib, header read as zeros) and a `checked`
-word. The linker writes magic and length (`src/boards/mpm_v2/app.ld`, through
-the startup vector table), no CRC and `checked` already 0: `firmware.bin` (the
-file the J-Link flashes) and `mpm-v2-full.bin` / `.hex` (objcopy: the
-application added to `bootloader.elf` at 0x2000) start without a CRC check.
+**Image header.** Right after the application's vector table (0x20D8 on the
+CC2652: `src/core/app_image.h`, `app_header.c`, the `.img_hdr` section of
+`src/linker/sections.ld`): magic `MPMI`, chip (`0x2652`), length, CRC32
+(zlib, header read as zeros) and a `checked` word. The boot loader and
+`tools/fw_image.py` find it by its magic in the first 512 bytes, as EdgeTX's
+boot loader finds its version tag after the vector table: no chip's reserved
+vector entries are used (the CC27xx's entry 7 is its SecureFault handler).
+The scan takes 14 us at power up (CC2652 LaunchPad, cold flash cache). The
+linker gives the length (`__img_length`, `app.ld`), no CRC and `checked`
+already 0: `firmware.bin` (the file the J-Link flashes) and
+`mpm-v2-full.bin` / `.hex` (objcopy: the application added to
+`bootloader.elf` at 0x2000) start without a CRC check.
 Python only makes the file for the radio, `tools/fw_image.py`:
 `mpm-v2.bin`, the image with its CRC and `checked` 0xFFFFFFFF, followed by
 the MULTI signature `multi-x00000983-<version>` (board type 3, boot loader
@@ -115,15 +121,15 @@ page back right after writing it works.
 
 ## Power up
 
-1. **Image check** (`checked` cleared, magic, stack pointer in SRAM, reset
-   vector in the application). The CRC takes about 0.3 ms per KB (110 ms for
-   336 KB), too slow for every start: it is checked once, at the first start
-   after an update, then the boot loader clears `checked` (bits only go from
-   1 to 0: no erase; flash cache off for the write, then invalidated) and
-   goes on. No system reset there: with a debugger attached, the ROM boot
-   after one waits in a `wfi` for a debug halt (FWFLAG bit 2, what sets it is
-   not known), which left the module stuck at its first start after a
-   J-Link flash.
+1. **Image check** (`checked` cleared, header for this chip, stack pointer
+   in SRAM, reset vector in the application). The CRC takes about 0.3 ms
+   per KB (110 ms for 336 KB), too slow for every start: it is checked
+   once, at the first start after an update, then the boot loader clears
+   `checked` (bits only go from 1 to 0: no erase; flash cache off for the
+   write, then invalidated) and goes on. No system reset there: with a
+   debugger attached, the ROM boot after one waits in a `wfi` for a debug
+   halt (FWFLAG bit 2, what sets it is not known), which left the module
+   stuck at its first start after a J-Link flash.
 2. **Sync window.** STK500 on the radio link (UART1, idle high) and on the
    console (UART0, the CH343 on USB-C), 57600 8N1. The application starts:
    - after `BL_CONSOLE_MS` (20 ms) when the radio line is at the "no radio"
@@ -155,12 +161,18 @@ reset to the application answering on USB.
   (`mpm-v2-flash`) refuses an MPM v2 file for a `1E 55 AA` module and the
   other way round, before writing anything; with either signature it writes
   256 byte pages from word address 0x1000.
-- **First page (0x2000) check before any erase:** the image header and
-  vectors as at power up. An STM32 MULTI image (reset vector at 0x0800xxxx)
-  or anything else gets `STK_FAILED`: EdgeTX reports "wrong request",
-  nothing was erased and the old application still runs (tested with
-  `multi-stm-1.3.4.74.bin`). The `checked` word of the first page is forced
-  to 0xFFFFFFFF.
+- **First page (0x2000) check before any erase:** the image header (for this
+  chip) and vectors as at power up. An STM32 MULTI image (reset vector at
+  0x0800xxxx), an image for another chip, one with the header of the boot
+  loaders before November 2026 (in the vector table) or anything else gets
+  `STK_FAILED`: EdgeTX reports "wrong request", nothing was erased and the
+  old application still runs (tested with `multi-stm-1.3.4.74.bin`, and with
+  an old-header v0.4.0 image on the MPM v2 and the LaunchPad). The `checked`
+  word of the first page is forced to 0xFFFFFFFF.
+- **Boot loaders before November 2026** (releases up to v0.4.0) look for the
+  header in the vector table and refuse the newer images the same way: such
+  a module takes `mpm-v2-full.bin` once over USB-C (`tools/rom_flash.py`,
+  boot loader and application), then updates from the radio again.
 - Each page is programmed and compared; a sector is erased when its first
   page arrives. Writes outside 0x2000 - 0x55FFF are refused.
 - `LEAVE_PROGMODE`: the boot loader starts the application when the image

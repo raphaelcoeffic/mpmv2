@@ -130,14 +130,6 @@ extern uint32_t _bss;
 extern uint32_t _ebss;
 extern uint32_t _estack;
 
-// MPM v2: the application image header in the reserved entries 7 to 10
-// (src/bootloader/layout.h), values from the linker script (0 in the boot
-// loader: sections.ld)
-extern uint32_t __img_hdr_magic;
-extern uint32_t __img_hdr_length;
-extern uint32_t __img_hdr_crc;
-extern uint32_t __img_hdr_checked;
-
 //*****************************************************************************
 //
 //! The vector table. Note that the proper constructs must be placed on this to
@@ -156,14 +148,10 @@ void (* const g_pfnVectors[])(void) =
     MPUFaultIntHandler,                     //  4 Memory Management (MemManage) Fault
     BusFaultIntHandler,                     //  5 The bus fault handler
     UsageFaultIntHandler,                   //  6 The usage fault handler
-    (void (*)(void))((unsigned long)&__img_hdr_magic),
-                                            //  7 Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_length),
-                                            //  8 Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_crc),
-                                            //  9 Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_checked),
-                                            // 10 Reserved (image header)
+    0,                                      //  7 Reserved
+    0,                                      //  8 Reserved
+    0,                                      //  9 Reserved
+    0,                                      // 10 Reserved
     SVCallIntHandler,                       // 11 Supervisor Call (SVCall)
     DebugMonIntHandler,                     // 12 Debug monitor handler
     0,                                      // 13 Reserved

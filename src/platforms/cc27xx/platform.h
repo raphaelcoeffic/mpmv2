@@ -5,3 +5,6 @@
 // (rf.c streams the long packets through the FIFO)
 #define RADIO_MAX_PKT_LEN 1100
 #define LOG_SIZE 4096  // power of 2
+
+// The chip in an application's image header (app_image.h)
+#define PLATFORM_CHIP_ID 0x2755

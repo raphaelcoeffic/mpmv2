@@ -128,13 +128,6 @@ extern uint32_t _bss;
 extern uint32_t _ebss;
 extern uint32_t _estack;
 
-// MPM: the application image header in the reserved entries 7 to 10, values
-// from the linker script (0 unless it sets them: src/linker/sections.ld)
-extern uint32_t __img_hdr_magic;
-extern uint32_t __img_hdr_length;
-extern uint32_t __img_hdr_crc;
-extern uint32_t __img_hdr_checked;
-
 //*****************************************************************************
 //
 //! The vector table. Note that the proper constructs must be placed on this to
@@ -152,14 +145,10 @@ void (* const g_pfnVectors[])(void) =
     MPUFaultIntHandler,                     // The MPU fault handler
     BusFaultIntHandler,                     // The bus fault handler
     UsageFaultIntHandler,                   // The usage fault handler
-    (void (*)(void))((unsigned long)&__img_hdr_magic),
-                                            // Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_length),
-                                            // Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_crc),
-                                            // Reserved (image header)
-    (void (*)(void))((unsigned long)&__img_hdr_checked),
-                                            // Reserved (image header)
+    0,                                      // Reserved
+    0,                                      // Reserved
+    0,                                      // Reserved
+    0,                                      // Reserved
     SVCallIntHandler,                       // SVCall handler
     DebugMonIntHandler,                     // Debug monitor handler
     0,                                      // Reserved
