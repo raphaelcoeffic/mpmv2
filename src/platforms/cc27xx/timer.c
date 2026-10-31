@@ -1,7 +1,7 @@
-// timer.h on the CC27xx (src/timer.c on the CC2652), on the system timer
-// (SYSTIM): micros() its 1 us time, get_ticks() its 250 ns time times 12
-// (48 MHz ticks, 0.25 us resolution), extended to 64 bits so that the ticks
-// wrap at 2^32 (the 250 ns time wraps every 1073 s: get_ticks() or millis()
+// timer.h on the CC27xx (platforms/cc26xx/timer.c on the CC2652), on the
+// system timer (SYSTIM): micros() its 1 us time, get_ticks() its 250 ns time
+// times 12 (48 MHz ticks, 0.25 us resolution), extended to 64 bits so that
+// the ticks wrap at 2^32 (the 250 ns time wraps every 1073 s: get_ticks() or millis()
 // must run once in that time). The alarm: SYSTIM channel 0 in compare mode,
 // its event on CPU IRQ 16, as TI's ClockP (kernel/nortos/dpl/
 // ClockPLPF3_nortos.c); rf.c has channel 2, the sync capture channel 4

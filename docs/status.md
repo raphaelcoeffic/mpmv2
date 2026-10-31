@@ -16,16 +16,16 @@ same packets as the real MPM.
 
 ## Done
 
-**CC2652 radio driver** (`src/radio.c`): the RF core in proprietary mode,
-bare-metal. Only `rfc.c`/`rfc.h` and the proprietary CPE patch come from TI's
-radio code. It is a raw packet engine: preamble, a 32 bit sync word (plus an
-alternative one), fixed-length data up to 1100 bytes (the advanced commands
-above 255), or variable length, each packet ended at its length field
-(NRF dynamic payload, XN297 enhanced, CC2500 length byte). It also has chained TX -> RX for Enhanced ShockBurst acks, a
-settable sync correlation threshold and a frequency trim, and gives the
-modem's frequency estimate of each packet received: the bench `autotrim`
-follows the sender with it
-([details](interop-results.md#automatic-frequency-trim)). TX can start
+**CC2652 radio driver** (`src/platforms/cc26xx/radio.c`): the RF core in
+proprietary mode, bare-metal. Only `rfc.c`/`rfc.h` and the proprietary CPE
+patch come from TI's radio code. It is a raw packet engine: preamble, a 32 bit
+sync word (plus an alternative one), fixed-length data up to 1100 bytes (the
+advanced commands above 255), or variable length, each packet ended at its
+length field (NRF dynamic payload, XN297 enhanced, CC2500 length byte). It
+also has chained TX -> RX for Enhanced ShockBurst acks, a settable sync
+correlation threshold and a frequency trim, and gives the modem's frequency
+estimate of each packet received: the bench `autotrim` follows the sender with
+it ([details](interop-results.md#automatic-frequency-trim)). TX can start
 without waiting for its end, or at a set time; RX packets carry the time of
 their sync word, an instant RSSI is there for LBT, and the TX power can
 change from one packet to the next
@@ -34,7 +34,7 @@ corrects the BAW oscillator (HPOSC) from TI's factory calibration and the chip
 temperature: about 98 ppm fast on the MPM v2 board, within about 10 kHz of the
 LaunchPad once corrected, no per-board calibration.
 
-**MPM v2 board support** (`src/board.c`, `src/board.h`): the pinout from the
+**MPM v2 board support** (`src/boards/mpm_v2/`): the pinout from the
 schematic and the RF front end set up at boot: RF switch to the CC2652, the
 PA/LNA switched by the RF core (`RFC_GPO1`), antenna 1, SX1281 held in reset,
 module inverters idle. TX power default `0x2853` (0 dBm into the PA, about
@@ -127,7 +127,7 @@ must meet: [cc2652-radio-assessment.md](cc2652-radio-assessment.md).
 
 | Repository, branch | Content |
 |---|---|
-| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (the `bench` target), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
+| [raphaelcoeffic/mpmv2](https://github.com/raphaelcoeffic/mpmv2) `main` | `src/platforms/cc26xx/radio.c`, `src/frame.c`, `src/mpm/` (MPM core), `src/bench.c` (the `bench` target), `tools/bench/` (rig), `tests/frame/`, `tests/mpm/` (unit tests), `docs/` |
 | [raphaelcoeffic/DIY-Multiprotocol-TX-Module](https://github.com/raphaelcoeffic/DIY-Multiprotocol-TX-Module) `mpm-bench` | MPM bench firmware (`_Bench.ino`, `_Bench_User.ino`, `_Bench_Config.h`, hooks in `Multiprotocol.ino`, `Validate.h`, `_Config.h`), plus the two fixes below |
 | same, `xn297-enhanced-xorout` | The XN297 emulation fix alone |
 | same, `e010r5-hop-fix` | The E010R5 fix alone, PR #1197 |

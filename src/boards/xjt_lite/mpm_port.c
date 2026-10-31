@@ -10,8 +10,8 @@
 // EdgeTX reads, ETX_Pol_Normal) unless the frame's telemetry invert bit is
 // clear (EdgeTX: an internal module), as the STM32 MULTI-Module switches its
 // TX_INV. No PPM input, no USB, no external flash: the EEPROM is the
-// board's I2C chip (eeprom_xjt.c).
-#include "mpm_port.h"
+// board's I2C chip (eeprom.c).
+#include "mpm/mpm_port.h"
 
 #include <driverlib/gpio.h>
 #include <driverlib/interrupt.h>
@@ -23,8 +23,8 @@
 
 #include "board.h"
 #include "eeprom.h"
-#include "mpm.h"
-#include "mpm_frame.h"
+#include "mpm/mpm.h"
+#include "mpm/mpm_frame.h"
 #include "radio.h"
 #include "timer.h"
 #include "uart.h"

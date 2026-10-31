@@ -4,7 +4,7 @@
 //   p       I2C scan on DIO9/10, both ways: addresses that acknowledge
 //   1 / 2   read from address 0 with 1 / 2 address bytes, 8 KB in hex lines
 //           (the content repeats every 256 bytes)
-//   w / v   mpm/eeprom_xjt.c: a pattern written to the FrSky clone data and
+//   w / v   eeprom.c: a pattern written to the FrSky clone data and
 //           flushed / read back from the chip and checked (the next "w":
 //           another pattern)
 
@@ -183,7 +183,7 @@ static void _ee_dump(uint8_t addr_bytes)
   _release();
 }
 
-// eeprom_xjt.c's waits: no protocol here
+// eeprom.c's waits: no protocol here
 void mpm_poll() {}
 int32_t mpm_time_left() { return INT32_MAX; }
 

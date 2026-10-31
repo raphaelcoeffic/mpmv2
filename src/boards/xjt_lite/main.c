@@ -1,5 +1,5 @@
 // FrSky XJT-Lite: the MULTI-Module core alone (no file system, no settings
-// files): the EEPROM on the board's I2C chip (mpm/eeprom_xjt.c), the PPM
+// files): the EEPROM on the board's I2C chip (eeprom.c), the PPM
 // defaults of mpm_settings.c
 #include "board.h"
 #include "eeprom.h"

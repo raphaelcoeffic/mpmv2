@@ -2,7 +2,8 @@
 
 Notes on the RadioMaster MPM v2 board (`doc/MPM_OUT.pdf`, rev 1.3, 2024-02-19):
 how the firmware uses it, and what to change in the next revision. The pin
-definitions are in `src/board.h`, the levels at boot in `board_init()`.
+definitions are in `src/boards/mpm_v2/board.h`, the levels at boot in
+`board_pins_init()` (`board.c` there).
 
 ## CC2652RB pins
 
@@ -35,8 +36,8 @@ CC2652 → F2 balun → U3 RF1; SX1281 → U3 RF2. U3 → F1 band-pass → SKY66
 (PA/LNA) → J2 / J3. On the SKY66112, CSD, CRX and CHL are pulled up and CPS is
 grounded: CTX alone switches between RX (LNA, 11 dB) and TX high-power mode
 (22 dB, +21 dBm). CTX is driven by the RF core PA enable (RFC_GPO1). The PA
-input is +5 dBm max: see `RF_TX_POWER_DEFAULT` in `src/board.h` and
-`doc/SKY66112-11_203225P.pdf`.
+input is +5 dBm max: see `RF_TX_POWER_DEFAULT` in `src/boards/mpm_v2/board.h`
+and `doc/SKY66112-11_203225P.pdf`.
 
 With the SX1281 (`src/sx1281.c`, `doc/SX1280-81_Rev3.2_Mar2020.pdf`), U3 is
 switched to RF2 and CTX becomes a GPIO, high only while the SX1281 sends
@@ -86,13 +87,13 @@ stay plugged in while the radio bay is used.
   force all SX1281 SPI work into the main loop behind a bus lock. With two
   buses neither driver knows about the other, both can use DMA at once, and
   a stuck device can't block the other's bus. Three more pins: SSI1 is
-  unused (`src/spi.c` drives both SSIs) and the I/O controller puts it on
-  any DIO, nine of which are free (more without U9). A possible layout, to
-  check against the TRM's ROM boot loader notes: the flash stays on SSI0
-  (DIO8-10) with its CS moved to DIO11 and pulled up (FSS high keeps the
-  ROM boot loader off SSI0, the item above), the SX1281 on SSI1 on free
-  pins with a pull-up on its NSS. Fallback if pins get tight: a shared bus
-  with the SX1281's SPI work only in the main loop (its interrupts set a
+  unused (`src/platforms/cc26xx/spi.c` drives both SSIs) and the I/O
+  controller puts it on any DIO, nine of which are free (more without U9). A
+  possible layout, to check against the TRM's ROM boot loader notes: the flash
+  stays on SSI0 (DIO8-10) with its CS moved to DIO11 and pulled up (FSS high
+  keeps the ROM boot loader off SSI0, the item above), the SX1281 on SSI1 on
+  free pins with a pull-up on its NSS. Fallback if pins get tight: a shared
+  bus with the SX1281's SPI work only in the main loop (its interrupts set a
   flag), the flash driver already working in short transfers; tight at
   high packet rates.
 - **A test pad** on a free DIO, for timing measurements.

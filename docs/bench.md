@@ -328,9 +328,10 @@ erase without retaining the HSM firmware ("HSM failed to boot" in UniFlash):
 `dslite.sh -s HsmImagePath=<sdk>/bin/hsm/CC2755R10_hsm_fw_v3.5.0.bin -b
 ProgramHsmImage` puts it back without touching the rest.
 
-`src/bench.c` is the command interpreter, `src/radio.c` the RF core driver
-(bare-metal proprietary mode: `rfc.c`/`rfc.h` and the proprietary CPE patch
-are the only TI radio files), `src/frame.c` the framings of the MPM chips.
+`src/bench.c` is the command interpreter, `src/platforms/cc26xx/radio.c` the
+RF core driver (bare-metal proprietary mode: `rfc.c`/`rfc.h` and the
+proprietary CPE patch are the only TI radio files), `src/frame.c` the framings
+of the MPM chips.
 
 ## Host tools
 

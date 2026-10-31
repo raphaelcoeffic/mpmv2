@@ -3,24 +3,27 @@
 # sector (CCFG) is never written. Flashed with OpenOCD over cJTAG on a
 # J-Link (a patched OpenOCD: github.com/raphaelcoeffic/openocd, jlink-cjtag)
 
+message("## Target is FrSky XJT-Lite (CC2650F128): reduced MPM")
+
 set(XJT_OPENOCD openocd CACHE STRING "OpenOCD with J-Link cJTAG support")
 
+include(platforms/cc26xx/platform.cmake)
 list(APPEND board_definitions MCU_CC26X0)
 
-# Target <name>: <name>.elf and <name>.bin in the build directory.
-# flash-<name>: the application only, at 0x8000
+# Target <name>: <name>.elf and <name>.bin in the build directory, with
+# board_init(). flash-<name>: the application only, at 0x8000
 function(add_xjt_application name)
     set(elf ${name}_elf)
-    add_executable(${elf} ${ARGN})
-    target_include_directories(${elf} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_executable(${elf} ${ARGN} ${cc26xx_dir}/board.c ${board_dir}/board.c)
+    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
     target_link_libraries(${elf} driverlib_cc26x0)
     target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
     set_target_properties(${elf} PROPERTIES
         OUTPUT_NAME ${name}
-        LINKER_FILE ${CMAKE_CURRENT_SOURCE_DIR}/linker/xjt_lite.ld
+        LINKER_FILE ${board_dir}/xjt_lite.ld
         # Relinked when a script changes
-        LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/linker/xjt_lite.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
+        LINK_DEPENDS "${board_dir}/xjt_lite.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
@@ -43,13 +46,15 @@ function(add_xjt_application name)
 endfunction()
 
 # Bring-up: bay serial in, echoed on S.Port
-add_xjt_application(xjtl-test xjtl_test.c board.c timer.c)
+add_xjt_application(xjtl-test ${board_dir}/xjtl_test.c ${cc26xx_dir}/timer.c)
 
 # Radio bring-up: a shell on the bay link driving the RF core
-add_xjt_application(xjtl-radio xjtl_radio.c board.c timer.c radio.c syscalls.c)
+add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c ${cc26xx_dir}/radio.c
+    syscalls.c)
 
 # EEPROM pin probe
-add_xjt_application(xjtl-eeprom xjtl_eeprom.c mpm/eeprom_xjt.c board.c log.c timer.c syscalls.c)
+add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${cc26xx_dir}/timer.c
+    log.c syscalls.c)
 
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h), without
 # the A7105 and CYRF6936 emulations (RAM)
@@ -64,19 +69,13 @@ list(REMOVE_ITEM xjt_mpm_sources
 )
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h)
 add_xjt_application(firmware
-    main_xjt.c
-    board.c
+    ${board_dir}/main.c
+    ${board_dir}/eeprom.c
+    ${board_dir}/mpm_port.c
+    ${cc26xx_hal_sources}
     frame.c
     log.c
-    radio.c
     syscalls.c
-    timer.c
-    uart.c
-    mpm/eeprom_xjt.c
-    mpm/mpm_port_xjt.c
     ${xjt_mpm_sources}
 )
 target_mpm_definitions(firmware_elf)
-set_source_files_properties(radio.c frame.c timer.c
-    PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
-)

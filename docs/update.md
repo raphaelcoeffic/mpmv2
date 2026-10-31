@@ -4,14 +4,13 @@ The update the STM32 MULTI-Module has: the user picks a `.bin` on the SD
 card ("Flash External Multi" or "Flash Internal Multi" in the SD manager)
 and EdgeTX writes it through the module bay, no USB and no tools.
 
-Status: the boot loader (`src/bootloader/`, always built, both applications
-run behind it) works over
-USB with a host tool that does what EdgeTX does; the EdgeTX side is on
-branch `mpm-v2-flash` (not pushed; `mpm-v2-flash-2.12` on EdgeTX 2.12).
-From a radio: one update on a TX15 over the external bay (2026-10-21), one
-on a GX15 with the boot loader without system reset (2026-10-24, see
-[Tested on a radio](#tested-on-a-radio)); the rest of
-[To test with a radio](#to-test-with-a-radio) is still open.
+Status: the boot loader (`src/boards/mpm_v2/bootloader/`, always built, both
+applications run behind it) works over USB with a host tool that does what
+EdgeTX does; the EdgeTX side is on branch `mpm-v2-flash` (not pushed;
+`mpm-v2-flash-2.12` on EdgeTX 2.12). From a radio: one update on a TX15 over
+the external bay (2026-10-21), one on a GX15 with the boot loader without
+system reset (2026-10-24, see [Tested on a radio](#tested-on-a-radio)); the
+rest of [To test with a radio](#to-test-with-a-radio) is still open.
 
 ## What EdgeTX does today
 
@@ -79,7 +78,7 @@ MPM v2 has its own boot loader in flash.
 
 The CC2652R1 / RB flash is 352 KB in 8 KB sectors, CCFG in the last 88
 bytes (0x57FA8, last sector at 0x56000). With the boot loader
-(`src/linker/`, `src/bootloader/layout.h`):
+(`src/boards/mpm_v2/`: `app.ld`, `bootloader.ld`, `bootloader/layout.h`):
 
 | Range | Content |
 |---|---|
@@ -93,8 +92,8 @@ backdoor on DIO19, so USB recovery through the ROM boot loader always works.
 
 **Image header.** The reserved vector table entries 7 to 10 (0x201C) hold
 magic `MPV2`, length, CRC32 (zlib, header read as zeros) and a `checked`
-word. The linker writes magic and length (`src/linker/app.ld`, through the
-startup vector table), no CRC and `checked` already 0: `firmware.bin` (the
+word. The linker writes magic and length (`src/boards/mpm_v2/app.ld`, through
+the startup vector table), no CRC and `checked` already 0: `firmware.bin` (the
 file the J-Link flashes) and `mpm-v2-full.bin` / `.hex` (objcopy: the
 application added to `bootloader.elf` at 0x2000) start without a CRC check.
 Python only makes the file for the radio, `tools/fw_image.py`:

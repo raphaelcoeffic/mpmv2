@@ -13,8 +13,8 @@
 #define BOARD_UART_TX 1
 #define BOARD_UART_RX 2
 
-// What the shared code takes from the board (src/board.h): the bench's
-// UART on the board's (uart.c ignores them)
+// What the shared code takes from the board (as the CC2652 boards): the
+// bench's UART on the board's (uart.c ignores them)
 #define SERIAL_RX_IOD BOARD_UART_RX
 #define SERIAL_TX_IOD BOARD_UART_TX
 #define IOID_UNUSED 0xFFFFFFFF

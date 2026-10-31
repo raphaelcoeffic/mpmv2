@@ -1,5 +1,5 @@
-// CC2755P10 LaunchPad: the MULTI-Module core (src/main.c on the MPM v2), the
-// radio's link on UART0 (mpm_port.c), the EEPROM in RAM
+// CC2755P10 LaunchPad: the MULTI-Module core (boards/mpm_v2/main.c on the
+// MPM v2), the radio's link on UART0 (mpm_port.c), the EEPROM in RAM
 #include "board.h"
 #include "eeprom.h"
 #include "log.h"

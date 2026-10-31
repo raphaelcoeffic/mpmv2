@@ -5,12 +5,13 @@
 # CC27_OPENOCD="<openocd-cc27xx>/src/openocd -s <openocd-cc27xx>/tcl" when
 # not installed.
 
+message("## Target is LP-EM-CC2755P10: radio bring-up")
+
 set(CC27_OPENOCD openocd CACHE STRING "OpenOCD with the cc27xx flash driver (and its arguments)")
 separate_arguments(cc27_openocd UNIX_COMMAND "${CC27_OPENOCD}")
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
-set(board_dir ${CMAKE_CURRENT_LIST_DIR})
 include(platforms/cc27xx/platform.cmake)
 
 # Target <name>: <name>.elf in the build directory. flash-<name>: the image

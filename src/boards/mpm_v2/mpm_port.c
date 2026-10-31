@@ -19,7 +19,7 @@
 // MPM v2 without USB: U8 puts S.Port on UART0 RX, which then hears the
 // module's own telemetry (not inverted back: UART errors, the frames are
 // dropped; read right, "MP" isn't a frame header either)
-#include "mpm_port.h"
+#include "mpm/mpm_port.h"
 
 #include <driverlib/gpio.h>
 #include <driverlib/interrupt.h>
@@ -33,8 +33,8 @@
 #include "eeprom.h"
 #include "file_server.h"
 #include "log.h"
-#include "mpm.h"
-#include "mpm_frame.h"
+#include "mpm/mpm.h"
+#include "mpm/mpm_frame.h"
 #include "radio.h"
 #include "timer.h"
 #include "uart.h"

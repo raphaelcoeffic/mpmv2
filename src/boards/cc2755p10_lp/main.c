@@ -1,4 +1,4 @@
-// CC2755P10 LaunchPad radio bench (src/main.c under BENCH on the CC2652):
+// CC2755P10 LaunchPad radio bench (boards/mpm_v2/main.c under BENCH):
 // bench.c's shell on UART0, 921600 baud
 
 #include "bench.h"

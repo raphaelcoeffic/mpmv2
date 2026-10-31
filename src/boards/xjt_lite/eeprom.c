@@ -12,9 +12,9 @@
 
 #include "board.h"
 #include "debug.h"
-#include "mpm.h"
+#include "mpm/mpm.h"
 #include "timer.h"
-#include "upstream/mpm_compat.h"
+#include "mpm/upstream/mpm_compat.h"
 
 #define CHIP_SIZE 256
 #define PAGE_SIZE 16

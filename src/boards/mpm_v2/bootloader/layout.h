@@ -1,7 +1,7 @@
 #pragma once
 
 // Flash layout shared by the boot loader, the application build
-// (src/linker/app.ld) and tools/fw_image.py (see docs/update.md)
+// (app.ld) and tools/fw_image.py (see docs/update.md)
 //
 //   0x00000 - 0x01FFF  boot loader (sector 0)
 //   0x02000 - 0x55FFF  application, vector table first
@@ -18,7 +18,7 @@
 #define SRAM_END   0x20014000
 
 // Image header in the reserved vector table entries 7 to 10. The linker
-// (src/linker/app.ld) writes magic and length, no CRC (0xFFFFFFFF) and
+// (app.ld) writes magic and length, no CRC (0xFFFFFFFF) and
 // `checked` 0: an image written into flash as it is (debugger, ROM boot
 // loader) starts without a CRC check. The file for the radio
 // (tools/fw_image.py) has the CRC32 (zlib) of the image from APP_START over

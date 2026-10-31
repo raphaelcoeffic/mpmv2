@@ -4,13 +4,13 @@
   fw_image.py build/firmware.bin --version 0.1.0.0 --out build/mpm-v2.bin
 
 The application binary (objcopy -O binary) has its image header from the
-linker (src/linker/app.ld): magic, length, no CRC, `checked` already 0, so a
-debugger or the ROM boot loader can write it as it is. The radio's file gets
+linker (src/boards/mpm_v2/app.ld): magic, length, no CRC, `checked` already
+0, so a debugger or the ROM boot loader can write it as it is. The radio's file gets
 the CRC32 and `checked` 0xFFFFFFFF (the boot loader checks the CRC at the
 first start after an update), followed by the 24 byte MULTI signature EdgeTX
 reads, multi-x<flags>-<version>.
 
-Layout and header: src/bootloader/layout.h.
+Layout and header: src/boards/mpm_v2/bootloader/layout.h.
 """
 
 import argparse

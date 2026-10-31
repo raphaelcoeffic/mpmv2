@@ -1,5 +1,6 @@
-// radio.h on the CC27xx (src/radio.c on the CC2652): rf.c's operations on
-// phy_fsk's GFSK, for the radio bench (bench.c). The differences:
+// radio.h on the CC27xx (platforms/cc26xx/radio.c on the CC2652): rf.c's
+// operations on phy_fsk's GFSK, for the radio bench (bench.c). The
+// differences:
 // - radio_phy_t's fsk: TX only (2-FSK), the RX is the same (rx_bw, if_freq
 //   and sync_threshold are ignored: phy_fsk takes the bandwidth from the
 //   deviation);
