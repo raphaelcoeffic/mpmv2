@@ -22,7 +22,7 @@ set(firmware_sources
     ${cc26xx_dir}/spi.c
     ${board_dir}/board.c
     ${board_dir}/flash_driver.c
-    ${board_dir}/main.c
+    ${board_dir}/board_app.c
     ${board_dir}/mpm_port.c
     ${mpm_sources}
     core/eeprom.c
@@ -140,8 +140,8 @@ function(add_application name file)
 endfunction()
 
 # The MPM port (the module EdgeTX drives)
-add_application(firmware mpm-v2)
+add_application(firmware mpm-v2 core/main_mpm.c)
 
 # Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
-add_application(bench mpm-v2-bench core/bench.c ${board_dir}/bench_port.c drivers/sx1281.c)
-target_compile_definitions(bench_elf PRIVATE BENCH)
+add_application(bench mpm-v2-bench core/main_bench.c core/bench.c ${board_dir}/bench_port.c
+    drivers/sx1281.c)

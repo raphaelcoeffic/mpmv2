@@ -1,6 +1,6 @@
-// board_init() on the CC27xx: the VDDIO pads, HFXT, GPIO, then the board's
-// pins (board_pins_init(), the board's board.c). The system timer's
-// microseconds and UART0 (cc27xx.h)
+// board_init() on the CC27xx: the VDDIO pads, HFXT, GPIO, the board's pins
+// (board_pins_init(), the board's board.c), the HFXT settled. The system
+// timer's microseconds and UART0 (cc27xx.h)
 #include "board.h"
 
 #include <inc/hw_ckmd.h>
@@ -21,6 +21,9 @@
 #ifndef BOARD_HFXT_PPB
 #define BOARD_HFXT_PPB 10000
 #endif
+
+// board_init()'s longest wait for the HFXT (it settles after some 100 us)
+#define BOARD_HFXT_WAIT_US 10000
 
 void board_init(void)
 {
@@ -43,6 +46,8 @@ void board_init(void)
   CLKCTLEnable(CLKCTL_BASE, CLKCTL_GPIO);
 
   board_pins_init();
+
+  board_hfxt_wait(BOARD_HFXT_WAIT_US);
 }
 
 bool board_hfxt_good(void)

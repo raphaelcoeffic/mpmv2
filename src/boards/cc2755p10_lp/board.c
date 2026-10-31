@@ -23,3 +23,6 @@ void board_led(uint32_t dio, bool on) { GPIOWriteDio(dio, on ? 1 : 0); }
 void board_led_toggle(uint32_t dio) { GPIOToggleDio(dio); }
 
 bool board_button(uint32_t dio) { return GPIOReadDio(dio) == 0; }
+
+// The LEDs are set up with the pins
+void board_app_init(void) {}

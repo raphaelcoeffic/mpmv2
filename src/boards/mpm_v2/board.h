@@ -113,6 +113,13 @@
   #error "No board: BOARD_MPM_V2 or BOARD_CC2652R1_LAUNCHXL from CMake's BOARD"
 #endif
 
+// littlefs on the external NOR flash (core/main_mpm.c): the EEPROM file,
+// the settings files, the file server
+#define BOARD_FILE_SYSTEM
+
 void board_init();
 // The board's pins at boot (board.c), from board_init()
 void board_pins_init();
+// The applications' part (core/main_*.c), after timer_init(): what the boot
+// loader doesn't set up: the LEDs (board_app.c)
+void board_app_init();

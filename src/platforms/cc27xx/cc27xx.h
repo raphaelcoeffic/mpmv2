@@ -12,10 +12,13 @@
 #include <inc/hw_memmap.h>
 #include <inc/hw_ioc.h>
 
-// Pads, HFXT, GPIO, then the board's pins (board_pins_init(), the board's
-// board.c)
+// Pads, HFXT, GPIO, the board's pins (board_pins_init(), the board's
+// board.c), then up to 10 ms for the HFXT to settle
 void board_init(void);
 void board_pins_init(void);
+// The applications' part (core/main_*.c), after timer_init(): what the boot
+// loader doesn't set up
+void board_app_init(void);
 
 // HFXT: started by board_init(), settled after some 100 us
 bool board_hfxt_good(void);

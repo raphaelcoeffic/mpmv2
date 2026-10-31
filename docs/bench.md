@@ -105,10 +105,10 @@ flash. The board itself is described in [hardware.md](hardware.md).
 
 ### CC2755P10 LaunchPad
 
-The bench (`src/core/bench.c`, `frame.c`) runs on the LP-EM-CC2755P10 over a
-`radio.h` of its own (`src/platforms/cc27xx/radio.c`, `timer.c`, `uart.c`:
-the CC2652's file names; `src/boards/cc2755p10_lp/main.c`), UART on the
-XDS110 back channel at 921600, `info` says `dev=cc2755`. The suites run unchanged with
+The bench (`src/core/bench.c`, `frame.c`, `main_bench.c` as on the MPM v2)
+runs on the LP-EM-CC2755P10 over a `radio.h` of its own
+(`src/platforms/cc27xx/radio.c`, `timer.c`, `uart.c`: the CC2652's file
+names), UART on the XDS110 back channel at 921600, `info` says `dev=cc2755`. The suites run unchanged with
 `CC_PORT=/dev/cu.usbmodemLS5600OQ1`. The radio bring-up shell
 (`src/boards/cc2755p10_lp/radio_test.c`, commands in its header, 115200) is still there:
 

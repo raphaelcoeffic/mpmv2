@@ -71,7 +71,7 @@ list(REMOVE_ITEM xjt_mpm_sources
 )
 # The MPM port: FrSky D and X, V2x2, XK (mpm/upstream/mpm_config.h)
 add_xjt_application(firmware
-    ${board_dir}/main.c
+    core/main_mpm.c
     ${board_dir}/eeprom.c
     ${board_dir}/mpm_port.c
     ${cc26xx_hal_sources}

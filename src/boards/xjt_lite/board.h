@@ -58,3 +58,6 @@
 void board_init();
 // The board's pins at boot (board.c), from board_init()
 void board_pins_init();
+// The applications' part (core/main_*.c), after timer_init(): what the boot
+// loader doesn't set up: nothing (the LEDs are pins)
+void board_app_init();
