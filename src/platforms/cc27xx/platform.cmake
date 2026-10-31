@@ -1,7 +1,8 @@
 # CC27xx: radio.h, timer.h and uart.h on the LRF radio (TI's LRF layer,
 # lib/ti/drivers/rcl, without the RCL), the system timer and UART0 (polled,
-# through the board's board_uart_init()). The PHY settings come from
-# tools/cc27_phy.py; phy_ble.c for the radio bring-up only
+# board_uart_init()). board.c (cc27xx.h), in every application: the chip's
+# power-up, HFXT, microseconds and UART0, the board's pins after. The PHY
+# settings come from tools/cc27_phy.py; phy_ble.c for the radio bring-up only
 
 set(cc27xx_dir ${CMAKE_CURRENT_LIST_DIR})
 

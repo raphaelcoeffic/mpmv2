@@ -18,7 +18,8 @@ include(platforms/cc27xx/platform.cmake)
 # and the CCFG, then a reset
 function(add_cc27_application name)
     set(elf ${name}_elf)
-    add_executable(${elf} ${ARGN} ${board_dir}/board.c ${board_dir}/ccfg.c core/syscalls.c)
+    add_executable(${elf} ${ARGN} ${cc27xx_dir}/board.c ${board_dir}/board.c ${board_dir}/ccfg.c
+        core/syscalls.c)
     target_include_directories(${elf} PRIVATE ${board_dir} ${cc27xx_dir} ${src_include_dirs})
     target_compile_definitions(${elf} PRIVATE ${board_definitions})
     target_link_libraries(${elf} driverlib_cc27xxx10)
