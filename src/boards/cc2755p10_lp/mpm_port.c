@@ -1,7 +1,7 @@
 // MULTI-Module core on the LP-EM-CC2755P10: the link with the radio on
 // UART0, 100000 baud 8E2, through the XDS110 back channel (a host plays the
 // radio: tools/bench/radio_sim.py), normal polarity. No PPM input, no file
-// system: the EEPROM in RAM (cc27/eeprom.c).
+// system: the EEPROM in RAM (eeprom.c).
 //
 // RX in the UART interrupt: a frame ends at the receive timeout (32 bit
 // times of silence with bytes left in the FIFO), or, when the interrupt

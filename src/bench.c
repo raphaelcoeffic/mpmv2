@@ -5,7 +5,6 @@
 
 #if defined(BOARD_CC2755P10_LP)
   #include <ti/drivers/dpl/HwiP.h>
-  #include "cc27/board.h"
   #define IntMasterDisable() (HwiP_disable() != 0)
   #define IntMasterEnable() HwiP_restore(0)
   #define BENCH_DEV "cc2755"
@@ -30,7 +29,7 @@
 // Commands (one per line, numbers in decimal or 0x hex):
 //
 //   info                         @ok bench=1 dev=cc2652 ... (cc2755: CC2755P10
-//                                LaunchPad, src/cc27)
+//                                LaunchPad, platforms/cc27xx)
 //   chip <cc2652|sx1281> [dbm]   radio for the PHY (applied at once and kept): the
 //                                CC2652 RF core (default; the CC2755's radio on its
 //                                LaunchPad, either name) or the SX1281 (MPM v2: GFSK

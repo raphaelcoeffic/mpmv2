@@ -106,11 +106,11 @@ flash. The board itself is described in [hardware.md](hardware.md).
 ### CC2755P10 LaunchPad
 
 The bench (`src/bench.c`, `frame.c`) runs on the LP-EM-CC2755P10 over a
-`radio.h` of its own (`src/cc27/radio.c`, `timer.c`, `uart.c`, `main.c`:
-the CC2652's file names), UART on the XDS110 back channel at 921600, `info`
-says `dev=cc2755`. The suites run unchanged with
+`radio.h` of its own (`src/platforms/cc27xx/radio.c`, `timer.c`, `uart.c`:
+the CC2652's file names; `src/boards/cc2755p10_lp/main.c`), UART on the
+XDS110 back channel at 921600, `info` says `dev=cc2755`. The suites run unchanged with
 `CC_PORT=/dev/cu.usbmodemLS5600OQ1`. The radio bring-up shell
-(`src/cc27/radio_test.c`, commands in its header, 115200) is still there:
+(`src/boards/cc2755p10_lp/radio_test.c`, commands in its header, 115200) is still there:
 
 ```sh
 cmake -B build-cc27 -G Ninja -DBOARD=CC2755P10_LP
@@ -197,9 +197,9 @@ symbol (LRFDRFE DTX), `LRF_TxShape` its last 24 taps (TI's BT 0.5: a
 Gaussian-filtered rectangle, 20 taps), scale 2^28 / the sum of the 48 taps
 (17 bits). 2-FSK: 8 taps of 255.
 
-`src/cc27/rf.c` drives TI's LRF layer (`lib/ti/drivers/rcl`, no RCL
+`src/platforms/cc27xx/rf.c` drives TI's LRF layer (`lib/ti/drivers/rcl`, no RCL
 scheduler) with raw framing: sync word, fixed length payload. The PHY
-settings (`src/cc27/phy_nesb.c`, `phy_ble.c`) come from
+settings (`src/platforms/cc27xx/phy_nesb.c`, `phy_ble.c`) come from
 `tools/cc27_phy.py`, the same registers as SysConfig's `ti_radio_config.c`
 for TI's NESB and generic BLE PHYs. Against the MPM v2's `preset nrf1m` /
 `nrf2m` raw framing: 999 or 1000 packets of 1000 both ways at 1 and 2 Mbps.
@@ -226,11 +226,11 @@ CC27xx one. The MSK 250 kbps PHY (genfsk images) receives the MPM v2's
 `hott` PHY (1000/1000), but its TX (MOD0.SYMSHP 2, fixed DTX taps, its own
 symbol mapping) is rubbish to FSK receivers (the SDR sees a 1 Mbps-like
 bit clock); `--gfsk` sends GFSK instead (NESB's BT 0.5 shape, SYMSHP 0,
-NESB's MODSYMMAP0): `src/cc27/phy_fsk250.c`, both ways with `hott`
+NESB's MODSYMMAP0): `src/platforms/cc27xx/phy_fsk250.c`, both ways with `hott`
 (196/200, 1000/1000); `nrf250k` and `xn250k` (160 and 127 kHz deviation)
 are received at about 85% with it as is.
 
-Other rates: `src/cc27/phy_fsk.c` (shell: `g RATE DEV [LOG2_PDIF]`) sets up
+Other rates: `src/platforms/cc27xx/phy_fsk.c` (shell: `g RATE DEV [LOG2_PDIF]`) sets up
 that PHY (above 1.2 Mbps TI's NESB 2 Mbps one: the genfsk images don't
 transmit at 2 Mbps, TI's CC23xx 2 Mbps GFSK uses ble5 too), then changes
 the rate word (BAUD/BAUDPRE, prescaler 12 at least: with 2 nothing is

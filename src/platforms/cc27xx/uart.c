@@ -1,5 +1,5 @@
 // uart.h on the CC27xx (src/uart.c on the CC2652): UART0 on the XDS110 back
-// channel through board.c, polled; what the radio bench uses. The pins are
+// channel through the board's board.c, polled; what the radio bench uses. The pins are
 // the board's (uart_device_t's ignored)
 
 #include "uart.h"

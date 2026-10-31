@@ -1,9 +1,10 @@
 # TI's LRF layer for the CC27xx radio (BSD-3-Clause), from the SimpleLink Low
 # Power F3 SDK 4aa2c92 (source/ti/drivers/rcl, unchanged): image loading,
 # register setup, trims, synthesizer and TX power, FIFOs. Not the RCL above
-# it (scheduler, command handlers): src/cc27/rf.c drives the PBE instead.
-# ti/log/Log.h, ti/drivers/dpl/HwiP.h and ti/drivers/Power.h are our
-# stand-ins; the RCL_Hal functions LRF needs are in src/cc27/lrf_hal.c.
+# it (scheduler, command handlers): src/platforms/cc27xx/rf.c drives the PBE
+# instead. ti/log/Log.h, ti/drivers/dpl/HwiP.h and ti/drivers/Power.h are
+# our stand-ins; the RCL_Hal functions LRF needs are in
+# src/platforms/cc27xx/lrf_hal.c.
 
 add_library(
     lrf_cc27xxx10

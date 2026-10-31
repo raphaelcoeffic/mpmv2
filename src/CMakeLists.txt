@@ -101,9 +101,10 @@ if (BOARD STREQUAL "XJT_LITE")
     return()
 endif()
 
-# CC2755P10 LaunchPad: CC27xx driverlib, its own applications (cc27/cc27.cmake)
+# CC2755P10 LaunchPad: the CC27xx platform, its own applications
+# (boards/cc2755p10_lp/board.cmake)
 if (BOARD STREQUAL "CC2755P10_LP")
-    include(cc27/cc27.cmake)
+    include(boards/cc2755p10_lp/board.cmake)
     return()
 endif()
 
