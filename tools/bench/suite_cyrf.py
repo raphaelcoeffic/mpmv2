@@ -94,14 +94,7 @@ def main():
     ap.add_argument("--trim", type=int, default=0, help="CC2652 trim in kHz (default 0)")
     rig.common_args(ap, period=20000, count=100)
     a = ap.parse_args()
-    fails = 0
-    mpm, cc = rig.open_devices()
-    with mpm, cc:
-        for c in cases(a.names, a.trim, a.ch, a.period, a.count, a.dir):
-            r = rig.run_case(mpm, cc, c, verbose=a.verbose)
-            rig.print_results(c.name, r)
-            fails += sum(v["good"] < v["count"] for v in r.values())
-    return 1 if fails else 0
+    return rig.run_suite(cases(a.names, a.trim, a.ch, a.period, a.count, a.dir), verbose=a.verbose)
 
 
 if __name__ == "__main__":

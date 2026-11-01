@@ -22,6 +22,7 @@ import time
 from collections import Counter
 
 import rig
+from proto_compare import frskyx_crc
 
 # name: (MPM proto args, CC2652 setup, rx length)
 CASES = {
@@ -32,18 +33,6 @@ CASES = {
     "e010r5": ("81", "preset gfsk1m;rf2500 0e5496ee 0;trim 0;ch 48", 14),
     "frskyl": ("67 0 0 0 1", "cc2652_frskyl.txt", 17),
 }
-
-_T = [0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF,
-      0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7]
-
-
-def frskyx_crc(data: bytes, init: int = 0) -> int:
-    c = init
-    for b in data:
-        v = ((c >> 8) ^ b) & 0xFF
-        c = ((c << 8) ^ _T[v & 0x0F] ^ (0x1081 * (v >> 4))) & 0xFFFF
-    return c
-
 
 def frskyl_ok(p: bytes) -> bool:
     return len(p) >= 17 and (p[15] << 8 | p[16]) in {frskyx_crc(p[1:15], n) for n in range(64)}
@@ -76,19 +65,17 @@ def main():
         time.sleep(a.secs)
         print("cc2652", cc.cmd("stop"))
         print("mpm", mpm.cmd("stop"))
-        lines = rig.events(cc)
+        pkts = rig.packets(cc, good=False)
 
     res, payloads, seq, prev = Counter(), Counter(), [], None
-    for e in lines:
-        p = e.split()
-        data = bytes.fromhex(p[3]) if "=" not in p[3] else b""
-        ok = frskyl_ok(data) if proto.split()[0] == "67" else rig.flag(e, "crc") != "bad"
+    for p in pkts:
+        ok = frskyl_ok(p.data) if proto.split()[0] == "67" else p.crc_ok is not False
         res["crc ok" if ok else "crc bad"] += 1
-        payloads[f"{p[3]} {'ok' if ok else 'BAD'}"] += 1
-        t = int(p[1])
+        payloads[f"{p.data.hex()} {'ok' if ok else 'BAD'}"] += 1
+        t = p.time_us
         seq.append(f"{'' if prev is None else t - prev}{'' if ok else '*'}")
         prev = t
-    print(f"{len(lines)} packets: {dict(res)}")
+    print(f"{len(pkts)} packets: {dict(res)}")
     if a.seq:
         print(" ".join(seq))
     for k, v in payloads.most_common(a.top):

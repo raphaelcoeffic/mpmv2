@@ -50,11 +50,13 @@ class RxPacket:
 
     @staticmethod
     def parse(line: str) -> RxPacket:
-        # @rx <us> <ch> <hex> [crc=ok|bad] [rpd=0|1]
+        # @rx <us> <ch> <hex> [crc=ok|bad] [rpd=0|1] [rssi=...]; no hex for an
+        # empty payload
         parts = line.split()
-        flags = dict(p.split("=", 1) for p in parts[4:] if "=" in p)
+        data = parts[3] if len(parts) > 3 and "=" not in parts[3] else ""
+        flags = dict(p.split("=", 1) for p in parts[3:] if "=" in p)
         crc = flags.get("crc")
-        return RxPacket(int(parts[1]), int(parts[2]), bytes.fromhex(parts[3]),
+        return RxPacket(int(parts[1]), int(parts[2]), bytes.fromhex(data),
                         None if crc is None else crc == "ok", flags)
 
 

@@ -69,8 +69,7 @@ def rssi(tx: Bench, rx: Bench, payload: bytes, n: int, period: int, bad_ok: bool
     rx.cmd("stop")
     tx.cmd("stop")
     time.sleep(0.05)
-    rs = [int(r) for e in rig.events(rx) if bad_ok or "crc=bad" not in e
-          if (r := rig.flag(e, "rssi")) is not None]
+    rs = [int(r) for p in rig.packets(rx, good=not bad_ok) if (r := p.flags.get("rssi")) is not None]
     return statistics.median(rs) if rs else None
 
 

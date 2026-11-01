@@ -89,7 +89,7 @@ class Rig:
         time.sleep(BIND_SECS)
         rx.cmd("stop")
         time.sleep(0.1)
-        packets = [e.split()[3] for e in rig.events(rx) if "crc=bad" not in e]
+        packets = [p.data.hex() for p in rig.packets(rx)]
         resp = Counter(p for p in packets if p.startswith(prefix))
         if a.sub == 4 and resp:
             r = bytes.fromhex(resp.most_common(1)[0][0])

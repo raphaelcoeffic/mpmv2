@@ -56,13 +56,9 @@ def listen(rx: Bench, setup: str, secs: float):
     t_end = time.time() + secs
     try:
         while time.time() < t_end:
-            for e in rig.events(rx):
-                f = e.split()
-                if len(f) < 4 or "crc=bad" in e:
-                    continue
-                p = bytes.fromhex(f[3])
-                if xk_ok(p):
-                    yield int(f[1]), p
+            for p in rig.packets(rx):
+                if xk_ok(p.data):
+                    yield p.time_us, p.data
             time.sleep(0.01)
     finally:
         rx.cmd("stop")

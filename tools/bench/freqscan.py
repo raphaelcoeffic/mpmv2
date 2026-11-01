@@ -46,9 +46,9 @@ def main():
                 time.sleep(0.02)
             time.sleep(0.1)
             rx.cmd("stop")
-            ev = rig.events(rx)
-            good = sum(e.split()[3].startswith(payload) and rig.flag(e, "crc") != "bad" for e in ev)
-            print(f"{off:+6d} kHz: {len(ev)} received, {good}/10 right", flush=True)
+            pkts = rig.packets(rx, good=False)
+            good = sum(p.data.hex().startswith(payload) and p.crc_ok is not False for p in pkts)
+            print(f"{off:+6d} kHz: {len(pkts)} received, {good}/10 right", flush=True)
     return 0
 
 

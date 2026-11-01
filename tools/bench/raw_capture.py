@@ -58,9 +58,9 @@ def main():
         time.sleep(0.2)
         print("cc2652:", cc.cmd("stop"))
         caps, rssi = Counter(), {}
-        for e in rig.events(cc):
-            caps[e.split()[3]] += 1
-            rssi[e.split()[3]] = rig.flag(e, "rssi")
+        for p in rig.packets(cc, good=False):
+            caps[p.data.hex()] += 1
+            rssi[p.data.hex()] = p.flags.get("rssi")
     for k, v in caps.most_common():
         print(f"{v:4d} {k} rssi={rssi[k]}")
     return 0

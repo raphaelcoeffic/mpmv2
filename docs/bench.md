@@ -358,7 +358,9 @@ tools/bench/link.py --mpm frskyd.txt --cc cc2652_frskyd.txt \
 `mpm_bench.py` can be imported too: `Bench(port).cmd("ch 10")`,
 `Bench.packets(seconds)`. `rig.py` holds what the test scripts share: device
 setup, setups as `;`-separated commands or example files
-(`"hott.txt;ch 10"`), and the two-way link test.
+(`"hott.txt;ch 10"`), the received packets (`packets()`), the two-way link
+test, a suite's run (`run_suite()`) and the suites' tests (`suite_cases()`,
+`suite_setups()`: what `compare.py`, `losses.py` and `autotrim.py` run).
 
 | Script | What it does |
 |---|---|

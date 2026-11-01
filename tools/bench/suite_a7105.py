@@ -72,19 +72,7 @@ def main():
     ap.add_argument("--trim", type=int, default=90, help="CC2652 trim in kHz (default 90)")
     rig.common_args(ap, period=5000, count=500)
     a = ap.parse_args()
-    fails = 0
-    mpm, cc = rig.open_devices()
-    with mpm, cc:
-        r, last = {}, None
-        for c in list(cases(a.names, a.trim, a.ch, a.period, a.count, a.dir)) + [None]:
-            if last and (c is None or c.name != last):
-                rig.print_results(last, r)
-                fails += sum(v["good"] < v["count"] for v in r.values())
-                r = {}
-            if c:
-                r |= rig.run_case(mpm, cc, c, verbose=a.verbose)
-                last = c.name
-    return 1 if fails else 0
+    return rig.run_suite(cases(a.names, a.trim, a.ch, a.period, a.count, a.dir), verbose=a.verbose)
 
 
 if __name__ == "__main__":

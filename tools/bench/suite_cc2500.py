@@ -100,23 +100,18 @@ def main():
     ap.add_argument("--phy", action="store_true", help="only print the PHY derived from the MPM registers")
     rig.common_args(ap, period=0, count=200)
     a = ap.parse_args()
-    fails = 0
-    mpm, cc = rig.open_devices()
-    with mpm, cc:
-        if a.phy:
+    if a.phy:
+        mpm, cc = rig.open_devices()
+        with mpm, cc:
             for name in a.names or list(P):
                 rig.run(mpm, P[name][0])
                 p = phy(bytes.fromhex(mpm.cmd("r 0x00 0x2f")))
                 print(f"{name}: rate={p['rate']:.0f} preamble={p['pre']} PKTLEN={p['pktlen']}\n  "
                       + "\n  ".join(p["cmds"]))
-            return 0
-        for c in cases(mpm, a.names, a.trim, a.period, a.count, a.dir):
-            # pwr applies at once and is kept: the default unless the test sets one
-            r = rig.run_case(mpm, cc, c, pwr="default", verbose=a.verbose)
-            rig.print_results(c.name, r)
-            fails += sum(v["good"] < v["count"] for v in r.values())
-        cc.cmd("pwr default")
-    return 1 if fails else 0
+        return 0
+    # pwr applies at once and is kept: the default unless the test sets one
+    return rig.run_suite(lambda mpm: cases(mpm, a.names, a.trim, a.period, a.count, a.dir),
+                         pwr="default", verbose=a.verbose)
 
 
 if __name__ == "__main__":

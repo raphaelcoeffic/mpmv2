@@ -35,10 +35,6 @@ import json
 import sys
 
 import rig
-import suite_a7105
-import suite_cc2500
-import suite_cyrf
-import suite_nrf
 from mpm_bench import Bench, find_port
 
 BOARDS = {
@@ -49,30 +45,7 @@ BOARDS = {
     # 0x10c3 295/300; at -20 dBm 80 to 86%, bit errors; at 0 dBm 0%)
     "cc27": ("cc", "5", {"0x10c3": "0xf6"}),
 }
-FAMILIES = ("cc2500", "a7105", "cyrf", "nrf")
 OK = 0.95  # a window: the offsets where at least 95% arrive
-
-
-NAMES = {"cc2500": list(suite_cc2500.P), "a7105": list(suite_a7105.P), "cyrf": list(suite_cyrf.P),
-         "nrf": list(suite_nrf.NRF) + list(suite_nrf.P)}
-
-
-def cases(mpm: Bench, family: str, names: list[str] | None, count: int | None) -> list[rig.Case]:
-    if names:
-        names = [n for n in names if n in NAMES[family]]
-        if not names:
-            return []
-    if family == "cc2500":
-        cs = list(suite_cc2500.cases(mpm, names))
-    elif family == "a7105":
-        cs = list(suite_a7105.cases(names))
-    elif family == "cyrf":
-        cs = list(suite_cyrf.cases(names))
-    else:
-        cs = list(suite_nrf.cases(names))
-    if count:
-        cs = [dataclasses.replace(c, kw=dict(c.kw, count=count)) for c in cs]
-    return cs
 
 
 def run_board(mpm: Bench, dev: Bench, board: str, case: rig.Case, trim: int, verbose: bool) -> dict:
@@ -129,7 +102,7 @@ def main():
     a = ap.parse_args()
     if a.mode == "report":
         return report(a.args)
-    families = a.args or list(FAMILIES)
+    families = a.args or list(rig.FAMILIES)
     count = a.count or (50 if a.mode == "sweep" else None)
     centres = {}
     if a.trims:
@@ -163,7 +136,7 @@ def main():
         flip = False
         try:
             for fam in families:
-                for case in cases(mpm, fam, a.names, count):
+                for case in rig.suite_cases(fam, a.names, mpm, count):
                     order = list(a.boards)[::-1] if flip else list(a.boards)
                     flip = not flip
                     offsets = a.offsets if a.mode == "sweep" else [None]

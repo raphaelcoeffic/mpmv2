@@ -67,7 +67,7 @@ def main():
             elif e.startswith("@ev txdone"):
                 break
         time.sleep(0.1)
-        seqs = {e.split()[3][2:4] for e in rig.events(mpm) if rig.flag(e, "crc") != "bad"}
+        seqs = {p.data[1:2] for p in rig.packets(mpm)}
         cc_stats, mpm_stats = cc.cmd("stop"), mpm.cmd("stop")
     print(f"{a.rate} dpl={a.dpl} retries={a.retries} window={a.window}"
           + (f" ackpl={len(a.ackpl) // 2}B" if a.ackpl else ""))

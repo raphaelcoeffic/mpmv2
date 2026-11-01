@@ -17,8 +17,9 @@ trim found. fixed<N>: plain trim N, no learning. --sweep: the MPM sends at
 each trim, median and spread of the estimate, its slope against the trim
 (about -1: the estimate's scale) and the trim where it is 0.
 
-Families: a7105, cc2500, cyrf (suite_<family>.py setups), nrf (suite_nrf.py
-plain NRF24L01 setups: nrf1m, nrf250k, nrf2m, nrf2mble).
+Families: a7105, cc2500, cyrf, nrf: the tests of suite_<family>.py (rig.py's
+suite_setups()), at their channel (the plain NRF24L01 ones at address
+e7e7e7e7e7).
 """
 
 import argparse
@@ -27,44 +28,22 @@ import sys
 import time
 
 import rig
-import suite_a7105
-import suite_cc2500
-import suite_cyrf
-import suite_nrf
 
 
 def setups(mpm, a):
-    """(MPM TX setup, MPM RX setup, CC2652 setup, payload, period_us, cc2500), trims removed."""
+    """(MPM TX setup, MPM RX setup, CC2652 setup, payload, period_us, cc2500): the
+    suite test's (nrf: address e7e7e7e7e7) at its channel, trims removed."""
+    s = rig.suite_setups(a.family, a.name, mpm, **({"addrs": ["e7e7e7e7e7"]} if a.family == "nrf" else {}))
+
+    def at_ch(cmds):
+        if s.case.kw.get("ch") is None or any(x.startswith("ch ") for x in cmds):
+            return cmds
+        return cmds + [f"ch {s.case.kw['ch']}"]
+
     cc2500 = a.family == "cc2500"
-    period = 5000
-    if cc2500:
-        m, c, n = suite_cc2500.P[a.name]
-        mtx = mrx = rig.commands(m)
-        rig.run(mpm, mtx)
-        p = suite_cc2500.phy(bytes.fromhex(mpm.cmd("r 0x00 0x2f")))
-        n = n or (min(p["pktlen"], 40) if p["var"] else p["pktlen"])
-        payload = rig.pattern(n)
-        if p["var"]:
-            payload = bytes([n - 1]) + payload[1:]
-        airtime = (n + p["pre"] + 6) * 8 * (2 if p["fec"] else 1) / p["rate"] * 1e6
-        period = max(3000, int(airtime) + 2000)
-        cc = rig.commands(c if "ch " in c else c + ";ch 0")
-    elif a.family == "cyrf":
-        m, c, n, m_rx, c_tx = (suite_cyrf.P[a.name] + ("", ""))[:5]
-        mtx, mrx = rig.commands(m), rig.commands(m) + rig.commands(m_rx)
-        cc = rig.commands(c) + rig.commands(c_tx)
-        payload = rig.pattern(n)
-    elif a.family == "nrf":
-        m, c = suite_nrf.nrf_setups(a.name, "e7e7e7e7e7")
-        mtx = mrx = rig.commands(m) + ["ch 40"]
-        cc = rig.commands(c) + ["ch 40"]
-        payload = rig.pattern(16)
-    else:
-        m_tx, m_rx, c, n = suite_a7105.setups(a.name)
-        mtx, mrx, cc = (rig.commands(s) + ["ch 170"] for s in (m_tx, m_rx, c))
-        payload = rig.pattern(n)
-    cc = [x for x in cc if not x.startswith("trim")] + rig.commands(a.cc_extra)
-    return mtx, mrx, cc, payload, period, cc2500
+    period = s.case.kw["period"] if cc2500 else 5000
+    cc = [x for x in at_ch(s.cc_tx) if not x.startswith("trim")] + rig.commands(a.cc_extra)
+    return at_ch(s.mpm_tx), at_ch(s.mpm_rx), cc, s.payload, period, cc2500
 
 
 def receive(mpm, cc, mtx, payload, period, count) -> list[str]:
@@ -103,7 +82,7 @@ def sweep(mpm, cc, s, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("family", choices=("a7105", "cc2500", "cyrf", "nrf"))
+    ap.add_argument("family", choices=rig.FAMILIES)
     ap.add_argument("name", help="setup of the family's suite")
     ap.add_argument("modes", nargs="+", help="autotrim offsets in kHz or fixed<trim>; --sweep: trims")
     ap.add_argument("--start", type=int, default=0, help="trim before learning (default 0)")

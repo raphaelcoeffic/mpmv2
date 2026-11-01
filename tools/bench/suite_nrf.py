@@ -68,14 +68,7 @@ def main():
     ap.add_argument("--addr", action="append", help="NRF addresses (TX_ADDR order), repeatable")
     rig.common_args(ap, period=5000, count=250)
     a = ap.parse_args()
-    fails = 0
-    mpm, cc = rig.open_devices()
-    with mpm, cc:
-        for c in cases(a.names, a.addr, a.period, a.count, a.dir):
-            r = rig.run_case(mpm, cc, c, verbose=a.verbose)
-            rig.print_results(c.name, r)
-            fails += sum(v["good"] < v["count"] for v in r.values())
-    return 1 if fails else 0
+    return rig.run_suite(cases(a.names, a.addr, a.period, a.count, a.dir), verbose=a.verbose)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ from typing import Any
 
 import serial
 
+import rig
 from mpm_bench import Bench, find_port
 
 FRAME_PERIOD = 0.007
@@ -297,26 +298,17 @@ def cmd_link(r: Radio, a):
     chans = [CH_MIN + (CH_MAX - CH_MIN) * i // 15 for i in range(16)]
     sub_rf = {0: "", 1: "w 0x06 0x22"}[a.sub]
     with Bench(find_port("mpm")) as mpm:
-        for c in [f"preset nrf", "w 0x00 0e", f"w 0x0a {TEST_ADDR}", f"w 0x10 {TEST_ADDR}",
+        for c in ["preset nrf", "w 0x00 0e", f"w 0x0a {TEST_ADDR}", f"w 0x10 {TEST_ADDR}",
                   f"w 0x11 {TEST_LEN:02x}", sub_rf, f"ch {a.option}"]:
             if c:
                 mpm.cmd(c)
         r.set(protocol=PROTO_TEST, sub=a.sub, option=a.option, rx_num=3, channels=chans)
         time.sleep(0.3)
-        while not mpm.events.empty():
-            mpm.events.get_nowait()
+        rig.drain(mpm)
         mpm.cmd(f"rx {TEST_LEN}")
         time.sleep(a.count * 0.004)
         mpm.cmd("stop")
-        pkts = []
-        while not mpm.events.empty():
-            e = mpm.events.get_nowait()
-            if not e.startswith("@rx"):
-                continue
-            f = e.split()
-            if "crc=bad" in e or len(f) < 4:
-                continue
-            pkts.append((int(f[1]), bytes.fromhex(f[3])))
+        pkts = [(p.time_us, p.data) for p in rig.packets(mpm)]
     if not pkts:
         print("no packets")
         return 1

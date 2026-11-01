@@ -75,17 +75,22 @@ def frskyv_capture(addr: bytes, sub: int) -> list[Capture]:
             Capture("data", "preset frskyv;ch 6", 16, mask=(3, 4, 14))]
 
 
-def frskyx_crc_ok(p: bytes) -> bool:
-    """FrSkyX_crc() over packet[3..len-2], in the last 2 bytes"""
-    crc = 0
-    for b in p[3:-2]:
-        v = (crc >> 8) ^ b
-        crc = ((crc << 8) ^ FRSKYX_CRC_SHORT[v & 15] ^ (0x1081 * (v >> 4))) & 0xFFFF
-    return len(p) > 5 and p[-2:] == crc.to_bytes(2, "big")
-
-
 FRSKYX_CRC_SHORT = [0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF,
                     0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7]
+
+
+def frskyx_crc(data: bytes, init: int = 0) -> int:
+    """FrSkyX_crc() (FrSkyDVX_common.ino)"""
+    crc = init
+    for b in data:
+        v = (crc >> 8) ^ b
+        crc = ((crc << 8) ^ FRSKYX_CRC_SHORT[v & 15] ^ (0x1081 * (v >> 4))) & 0xFFFF
+    return crc
+
+
+def frskyx_crc_ok(p: bytes) -> bool:
+    """FrSkyX_crc() over packet[3..len-2], in the last 2 bytes"""
+    return len(p) > 5 and p[-2:] == frskyx_crc(p[3:-2]).to_bytes(2, "big")
 
 
 def frskyx_capture(addr: bytes, sub: int, x2: bool = False) -> list[Capture]:
@@ -292,12 +297,7 @@ def capture(rx: Bench, setup: str, rx_len: int, start, stop, secs: float) -> lis
     stop()
     rx.cmd("stop")
     time.sleep(0.1)
-    out = []
-    for e in rig.events(rx):
-        f = e.split()
-        if len(f) >= 4 and "crc=bad" not in e:
-            out.append((int(f[1]), f[3]))
-    return out
+    return [(p.time_us, p.data.hex()) for p in rig.packets(rx)]
 
 
 def summary(pkts: list[tuple[int, str]]) -> str:

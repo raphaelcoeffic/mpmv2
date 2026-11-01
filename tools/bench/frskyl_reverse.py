@@ -65,9 +65,9 @@ def main():
             time.sleep(a.count * 0.02 + 0.3)
             mpm.cmd("stop")
             starts = Counter()
-            for e in rig.events(mpm):
+            for p in rig.packets(mpm, good=False):
                 total_chunks += 1
-                d = bytes.fromhex(e.split()[3])[:60]
+                d = p.data[:60]
                 rb = [(d[i // 8] >> (7 - i % 8)) & 1 for i in range(480)]
                 err, q = min((sum(x != y for x, y in zip(rb, bits[q:q + 480])), q) for q in syncs)
                 starts[(q, min(err, 99))] += 1

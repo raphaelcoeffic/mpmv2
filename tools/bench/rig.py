@@ -1,6 +1,6 @@
 """Shared helpers of the interoperability tests: the two bench devices (a 4-in-1
-MULTI-Module with the bench firmware and the mpm-v2 CC2652), their setups and
-the two-way link test. See docs/bench.md.
+MULTI-Module with the bench firmware and the mpm-v2 CC2652), their setups, the
+received packets, the two-way link test and the suites' tests. See docs/bench.md.
 
 Ports: $MPM_PORT / $CC_PORT / $V2_PORT, else detected (mpm_bench.find_port()).
 A setup is a list of commands separated by ';'. An item ending in .txt is a
@@ -10,12 +10,14 @@ command file, looked up in examples/ when it isn't a path:
 
 from __future__ import annotations
 
+import dataclasses
+import importlib
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mpm_bench import Bench, find_port, setup_lines
+from mpm_bench import Bench, RxPacket, find_port, setup_lines
 
 EXAMPLES = Path(__file__).resolve().parent / "examples"
 SEQ = 2  # payload byte replaced by the packet counter
@@ -68,6 +70,13 @@ def events(dev: Bench, prefix: str = "@rx") -> list[str]:
     return out
 
 
+def packets(dev: Bench, good: bool = True) -> list[RxPacket]:
+    """The packets received since the last call (events()); good: without
+    the ones with crc=bad."""
+    pkts = [RxPacket.parse(e) for e in events(dev)]
+    return [p for p in pkts if p.crc_ok is not False] if good else pkts
+
+
 def pattern(n: int) -> bytes:
     """Test payload: no long runs, every byte different from its neighbours."""
     return bytes((0xA5 + 0x3B * i) & 0xFF for i in range(n))
@@ -93,14 +102,13 @@ def send_and_count(tx: Bench, rx: Bench, payload: bytes, rx_len: int, period: in
     tx.wait_event("@ev txdone", count * period / 1e6 + 2)
     time.sleep(0.2)
     seen, good, crc_bad, other = set(), 0, 0, 0
-    for e in events(rx):
-        f = e.split()[3]
-        d = b"" if "=" in f else bytes.fromhex(f)
+    for p in packets(rx, good=False):
+        d = p.data
         body = d[:len(payload)]
         exp = bytearray(payload)
         if len(body) > seq:
             exp[seq] = body[seq]
-        if flag(e, "crc") == "bad":
+        if p.crc_ok is False:
             crc_bad += 1
             continue
         if body != bytes(exp):
@@ -194,6 +202,85 @@ def print_results(name: str, results: dict):
     for way, label in (("fwd", "MPM -> CC2652"), ("rev", "CC2652 -> MPM")):
         if way in results:
             print(f"{name:14s} {label}: {fmt(results[way])}", flush=True)
+
+
+def run_suite(cases, *, pwr: str | None = None, verbose: bool = False) -> int:
+    """A suite's main: its cases (or a function of the MPM giving them) on the
+    two devices, the results of each test name printed together. pwr: as
+    run_case(), and set again at the end. Returns 1 if a packet was lost."""
+    fails = 0
+    mpm, cc = open_devices()
+    with mpm, cc:
+        name, r = None, {}
+        for c in (cases(mpm) if callable(cases) else cases):
+            if name is not None and c.name != name:
+                print_results(name, r)
+                fails += sum(v["good"] < v["count"] for v in r.values())
+                r = {}
+            r |= run_case(mpm, cc, c, pwr=pwr, verbose=verbose)
+            name = c.name
+        if name is not None:
+            print_results(name, r)
+            fails += sum(v["good"] < v["count"] for v in r.values())
+        if pwr:
+            cc.cmd(f"pwr {pwr}")
+    return 1 if fails else 0
+
+
+# The suites (suite_<family>.py) and their tests
+FAMILIES = ("cc2500", "a7105", "cyrf", "nrf")
+
+
+def suite(family: str):
+    return importlib.import_module(f"suite_{family}")
+
+
+def suite_names(family: str) -> list[str]:
+    m = suite(family)
+    return (list(m.NRF) if family == "nrf" else []) + list(m.P)
+
+
+def suite_cases(family: str, names: list[str] | None = None, mpm: Bench | None = None,
+                count: int | None = None, **kw) -> list[Case]:
+    """The cases of a suite's tests (names: those of the family, None: all;
+    none of them: no case). The CC2500 suite sets the MPM up for each
+    (mpm). count: instead of the suite's; kw: the suite's cases() arguments."""
+    if names:
+        names = [n for n in names if n in suite_names(family)]
+        if not names:
+            return []
+    m = suite(family)
+    cs = list(m.cases(mpm, names, **kw) if family == "cc2500" else m.cases(names, **kw))
+    if count:
+        cs = [dataclasses.replace(c, kw=dict(c.kw, count=count)) for c in cs]
+    return cs
+
+
+@dataclass
+class Setups:
+    """A suite test's commands for one link, trim and channel left out: the
+    MPM sending (mpm_tx) or receiving (mpm_rx), the CC2652 receiving (cc_rx)
+    or sending (cc_tx, its power word first if the test has one)."""
+    mpm_tx: list[str]
+    mpm_rx: list[str]
+    cc_rx: list[str]
+    cc_tx: list[str]
+    payload: bytes
+    case: Case  # the first (period, channel: case.kw)
+
+
+def suite_setups(family: str, name: str, mpm: Bench | None = None, **kw) -> Setups:
+    """The commands of a suite test (suite_cases() arguments), as link_test()
+    gives them to each direction"""
+    cs = suite_cases(family, [name], mpm, **kw)
+    if not cs:
+        raise ValueError(f"no {family} test {name}")
+    fwd = next((c for c in cs if c.kw.get("direction", "both") in ("both", "fwd")), cs[0])
+    rev = next((c for c in cs if c.kw.get("direction", "both") in ("both", "rev")), cs[0])
+    pwr = [f"pwr {cs[0].pwr}"] if cs[0].pwr else []
+    return Setups(commands(fwd.mpm_setup), commands(rev.mpm_setup) + commands(rev.kw.get("mpm_rx_setup")),
+                  pwr + commands(fwd.cc_setup), pwr + commands(rev.cc_setup) + commands(rev.kw.get("cc_rx_setup")),
+                  cs[0].payload, cs[0])
 
 
 def common_args(ap, period: int, count: int):

@@ -14,9 +14,8 @@ bits are wrong, the RSSI, the receiver counters and the timing of the losses.
   losses.py nrf nrf2m --cc-extra "chip sx1281"   NRF -> MPM v2 SX1281, 2 Mbps
   losses.py nrf nrf2mble                       NRF -> CC2652 Bluetooth LE 2M PHY
 
-Families: cyrf (suite_cyrf.py setups), a7105 (suite_a7105.py setups), nrf
-(the plain NRF24L01 tests of suite_nrf.py: nrf1m, nrf250k, nrf2m, nrf2mble). The
-packet counter is at byte 2, so --count is at most 256.
+Families: cyrf, a7105, nrf: the tests of suite_<family>.py (rig.py's
+suite_setups()). The packet counter is at byte 2, so --count is at most 256.
 
 Losses locked to the 102.4 ms cycle (--timing: most of them in one phase
 window, against 2 / (102.4 ms / period) if random) are Wi-Fi beacons: an
@@ -31,26 +30,18 @@ import sys
 import time
 
 import rig
-import suite_a7105
-import suite_cyrf
-import suite_nrf
 
 BEACON_US = 102400
 
 
 def family_setups(a) -> tuple[list[str], list[str], int]:
-    """(TX setup, RX setup, payload length) for a.family / a.name / a.dir."""
-    if a.family == "cyrf":
-        mpm_setup, cc_setup, n, mpm_rx, cc_tx = (suite_cyrf.P[a.name] + ("", ""))[:5]
-        cc_setup = f"trim 0;{cc_setup}"
-        mpm = rig.commands(mpm_setup) + (rig.commands(mpm_rx) if a.dir == "rev" else [])
-        cc = rig.commands(cc_setup) + (rig.commands(cc_tx) if a.dir == "rev" else [])
-        return mpm, cc, n
-    if a.family == "nrf":
-        mpm_setup, cc_setup = suite_nrf.nrf_setups(a.name, a.addr)
-        return rig.commands(mpm_setup), rig.commands(cc_setup), 16
-    mpm_tx, mpm_rx, cc_setup, n = suite_a7105.setups(a.name, a.trim)
-    return rig.commands(mpm_rx if a.dir == "rev" else mpm_tx), rig.commands(cc_setup), n
+    """(TX setup, RX setup, payload length) for a.family / a.name / a.dir: the
+    suite test's, the CC2652 at its trim (a7105: a.trim), channel left out."""
+    kw = {"nrf": {"addrs": [a.addr]}, "a7105": {"trim": a.trim}}.get(a.family, {})
+    s = rig.suite_setups(a.family, a.name, **kw)
+    rev = a.dir == "rev"
+    cc = [f"trim {s.case.trim}"] + (s.cc_tx if rev else s.cc_rx)
+    return (s.mpm_rx if rev else s.mpm_tx), cc, len(s.payload)
 
 
 def beacon_phase(lost: list[int], period_us: int) -> tuple[float, float]:
@@ -72,18 +63,17 @@ def run_once(tx, rx, payload: bytes, a) -> dict:
     time.sleep(0.2)
     good, bad, other = set(), {}, 0
     rssi = collections.Counter()
-    for e in rig.events(rx):
-        f = e.split()
-        d = b"" if "=" in f[3] else bytes.fromhex(f[3])
+    for p in rig.packets(rx, good=False):
+        d = p.data
         if len(d) <= rig.SEQ:
             other += 1
             continue
-        if (r := rig.flag(e, "rssi")) is not None:
+        if (r := p.flags.get("rssi")) is not None:
             rssi[int(r)] += 1
         exp = bytearray(payload)
         exp[rig.SEQ] = d[rig.SEQ]
         body = d[:n]
-        if rig.flag(e, "crc") == "bad" or body != bytes(exp):
+        if p.crc_ok is False or body != bytes(exp):
             if len(body) < n:
                 other += 1
                 continue
@@ -142,7 +132,7 @@ def main():
         ap.error("--count: at most 256 (8 bit counter)")
     a.period = a.period or (10000 if a.family == "cyrf" else 5000)
     ch = a.ch if a.ch is not None else {"cyrf": 30, "a7105": 170, "nrf": 40}[a.family]
-    names = {"cyrf": suite_cyrf.P, "a7105": suite_a7105.P, "nrf": suite_nrf.NRF}[a.family]
+    names = rig.suite_names(a.family)
     if a.name not in names:
         ap.error(f"unknown {a.family} setup {a.name}: {' '.join(names)}")
     rx_2m = any(s in a.cc_extra + os.environ.get("CC_INIT", "") for s in ("sx1281", "nrf2mble"))
