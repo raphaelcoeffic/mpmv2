@@ -104,11 +104,33 @@ static uint32_t _channel_khz()
   return (uint32_t)((hz + 500) / 1000);
 }
 
+// The last _setup() inputs: frame_init() (about 130 us at 48 MHz) only when
+// they change, not at every TX and RX (the AFHDS2A receivers answer about
+// 1.9 ms after the packet, before the next callback)
+static struct {
+  bool valid;
+  uint8_t id[4], code, rate;
+  uint16_t power;
+} _setup_key;
+
 static bool _prepare()
 {
   radio_phy_t phy;
   frame_t f;
-  if (!_setup(&phy, &f)) return false;
+  if (_setup_key.valid && _phy_on && !memcmp(_setup_key.id, _id, 4) &&
+      _setup_key.code == _reg[A7105_1F_CODE_I] && _setup_key.rate == _reg[A7105_0E_DATA_RATE] &&
+      _setup_key.power == _power) {
+    phy = _phy;
+    f = _frame;
+  } else {
+    _setup_key.valid = false;
+    if (!_setup(&phy, &f)) return false;
+    memcpy(_setup_key.id, _id, 4);
+    _setup_key.code = _reg[A7105_1F_CODE_I];
+    _setup_key.rate = _reg[A7105_0E_DATA_RATE];
+    _setup_key.power = _power;
+    _setup_key.valid = true;
+  }
   if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
     _phy = phy;
     _freq_khz = 0;
@@ -120,10 +142,13 @@ static bool _prepare()
   }
   _frame = f;
   radio_set_sync_word(frame_tx_sync(&_frame), frame_rx_sync(&_frame));
+  // The RF core tunes while the caller encodes its packet, the next radio
+  // call waits for it (CC2650: CMD_FS about 270 us, the AFHDS2A FEC encoding
+  // as long: the receiver's answer ended after the next callback)
   uint32_t khz = _channel_khz();
   if (khz != _freq_khz) {
     _freq_khz = khz;
-    radio_set_frequency(khz);
+    radio_set_frequency_start(khz);
   }
   return true;
 }
