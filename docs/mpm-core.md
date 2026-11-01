@@ -394,11 +394,13 @@ DSM_RX (70: Multi, CloneTX, EraseTX). Not in the reduced build. CloneTX
 binds as a receiver and stores the transmitter's ID (and FrSky's hop table)
 as the EEPROM's clone entry, which FrSky X / D and DSM "Cloned" send with.
 
-One change in `FrSky_Rx_cc2500.c` (marked `mpm-v2`, for upstream too): the
+Two changes in `FrSky_Rx_cc2500.c` (marked `mpm-v2`, for upstream too): the
 tune steps and the bind read `packet_length + 2` bytes, not the whole
 FIFO. An 18 ms tune step holds two packets; with both read as one, the
 length check failed and the tune search never locked. The data phase
-reads one packet at a time as before.
+reads one packet at a time as before. And `FRSKY_RX_TUNE_RANGE` (default
+127, as upstream): the FSCTRL0 steps the tune search covers either way
+(the CC2755 below).
 
 `tools/bench/rx_test.py <case>`: the 4-in-1 (bench `proto`) binds and then
 sends known channels, the port (`-p`: the LaunchPad by default, or the
@@ -419,8 +421,18 @@ the result. MPM v2 (2026-11-01):
 
 CloneTX: FrSkyRX on the MPM v2 stored the 4-in-1's FrSky X ID (259e02) and
 hop table as clone entry, format 1. Not yet tried: a receiver bound to the
-4-in-1 driven by FrSky X "Cloned" from the MPM v2. CC2755 LaunchPad: X and
-X2 as on the MPM v2; D8 open (binds at times, no data).
+4-in-1 driven by FrSky X "Cloned" from the MPM v2.
+
+CC2755 LaunchPad (2026-11-01): the CC27 receives FrSky D 248 kHz off the
+channel as well as on it ([bench.md](bench.md#cc2755p10-launchpad)). With
+upstream's tune search (FSCTRL0 +-127 steps, +-203 kHz) FrSkyRX took the
+real window's low edge and the alias's high edge, then waited for bind
+packets at their middle, where none came. `FRSKY_RX_TUNE_RANGE` 80
+(`mpm_config.h`, this board only) searches +-80 steps: the windows are
+about +-28 steps wide at bind power and the aliases 156 steps away, so a
+transmitter within 48 steps (76 kHz) of the CC27 binds. With the 4-in-1
+(57 kHz below): D8 5/5, bound in 2.4 s, 81-84 frames/s; X and X2 4/4,
+1.3-1.8 s, 109-112 frames/s; channels exact.
 
 ## Storage
 

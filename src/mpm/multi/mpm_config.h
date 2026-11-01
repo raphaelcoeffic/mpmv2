@@ -18,6 +18,15 @@
 // listens (X8R, S8R, V8R4-II: docs/frsky-frequency.md of mpm-v2)
 #define FRSKY_FSCTRL0_OFFSET -25
 
+// FrSkyRX's tune search, FSCTRL0 steps either way (127 upstream). The
+// CC2755 receives FrSky D (31 kbps: samples at 248 kHz) 248 kHz off the
+// channel as well (156 steps, docs/bench.md of mpm-v2), each window about
+// +-28 steps at bind power: +-80 keeps the aliases out and the channel in
+// for a transmitter within 48 steps (76 kHz) of the CC2755
+#ifdef BOARD_CC2755P10_LP
+#define FRSKY_RX_TUNE_RANGE 80
+#endif
+
 #if defined(MPM_REDUCED)
 // The reduced MPM (the XJT-Lite's board.cmake; CC2650, 20 KB of RAM): FrSky
 // D and X, and the WLtoys cars' V2x2 and XK

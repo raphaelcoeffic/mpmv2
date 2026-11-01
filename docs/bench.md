@@ -283,6 +283,22 @@ shows up mirrored about the CC27's channel centre, inverted bits included
 (4-in-1 at -70 kHz: received with the inverted sync word at +30 to +90 kHz),
 which looks like a polarity difference.
 
+FrSky D's aliases: at 31 kbps the samples' rate is 248 kHz (4 x rate x
+PDIF decimation 2), and a sender 248 kHz off is received as well as one on
+the channel, CRC good, the frequency estimate wrapped (2026-11-01: 4-in-1
+`frskyd` on channel 0, CC27 trim swept by 20 kHz: 100% from -60 to 0 kHz
+around the real centre, again from -280 to -240 and from +200 to +240,
+nothing in between). Nothing on the CC27 removes them: BDE2 16 or 31 and
+BDE1 decimating receive nothing at any digital gain (BDE2DECRATIO is a
+plain ratio whatever the header's log2 names: `LRF_programPQ()` multiplies
+by it); the RX at 2 or 4 x the rate (497 kHz) receives 0 to 18% at any
+offset, the vote's samples offset searched or not; an IF of -1 MHz changes
+nothing. They only matter to FrSky RX's tune search
+([mpm-core.md](mpm-core.md#rx-protocols)): FrSky D's telemetry comes on the
+channel the TX listens on (a D8R-II+: 27 frames/s, as the MPM v2), and the
+next channel's sender is 52 kHz from an alias's centre (windows about
+60 kHz wide).
+
 Our OpenOCD branch `cc27xx`
 (`~/Src/openocd-cc27xx`, configure `--enable-xds110 --enable-cmsis-dap`) has a
 flash driver for it, through its XDS110:
