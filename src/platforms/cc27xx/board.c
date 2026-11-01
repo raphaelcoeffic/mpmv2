@@ -12,9 +12,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-// UART0: 48 MHz peripheral clock (CLKSVT / 2)
-#define UART_CLK 48000000
-
 // The HFXT above 48 MHz (ppb): TI's offset for the internal capacitor array
 // at 25 C (PowerCC27XX.c capArrayP0/P1: 10 ppm, 0.07 ppm/C), no temperature
 // tracking. The board or CMake can add the crystal's own error
@@ -80,7 +77,7 @@ void board_uart_init(uint32_t baudrate)
   board_ioc(BOARD_UART_RX, BOARD_UART_IOC | IOC_IOC0_INPEN_EN | IOC_IOC0_PULLCTL_PULL_UP);
 
   UARTDisable(UART0_BASE);
-  UARTConfigSetExpClk(UART0_BASE, UART_CLK, baudrate,
+  UARTConfigSetExpClk(UART0_BASE, BOARD_UART_CLK, baudrate,
                       UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE);
   UARTEnableFifo(UART0_BASE);
   UARTEnable(UART0_BASE);

@@ -28,7 +28,9 @@ bool board_hfxt_wait(uint32_t timeout_us);
 uint32_t board_us(void);
 void board_delay_us(uint32_t us);
 
-// UART0 on the board's pins, 8N1, polled
+// UART0 on the board's pins, 8N1, polled (uart.c: other modes, interrupts).
+// Its clock: the 48 MHz peripheral clock (CLKSVT / 2)
+#define BOARD_UART_CLK 48000000
 void board_uart_init(uint32_t baudrate);
 void uart_putc(uint8_t c);
 void uart_write(const void *buf, uint32_t len);
