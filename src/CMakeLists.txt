@@ -75,6 +75,50 @@ function(mpm_flash_method var)
     set(${var} ${method} PARENT_SCOPE)
 endfunction()
 
+# add_board_elf(<target> <name> <ld> <sources>...): <name>.elf in the build
+# directory, linked by <ld> (with linker/sections.ld) against the
+# platform's driverlib (platform_driverlib, platform.cmake), with the
+# board's and the platform's headers
+function(add_board_elf target name ld)
+    add_executable(${target} ${ARGN})
+    target_include_directories(${target} PRIVATE ${board_dir} ${platform_dir} ${src_include_dirs})
+    target_compile_definitions(${target} PRIVATE ${board_definitions})
+    target_link_libraries(${target} ${platform_driverlib})
+    target_link_options(${target} PRIVATE -L${CMAKE_CURRENT_FUNCTION_LIST_DIR}/linker)
+    set_target_properties(${target} PROPERTIES
+        OUTPUT_NAME ${name}
+        LINKER_FILE ${ld}
+        # Relinked when a script changes
+        LINK_DEPENDS "${ld};${CMAKE_CURRENT_FUNCTION_LIST_DIR}/linker/sections.ld"
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endfunction()
+
+# add_board_app(<name> <ld> <sources>...): add_board_elf() as <name>_elf,
+# and <name>.bin in the build directory (the board's <name> target builds it)
+function(add_board_app name ld)
+    add_board_elf(${name}_elf ${name} ${ld} ${ARGN})
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/${name}.bin
+        COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
+        DEPENDS ${name}_elf
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endfunction()
+
+# add_update_image(<name> <file>): <file> in the build directory, <name>.bin
+# for an update through the boot loader, from the radio or STK500 (CRC,
+# MULTI signature: tools/fw_image.py)
+function(add_update_image name file)
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/${file}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
+                --version ${PROJECT_VERSION} --out ${file}
+        DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin ${CMAKE_SOURCE_DIR}/tools/fw_image.py
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+endfunction()
+
 # Release builds are -Os; the code on the radio's time-critical paths gets
 # -O2: RF core commands and interrupts, the frame encoders and decoders
 # (CYRF6936 sync search, DSM telemetry decoded between callbacks), the

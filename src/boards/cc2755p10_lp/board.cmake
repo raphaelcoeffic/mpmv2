@@ -16,19 +16,10 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 include(platforms/cc27xx/platform.cmake)
 
 # Boot loader in sectors 0 to 3 with the CCFG
-add_executable(bootloader core/bootloader.c ${cc27xx_dir}/bl_port.c ${cc27xx_dir}/board.c
+add_board_elf(bootloader bootloader ${board_dir}/bootloader.ld
+    core/bootloader.c ${platform_dir}/bl_port.c ${platform_dir}/board.c
     ${board_dir}/board.c ${board_dir}/ccfg.c)
-target_compile_definitions(bootloader PRIVATE ${board_definitions})
 target_compile_options(bootloader PRIVATE -Os)
-target_include_directories(bootloader PRIVATE ${board_dir} ${cc27xx_dir} ${src_include_dirs})
-target_link_libraries(bootloader driverlib_cc27xxx10)
-target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-set_target_properties(bootloader PROPERTIES
-    LINKER_FILE ${board_dir}/bootloader.ld
-    # Relinked when a script changes
-    LINK_DEPENDS "${board_dir}/bootloader.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-)
 add_custom_command(
     TARGET bootloader POST_BUILD
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/cc27_ccfg.py
@@ -38,35 +29,14 @@ add_custom_command(
 
 # Target <name>: in the build directory <name>.elf, <name>.bin with the
 # image header (no CRC, already checked) and <name>-update.bin for an
-# STK500 update (tools/fw_image.py: CRC, MULTI signature). flash-<name>:
-# the boot loader, then the application at 0x2000, then a reset
+# STK500 update. flash-<name>: the boot loader, then the application at
+# 0x2000, then a reset
 function(add_cc27_application name)
-    set(elf ${name}_elf)
-    add_executable(${elf} ${ARGN} ${cc27xx_dir}/board.c ${board_dir}/board.c
+    add_board_app(${name} ${board_dir}/app.ld ${ARGN} ${platform_dir}/board.c ${board_dir}/board.c
         core/app_header.c core/syscalls.c)
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc27xx_dir} ${src_include_dirs})
-    target_compile_definitions(${elf} PRIVATE ${board_definitions})
-    target_link_libraries(${elf} driverlib_cc27xxx10)
-    target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-    set_target_properties(${elf} PROPERTIES
-        OUTPUT_NAME ${name}
-        LINKER_FILE ${board_dir}/app.ld
-        # Relinked when a script changes
-        LINK_DEPENDS "${board_dir}/app.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-
-    set(images ${name}.bin ${name}-update.bin)
-    list(TRANSFORM images PREPEND ${CMAKE_BINARY_DIR}/)
-    add_custom_command(
-        OUTPUT ${images}
-        COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
-                --version ${PROJECT_VERSION} --out ${name}-update.bin
-        DEPENDS ${elf} ${CMAKE_SOURCE_DIR}/tools/fw_image.py
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-    add_custom_target(${name} ALL DEPENDS ${images} bootloader)
+    add_update_image(${name} ${name}-update.bin)
+    add_custom_target(${name} ALL
+        DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin ${CMAKE_BINARY_DIR}/${name}-update.bin bootloader)
 
     add_custom_target(flash-${name}
         COMMAND ${cc27_openocd} -f board/ti/lp-em-cc2755p10.cfg
@@ -84,7 +54,7 @@ add_cc27_application(cc27-test ${board_dir}/test.c)
 # Radio bring-up: a shell on UART0 driving the radio (TI's NESB PHY, raw
 # framing). The PHY files come from tools/cc27_phy.py nesb_1m_2m_cc27xx
 add_cc27_application(cc27-radio ${board_dir}/radio_test.c ${cc27xx_rf_sources}
-    ${cc27xx_dir}/phy_ble.c)
+    ${platform_dir}/phy_ble.c)
 target_link_libraries(cc27-radio_elf lrf_cc27xxx10)
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,

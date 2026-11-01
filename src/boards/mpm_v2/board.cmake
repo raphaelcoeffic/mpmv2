@@ -15,11 +15,11 @@ else()
 endif()
 
 set(firmware_sources
-    ${cc26xx_dir}/board.c
+    ${platform_dir}/board.c
     ${cc26xx_hal_sources}
-    ${cc26xx_dir}/dma.c
-    ${cc26xx_dir}/ppm.c
-    ${cc26xx_dir}/spi.c
+    ${platform_dir}/dma.c
+    ${platform_dir}/ppm.c
+    ${platform_dir}/spi.c
     ${board_dir}/board.c
     ${board_dir}/flash_driver.c
     ${board_dir}/board_app.c
@@ -39,19 +39,9 @@ set(firmware_sources
 )
 
 # Boot loader in sector 0 with CCFG, applications at 0x2000 (docs/update.md)
-add_executable(bootloader core/bootloader.c ${cc26xx_dir}/bl_port.c ${cc26xx_dir}/board.c
-    ${board_dir}/board.c)
-target_compile_definitions(bootloader PRIVATE ${board_definitions})
+add_board_elf(bootloader bootloader ${board_dir}/bootloader.ld
+    core/bootloader.c ${platform_dir}/bl_port.c ${platform_dir}/board.c ${board_dir}/board.c)
 target_compile_options(bootloader PRIVATE -Os)
-target_include_directories(bootloader PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
-target_link_libraries(bootloader ${cc26xx_driverlib})
-target_link_options(bootloader PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-set_target_properties(bootloader PROPERTIES
-    LINKER_FILE ${board_dir}/bootloader.ld
-    # Relinked when a script changes
-    LINK_DEPENDS "${board_dir}/bootloader.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-)
 if (USE_CCFG)
     message("## Include CCFG")
     target_sources(bootloader PRIVATE ${board_dir}/ccfg.c)
@@ -75,56 +65,34 @@ endif()
 # changes, and with Python <file>.bin for the radio (CRC, MULTI signature).
 # flash-<name>: boot loader and application through the board's debug probe.
 function(add_application name file)
-    set(elf ${name}_elf)
-    add_executable(${elf} ${firmware_sources} ${ARGN})
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
-    target_compile_definitions(${elf} PRIVATE ${board_definitions})
-    target_mpm(${elf})
+    add_board_app(${name} ${board_dir}/app.ld ${firmware_sources} ${ARGN})
+    target_mpm(${name}_elf)
     if (DEBUG)
-        target_compile_definitions(${elf} PRIVATE DEBUG)
+        target_compile_definitions(${name}_elf PRIVATE DEBUG)
     endif()
-    target_link_libraries(${elf}
-        ${cc26xx_driverlib}
-        segger_rtt
-        littlefs
-    )
-    target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-    set_target_properties(${elf} PROPERTIES
-        OUTPUT_NAME ${name}
-        LINKER_FILE ${board_dir}/app.ld
-        # Relinked when a script changes
-        LINK_DEPENDS "${board_dir}/app.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    target_link_libraries(${name}_elf segger_rtt littlefs)
 
     # The whole flash: the application added to the boot loader at 0x2000
     set(app_section
         --add-section .app=${name}.bin
         --set-section-flags .app=alloc,load,readonly,contents
         --change-section-address .app=0x2000)
-    set(images ${name}.bin ${file}-full.bin ${file}-full.hex)
+    set(images ${file}-full.bin ${file}-full.hex)
     list(TRANSFORM images PREPEND ${CMAKE_BINARY_DIR}/)
     add_custom_command(
         OUTPUT ${images}
-        COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
         COMMAND ${CMAKE_OBJCOPY} -O binary --gap-fill 0xff ${app_section}
                 bootloader.elf ${file}-full.bin
         COMMAND ${CMAKE_OBJCOPY} -O ihex ${app_section}
                 bootloader.elf ${file}-full.hex
-        DEPENDS ${elf} bootloader
+        DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin bootloader
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
     if (Python3_Interpreter_FOUND)
-        add_custom_command(
-            OUTPUT ${CMAKE_BINARY_DIR}/${file}.bin
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/fw_image.py ${name}.bin
-                    --version ${PROJECT_VERSION} --out ${file}.bin
-            DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin ${CMAKE_SOURCE_DIR}/tools/fw_image.py
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        )
+        add_update_image(${name} ${file}.bin)
         list(APPEND images ${CMAKE_BINARY_DIR}/${file}.bin)
     endif()
-    add_custom_target(${name} ALL DEPENDS ${images})
+    add_custom_target(${name} ALL DEPENDS ${CMAKE_BINARY_DIR}/${name}.bin ${images})
 
     if (BOARD STREQUAL "CC2652R1_LAUNCHXL")
         set(flash_args

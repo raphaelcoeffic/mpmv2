@@ -15,27 +15,8 @@ list(APPEND board_definitions MPM_REDUCED)
 # Target <name>: <name>.elf and <name>.bin in the build directory, with
 # board_init(). flash-<name>: the application only, at 0x8000
 function(add_xjt_application name)
-    set(elf ${name}_elf)
-    add_executable(${elf} ${ARGN} ${cc26xx_dir}/board.c ${board_dir}/board.c)
-    target_include_directories(${elf} PRIVATE ${board_dir} ${cc26xx_dir} ${src_include_dirs})
-    target_compile_definitions(${elf} PRIVATE ${board_definitions})
-    target_link_libraries(${elf} ${cc26xx_driverlib})
-    target_link_options(${elf} PRIVATE -L${CMAKE_CURRENT_SOURCE_DIR}/linker)
-    set_target_properties(${elf} PROPERTIES
-        OUTPUT_NAME ${name}
-        LINKER_FILE ${board_dir}/xjt_lite.ld
-        # Relinked when a script changes
-        LINK_DEPENDS "${board_dir}/xjt_lite.ld;${CMAKE_CURRENT_SOURCE_DIR}/linker/sections.ld"
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-
+    add_board_app(${name} ${board_dir}/xjt_lite.ld ${ARGN} ${platform_dir}/board.c ${board_dir}/board.c)
     set(bin ${CMAKE_BINARY_DIR}/${name}.bin)
-    add_custom_command(
-        OUTPUT ${bin}
-        COMMAND ${CMAKE_OBJCOPY} -O binary ${name}.elf ${name}.bin
-        DEPENDS ${elf}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
     add_custom_target(${name} ALL DEPENDS ${bin})
 
     add_custom_target(flash-${name}
@@ -48,14 +29,14 @@ function(add_xjt_application name)
 endfunction()
 
 # Bring-up: bay serial in, echoed on S.Port
-add_xjt_application(xjtl-test ${board_dir}/xjtl_test.c ${cc26xx_dir}/timer.c)
+add_xjt_application(xjtl-test ${board_dir}/xjtl_test.c ${platform_dir}/timer.c)
 
 # Radio bring-up: a shell on the bay link driving the RF core
-add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${cc26xx_dir}/timer.c
+add_xjt_application(xjtl-radio ${board_dir}/xjtl_radio.c ${platform_dir}/timer.c
     ${cc26xx_radio_sources} core/syscalls.c)
 
 # EEPROM pin probe
-add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${cc26xx_dir}/timer.c
+add_xjt_application(xjtl-eeprom ${board_dir}/xjtl_eeprom.c ${board_dir}/eeprom.c ${platform_dir}/timer.c
     core/log.c core/syscalls.c)
 
 # The MPM port: FrSky D and X, V2x2, XK (mpm/multi/mpm_config.h), without

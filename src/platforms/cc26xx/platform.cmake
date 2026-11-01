@@ -5,28 +5,28 @@
 #
 # The board sets cc26xx_chip before: cc26x2 (default) or cc26x0 (MCU_CC26X0:
 # TI's generic FSK patches, one UART, no DMA, the CC26x0 driverlib). Gives
-# cc26xx_driverlib, the driverlib to link
+# platform_dir and platform_driverlib, the driverlib to link (add_board_elf())
 
-set(cc26xx_dir ${CMAKE_CURRENT_LIST_DIR})
+set(platform_dir ${CMAKE_CURRENT_LIST_DIR})
 
 if (NOT cc26xx_chip)
     set(cc26xx_chip cc26x2)
 endif()
 if (cc26xx_chip STREQUAL "cc26x0")
     list(APPEND board_definitions MCU_CC26X0)
-    set(cc26xx_driverlib driverlib_cc26x0)
+    set(platform_driverlib driverlib_cc26x0)
 elseif (cc26xx_chip STREQUAL "cc26x2")
-    set(cc26xx_driverlib driverlib_cc13x2_cc26x2)
+    set(platform_driverlib driverlib_cc13x2_cc26x2)
 else()
     message(FATAL_ERROR "cc26xx_chip=${cc26xx_chip}: cc26x2 or cc26x0")
 endif()
 
 # radio.h alone, and with timer.h and uart.h
 set(cc26xx_radio_sources radio.c rf_${cc26xx_chip}.c)
-list(TRANSFORM cc26xx_radio_sources PREPEND ${cc26xx_dir}/)
-set(cc26xx_hal_sources ${cc26xx_radio_sources} ${cc26xx_dir}/timer.c ${cc26xx_dir}/uart.c)
+list(TRANSFORM cc26xx_radio_sources PREPEND ${platform_dir}/)
+set(cc26xx_hal_sources ${cc26xx_radio_sources} ${platform_dir}/timer.c ${platform_dir}/uart.c)
 
 # Radio timing (src/CMakeLists.txt)
-set_source_files_properties(${cc26xx_radio_sources} ${cc26xx_dir}/timer.c
+set_source_files_properties(${cc26xx_radio_sources} ${platform_dir}/timer.c
     PROPERTIES COMPILE_OPTIONS $<$<CONFIG:Release>:-O2>
 )
