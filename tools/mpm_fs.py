@@ -36,16 +36,10 @@ import sys
 import time
 import zlib
 
-# pyserial: lib/pyserial (vendored, Python alone runs the script), else the
-# installed one (uv run: the script's dependencies above)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "lib", "pyserial"))
-import serial  # noqa: E402
-from serial.tools import list_ports  # noqa: E402
+from v2_serial import find_port, serial
 
 import mpm_eeprom
 
-CH343 = (0x1A86, 0x55D3)
 TELEM_FILE = 0x40
 TELEM_LOG = 0x41
 INFO, LIST, STAT, READ, OPEN, WRITE, CLOSE, REMOVE, RENAME, MKDIR, LOG = range(11)
@@ -60,16 +54,6 @@ class FsError(Exception):
     def __init__(self, status: int):
         super().__init__(f"{ERRORS.get(status, 'error')} ({status})")
         self.status = status
-
-
-def find_port() -> str:
-    env = os.environ.get("V2_PORT")
-    if env:
-        return env
-    ports = sorted(p.device for p in list_ports.comports() if (p.vid, p.pid) == CH343)
-    if not ports:
-        sys.exit("No MPM v2 (CH343) found: connect its USB-C, or give the port (--port, $V2_PORT; MULTI_FLASH_PORT in CMake)")
-    return ports[0]
 
 
 class Fs:

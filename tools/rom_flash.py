@@ -24,21 +24,14 @@ Port: --port, else $V2_PORT, else the first CH343.
 """
 
 import argparse
-import os
 import struct
 import sys
 import time
 import zlib
 from pathlib import Path
 
-# pyserial: lib/pyserial (vendored, Python alone runs the script), else the
-# installed one (uv run: the script's dependencies above)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "lib", "pyserial"))
-import serial  # noqa: E402
-from serial.tools import list_ports  # noqa: E402
+from v2_serial import find_port, serial
 
-CH343 = (0x1A86, 0x55D3)
 ACK, NACK = b"\x00\xcc", b"\x00\x33"
 
 PING, DOWNLOAD, GET_STATUS, SEND_DATA, RESET = 0x20, 0x21, 0x23, 0x24, 0x25
@@ -54,16 +47,6 @@ DATA_MAX = 252  # SEND_DATA payload (the packet is 255 bytes at most)
 
 class BlError(Exception):
     pass
-
-
-def find_port() -> str:
-    env = os.environ.get("V2_PORT")
-    if env:
-        return env
-    ports = sorted(p.device for p in list_ports.comports() if (p.vid, p.pid) == CH343)
-    if not ports:
-        sys.exit("No MPM v2 (CH343) found: connect its USB-C, or give the port (--port, $V2_PORT; MULTI_FLASH_PORT in CMake)")
-    return ports[0]
 
 
 class RomBl:

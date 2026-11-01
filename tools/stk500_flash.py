@@ -44,31 +44,15 @@ script exits and closes the port (hangup: DTR drops).
 import argparse
 import shlex
 import subprocess
-import os
 import sys
 import time
 
-# pyserial: lib/pyserial (vendored, Python alone runs the script), else the
-# installed one (uv run: the script's dependencies above)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "lib", "pyserial"))
-import serial  # noqa: E402
-from serial.tools import list_ports  # noqa: E402
+from fw_image import FLAGS
+from v2_serial import find_port, serial
 
 STK_OK, STK_FAILED, STK_INSYNC, CRC_EOP = 0x10, 0x11, 0x14, 0x20
 GET_SYNC, LEAVE_PROGMODE, LOAD_ADDRESS, PROG_PAGE, READ_PAGE, READ_SIGN = 0x30, 0x51, 0x55, 0x64, 0x74, 0x75
-CH343 = (0x1A86, 0x55D3)
 SIG_LEN = 24
-BOARD_CC2652 = 3
-
-
-def find_port() -> str:
-    if os.environ.get("V2_PORT"):
-        return os.environ["V2_PORT"]
-    for p in list_ports.comports():
-        if (p.vid, p.pid) == CH343:
-            return p.device
-    raise SystemExit("No MPM v2 (CH343) found: connect its USB-C, or give the port (--port, $V2_PORT; MULTI_FLASH_PORT in CMake)")
 
 
 def check_signature(data: bytes) -> str:
@@ -77,7 +61,7 @@ def check_signature(data: bytes) -> str:
     if not sig.startswith(b"multi-x"):
         raise SystemExit("no multi-x signature at the end of the file")
     flags = int(sig[7:15], 16)
-    if flags & 3 != BOARD_CC2652 or not flags & 0x80 or not flags & 0x100 or not flags & 0x800:
+    if flags & FLAGS != FLAGS:
         raise SystemExit(f"signature flags {flags:08x}: not an MPM v2 application")
     return sig.decode()
 
