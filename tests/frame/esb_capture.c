@@ -2,9 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-static void hex(const char* h, uint8_t* b) { for (int i = 0; h[2*i]; i++) sscanf(h + 2*i, "%2hhx", &b[i]); }
+#include "test.h"
 
 static void check(const char* name, bool dpl, bool noack, uint8_t pid, const char* cap)
 {
@@ -42,6 +40,5 @@ int main()
   check("dpl_aa", true, false, 3, "4380089119a22ab33bc44cd55de66ef77fd147ad5bcbebfd");
   check("dpl_noaa", true, true, 2, "4200089119a22ab33bc44cd55de66ef77fc9d4b9f37bbddb");
   check("dpl_noaa0", true, true, 0, "4000089119a22ab33bc44cd55de66ef77fe810bb5576576f");
-  printf("%d failures\n", fails);
-  return fails != 0;
+  return test_done();
 }

@@ -3,10 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static void hex(const char* h, uint8_t* b) { for (int i = 0; h[2*i]; i++) sscanf(h + 2*i, "%2hhx", &b[i]); }
+#include "test.h"
 
 int main()
 {
@@ -89,6 +86,5 @@ int main()
       CHECK(n == 17 && data[15] == c[0] && data[16] == c[1]);
     }
   }
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

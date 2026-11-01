@@ -2,10 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static int hex(const char* h, uint8_t* b) { int i; for (i = 0; h[2*i]; i++) sscanf(h + 2*i, "%2hhx", &b[i]); return i; }
+#include "test.h"
 
 static void check(const char* name, bool fec, const char* payload_hex, const char* cap_hex)
 {
@@ -35,6 +32,5 @@ int main()
   char p[80] = "";
   for (int i = 0; i < 38; i++) sprintf(p + 2 * i, "%02x", i);
   check("afhds2a", true, p, "000000b005801d009c02c00c403a011404e014c058018806901d007f160058b165859d169c5ac16c45ba17145ce174c5d817885e917d05ff2c00b0b2c58b1d2c9cb2cd388ed3ffdf62041dc16336cecf0bf84a9d27efffeff55b");
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

@@ -3,9 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#include "test.h"
 
 static void check(const char* name, frame_t f, uint8_t max)
 {
@@ -112,6 +110,5 @@ int main()
   nosop.sop = false;
   CHECK(!frame_init(&nosop) || frame_rx_hdr_len(&nosop) == 0);
 
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

@@ -5,10 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
+#include "test.h"
 
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static int hex(const char* h, uint8_t* b) { int i; for (i = 0; h[2*i] && h[2*i+1] > ' '; i++) sscanf(h + 2*i, "%2hhx", &b[i]); return i; }
 static int bit(const uint8_t* b, int i) { return (b[i >> 3] >> (7 - (i & 7))) & 1; }
 
 int main()
@@ -34,6 +32,5 @@ int main()
   printf("kyosho3 n=%u rx_sync=%08x encode %s (%d bad bits of %d) decode %s\n", n, frame_rx_sync(&f),
          enc ? "ok" : "FAIL", bad, nbits, dec ? "ok" : "FAIL");
   CHECK(enc && dec);
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

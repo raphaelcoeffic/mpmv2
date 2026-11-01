@@ -4,10 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static int hex(const char* h, uint8_t* b) { int i; for (i = 0; h[2*i] && h[2*i+1] > ' '; i++) sscanf(h + 2*i, "%2hhx", &b[i]); return i; }
+#include "test.h"
 
 int main()
 {
@@ -58,6 +55,5 @@ int main()
          f.rx_start, enc ? "ok" : "FAIL", dec ? "ok" : "FAIL", robust ? "ok" : "FAIL", g.known_len,
          g.rx_start, pre ? "ok" : "FAIL");
   CHECK(enc && dec && robust && pre);
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

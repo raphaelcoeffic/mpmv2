@@ -2,9 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#include "test.h"
 
 static void roundtrip(const char* name, frame_t f, const uint8_t* p, uint8_t len, uint8_t max)
 {
@@ -61,6 +59,5 @@ int main()
                                 .addr_len = 4, .var_len = true}, x, 30, 30);
   roundtrip("fixed", (frame_t){.type = FRAME_CC2500, .addr = {0x7d, 0x7d}, .addr_len = 2,
                                .crc_len = 2}, x, 20, 20);
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

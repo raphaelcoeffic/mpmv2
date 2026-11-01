@@ -16,15 +16,7 @@
 #include "nor_flash.h"
 #include "settings.h"
 #include "log.h"
-
-static int _fails;
-#define CHECK(c)                                                       \
-  do {                                                                 \
-    if (!(c)) {                                                        \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);              \
-      _fails++;                                                        \
-    }                                                                  \
-  } while (0)
+#include "test.h"
 
 //
 // Simulated NOR flash (MX25R8035F): a program clears bits, an erase sets a
@@ -740,6 +732,5 @@ int main()
   test_upload_power_cut();
   test_settings();
   test_ram_only();
-  printf("%s\n", _fails ? "FAILED" : "ok");
-  return _fails != 0;
+  return test_done();
 }

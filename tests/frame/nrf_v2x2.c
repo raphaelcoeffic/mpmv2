@@ -3,9 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
-
-static int fails;
-static void hex(const char* h, uint8_t* b) { for (int i = 0; h[2*i]; i++) sscanf(h + 2*i, "%2hhx", &b[i]); }
+#include "test.h"
 
 static void check(const char* name, const char* cap)
 {
@@ -42,6 +40,5 @@ int main()
   check("bind", "000000000000007f08c800000000c00f168c");
   check("forward", "00007f003c40007f08c800000000004af80a");
   check("left", "00ff00003c40007f08c80000000000ca703f");
-  printf("%d failures\n", fails);
-  return fails != 0;
+  return test_done();
 }

@@ -4,9 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#include "test.h"
 
 static uint8_t buffer[256], packet[17];
 static void encode(int type)
@@ -65,6 +63,5 @@ int main(int argc, char** argv)
     printf("  %d/200 bit exact, %d/200 decoded with chip errors, rx_len %d\n", ok, dec, frame_rx_len(&f, 17));
     CHECK(ok == 200 && dec == 200);
   }
-  printf(fails ? "FAILED\n" : "OK\n");
-  return fails != 0;
+  return test_done();
 }

@@ -4,9 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "frame.h"
-
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#include "test.h"
 
 static uint16_t crc;
 static void crc16_update(uint8_t a, uint8_t bits)
@@ -148,6 +146,5 @@ int main()
     CHECK(ok == 200);
   }
   CHECK(!frame_len_ok(&(frame_t){.type = FRAME_RF2500, .scramble = true}, 15));
-  printf(fails ? "FAILED\n" : "OK\n");
-  return fails != 0;
+  return test_done();
 }

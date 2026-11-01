@@ -6,10 +6,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "frame.h"
+#include "test.h"
 
-static int fails;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
-static int hex(const char* h, uint8_t* b) { int i; for (i = 0; h[2*i] && h[2*i+1] > ' '; i++) sscanf(h + 2*i, "%2hhx", &b[i]); return i; }
 static uint32_t _sync(const uint8_t* b) { return (uint32_t)b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3]; }
 static const uint8_t sop[8] = {0x03, 0xBC, 0x6E, 0x8A, 0xEF, 0xBD, 0xFE, 0xF8};
 static const uint8_t data[16] = {0x40, 0xBA, 0x97, 0xD5, 0x86, 0x4F, 0xCC, 0xD1,
@@ -99,6 +97,5 @@ int main()
   check_alt();
   check("seed0", 0, "000102030405060708090a0b0c0d0e0f", "084280e08b2a4f06e63a7ed17ed10b2a4f06e63a7da216549e0dcc74fb442ca93c1b98e9f6885952783731d3ed10b2a4f06e63a7da216549e0dcc74fb442ca93c1b98e9fe885952783731d3f510b2a4f06e63a7ea216549e0dcc74fdc42ca93c1b98e9fb085952783731d3f690b2a4f06e63a7ed216549e0dcc74fda42ca93c1b98e9fb405952783731d3f68b0f5c29546bd48badcc74fda216549e0e1c76ae7feb7bedf8d");
   check("seed1234", 0x1234, "55aa00ff", "084280e0ed10b2a4f06e63a7d72856e8a9e147ad64671604bbd356c3fed10b2a4f06e63a7ae14aa35ea45d586ad87c8ce2c0977a216549e0dcc74fda61dfbdfcf2b75bbebf7efefffff73f7b979bbfffdffff7efefe6e57fedab7d6f77ffd7f7cfbfb57795fdf7fffcfedfdf4f7cace9cff7a77fff4e7fdffd3eeefadfec65b7853fef78fde27fc75faeb5fc1f7f97dd6b9d53d73febfa377ffdfbdec9fddbecbfff7ff52e");
-  printf(fails ? "%d FAILED\n" : "all ok\n", fails);
-  return fails != 0;
+  return test_done();
 }

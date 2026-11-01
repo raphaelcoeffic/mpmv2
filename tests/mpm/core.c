@@ -9,15 +9,7 @@
 #include "mpm/mpm_port.h"
 #include "mpm/mpm_settings.h"
 #include "log.h"
-
-static int _fails;
-#define CHECK(c)                                                       \
-  do {                                                                 \
-    if (!(c)) {                                                        \
-      printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c);              \
-      _fails++;                                                        \
-    }                                                                  \
-  } while (0)
+#include "test.h"
 
 //
 // Fake port: time advances on each poll, frames from the simulated radio
@@ -168,7 +160,7 @@ static int _telem_frames(telem_t* out, int max)
   while (i + 4 <= _telem_len && n < max) {
     if (_telem[i] != 'M' || _telem[i + 1] != 'P') {
       printf("bad telemetry header at %u\n", i);
-      _fails++;
+      fails++;
       break;
     }
     out[n].type = _telem[i + 2];
@@ -696,6 +688,5 @@ int main()
   test_proto_list();
   test_ppm();
   test_ppm_parse();
-  printf("%s\n", _fails ? "FAILED" : "ok");
-  return _fails != 0;
+  return test_done();
 }
