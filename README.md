@@ -115,6 +115,7 @@ ninja -C build-lp flash-bench
 Host unit tests (a C compiler):
 
 ```bash
+make -C tests                     # all of them, or one:
 make -C tests/frame               # the framings
 make -C tests/mpm                 # the MPM core, the log
 make -C tests/storage             # littlefs on a simulated NOR flash, EEPROM, file server, settings
