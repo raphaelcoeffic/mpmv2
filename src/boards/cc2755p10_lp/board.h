@@ -48,5 +48,3 @@
   {30, RF_TX_DBM(-12)}, {34, RF_TX_DBM(-16)}, {38, RF_TX_DBM(-20)}
 
 void board_led(uint32_t dio, bool on);
-void board_led_toggle(uint32_t dio);
-bool board_button(uint32_t dio);

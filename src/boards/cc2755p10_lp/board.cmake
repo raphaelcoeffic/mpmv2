@@ -6,7 +6,7 @@
 # CC27_OPENOCD="<openocd-cc27xx>/src/openocd -s <openocd-cc27xx>/tcl" when
 # not installed.
 
-message("## Target is LP-EM-CC2755P10: radio bring-up")
+message("## Target is LP-EM-CC2755P10")
 
 set(CC27_OPENOCD openocd CACHE STRING "OpenOCD with the cc27xx flash driver (and its arguments)")
 separate_arguments(cc27_openocd UNIX_COMMAND "${CC27_OPENOCD}")
@@ -47,15 +47,6 @@ function(add_cc27_application name)
         VERBATIM
     )
 endfunction()
-
-# Bring-up: UART0, LEDs, buttons, HFXT
-add_cc27_application(cc27-test ${board_dir}/test.c)
-
-# Radio bring-up: a shell on UART0 driving the radio (TI's NESB PHY, raw
-# framing). The PHY files come from tools/cc27_phy.py nesb_1m_2m_cc27xx
-add_cc27_application(cc27-radio ${board_dir}/radio_test.c ${cc27xx_rf_sources}
-    ${platform_dir}/phy_ble.c)
-target_link_libraries(cc27-radio_elf lrf_cc27xxx10)
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)

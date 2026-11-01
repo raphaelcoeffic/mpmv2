@@ -109,12 +109,11 @@ The bench (`src/core/bench.c`, `frame.c`, `main_bench.c` as on the MPM v2)
 runs on the LP-EM-CC2755P10 over a `radio.h` of its own
 (`src/platforms/cc27xx/radio.c`, `timer.c`, `uart.c`: the CC2652's file
 names), UART on the XDS110 back channel at 921600, `info` says `dev=cc2755`. The suites run unchanged with
-`CC_PORT=/dev/cu.usbmodemLS5600OQ1`. The radio bring-up shell
-(`src/boards/cc2755p10_lp/radio_test.c`, commands in its header, 115200) is still there:
+`CC_PORT=/dev/cu.usbmodemLS5600OQ1`:
 
 ```sh
 cmake -B build-cc27 -G Ninja -DBOARD=CC2755P10_LP
-ninja -C build-cc27 flash-cc27-bench   # or flash-cc27-radio
+ninja -C build-cc27 flash-cc27-bench
 ```
 
 What differs from the CC2652 bench:
@@ -199,9 +198,9 @@ Gaussian-filtered rectangle, 20 taps), scale 2^28 / the sum of the 48 taps
 
 `src/platforms/cc27xx/rf.c` drives TI's LRF layer (`lib/ti/drivers/rcl`, no RCL
 scheduler) with raw framing: sync word, fixed length payload. The PHY
-settings (`src/platforms/cc27xx/phy_nesb.c`, `phy_ble.c`) come from
+settings (`src/platforms/cc27xx/phy_nesb.c`, `phy_fsk250.c`) come from
 `tools/cc27_phy.py`, the same registers as SysConfig's `ti_radio_config.c`
-for TI's NESB and generic BLE PHYs. Against the MPM v2's `preset nrf1m` /
+for TI's NESB PHY and its CC23xx MSK 250 kbps one (ported). Against the MPM v2's `preset nrf1m` /
 `nrf2m` raw framing: 999 or 1000 packets of 1000 both ways at 1 and 2 Mbps.
 What the generic PBE needs for raw RX:
 
@@ -352,9 +351,8 @@ tools/bench/mpm_bench.py shell                       # MPM console
 tools/bench/mpm_bench.py -p cc shell                 # CC2652 console
 tools/bench/mpm_bench.py run tools/bench/examples/frskyd.txt
 tools/bench/mpm_bench.py exec "preset frskyd" "ch 10" "rx 20" --listen 10
-tools/bench/mpm_bench.py link --tx mpm --rx cc --tx-setup tools/bench/examples/frskyd.txt \
-    --rx-setup tools/bench/examples/cc2652_frskyd.txt \
-    --payload 110102030405060708090a0b0c0d0e0f1011 --rx-len 18
+tools/bench/link.py --mpm frskyd.txt --cc cc2652_frskyd.txt \
+    --payload 110102030405060708090a0b0c0d0e0f1011 --cc2500
 ```
 
 `mpm_bench.py` can be imported too: `Bench(port).cmd("ch 10")`,

@@ -63,8 +63,6 @@ static uint32_t _rx_buf[(RF_MAX_PAYLOAD + 16 + 3) / 4];
 static rf_packet_t _rx_pkt;  // the last one, until rf_rx_read()
 static bool _rx_ready;
 
-void (*rf_debug)(int step, uint32_t events, int8_t rssi, uint16_t endcause);
-
 static uint32_t _now(void) { return HWREG(SYSTIM_BASE + SYSTIM_O_TIME250N); }
 
 uint32_t rf_time(void) { return _now(); }
@@ -341,16 +339,6 @@ int rf_stop(void)
   return res;
 }
 
-// Waits for OPDONE / OPERROR until the deadline (SYSTIM), stops the
-// operation then
-static int _wait_done(uint32_t deadline)
-{
-  while (rf_busy()) {
-    if ((int32_t)(_now() - deadline) > 0) return rf_stop();
-  }
-  return rf_stop();
-}
-
 int rf_fs_start(uint32_t freq_hz)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
@@ -433,13 +421,6 @@ int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at
   LRF_Interface_Generic_sendOpTx();
   _running = true;
   return RF_OK;
-}
-
-int rf_tx(uint32_t freq_hz, const uint8_t *data, uint16_t len)
-{
-  int res = rf_tx_start(freq_hz, data, len, 0);
-  if (res) return res;
-  return _wait_done(_now() + START_DELAY + US(10000) + US((uint32_t)len * 8 * 1000));
 }
 
 static int _rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at, bool clear_stats)
@@ -556,14 +537,6 @@ int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)
   uint32_t start = _now();
 
   // The PBE takes SYSTIM0 as the start; the stop is ours (hard stop)
-  if (rf_debug) {
-    for (int i = 0; i < 8; i++) {
-      uint32_t t = _now();
-      while (_now() - t < US(timeout_us / 8)) {
-      }
-      rf_debug(i, _events_now(), LRF_readRssi(), HWREGH_READ_LRF(LRFD_BUFRAM_BASE + 6));
-    }
-  }
   while (rf_busy() && (int32_t)(_now() - start - START_DELAY - US(timeout_us)) < 0) {
   }
   pkt->len = 0;
@@ -588,5 +561,3 @@ void rf_stats(rf_stats_t *stats)
   stats->last_rssi = (int8_t)HWREGH_READ_LRF(BUFRAM(LASTRSSI));
 }
 
-uint16_t rf_last_endcause(void) { return _endcause; }
-uint32_t rf_last_events(void) { return _events; }

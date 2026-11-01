@@ -67,9 +67,7 @@ typedef struct {
   uint8_t data[RF_MAX_PAYLOAD];
 } rf_packet_t;
 
-// Blocking: one packet (rf_tx), one packet of len bytes (2 at least)
-// within timeout_us (rf_rx)
-int rf_tx(uint32_t freq_hz, const uint8_t *data, uint16_t len);
+// Blocking: one packet of len bytes (2 at least) within timeout_us
 int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt);
 
 // Non-blocking: the operation starts at SYSTIM time at (0: as soon as
@@ -102,10 +100,6 @@ int rf_stop(void);
 // Instant RSSI (dBm) while an operation runs, RF_RSSI_NONE if not valid
 int8_t rf_rssi(void);
 
-// Last end cause and events, for debugging
-uint16_t rf_last_endcause(void);
-uint32_t rf_last_events(void);
-
 // The PBE's counters of the last RX operation
 typedef struct {
   uint16_t rx_ok, rx_nok, rx_ignored, rx_empty, rx_fifo_full, rx_timeout;
@@ -113,5 +107,3 @@ typedef struct {
 } rf_stats_t;
 void rf_stats(rf_stats_t *stats);
 
-// Called during rf_rx() at 1/8 steps of the window when set (debugging)
-extern void (*rf_debug)(int step, uint32_t events, int8_t rssi, uint16_t endcause);

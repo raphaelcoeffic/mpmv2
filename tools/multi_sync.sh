@@ -47,7 +47,7 @@ copy() {
 copy src --exclude /mpm/upstream/ --exclude /mpm/sketch/
 copy lib --exclude /stm32f1/
 copy tools --exclude /bench/ --exclude /pyproject.toml --exclude /uv.lock \
-    --exclude '/test_*.py' --exclude /multi_sync.sh
+    --exclude /multi_sync.sh
 copy tests
 
 version() {

@@ -2,8 +2,8 @@
 # lib/ti/drivers/rcl, without the RCL), the system timer and UART0 (polled,
 # board_uart_init()). board.c (cc27xx.h), in every application: the chip's
 # power-up, HFXT, microseconds and UART0, the board's pins after. The PHY
-# settings come from tools/cc27_phy.py; phy_ble.c for the radio bring-up
-# only. Gives platform_dir and platform_driverlib (add_board_elf())
+# settings come from tools/cc27_phy.py. Gives platform_dir and
+# platform_driverlib (add_board_elf())
 
 set(platform_dir ${CMAKE_CURRENT_LIST_DIR})
 set(platform_driverlib driverlib_cc27xxx10)

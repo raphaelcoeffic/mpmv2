@@ -16,8 +16,6 @@ port (LaunchPad UART) / the first CH343 port (MPM v2 USB-C, CC2652 UART0).
   mpm_bench.py [-p PORT] shell               interactive console
   mpm_bench.py [-p PORT] run FILE            run a command file ('#' comments)
   mpm_bench.py [-p PORT] exec CMD [CMD...]   run commands, e.g. exec "preset frskyd" "ch 10" "rx 20"
-  mpm_bench.py link --tx PORT --rx PORT --tx-setup FILE --rx-setup FILE --payload HEX
-                                             packet loss test between two devices
 """
 
 from __future__ import annotations
@@ -178,44 +176,6 @@ def setup_lines(path: str | None):
         return f.readlines()
 
 
-def link_test(args):
-    """Send numbered packets from one device and count them on the other."""
-    payload = bytes.fromhex(args.payload)
-    with Bench(find_port(args.tx), args.baud, echo_debug=args.debug) as tx, \
-            Bench(find_port(args.rx), args.baud, echo_debug=args.debug) as rx:
-        rx.run_lines(setup_lines(args.rx_setup), verbose=args.verbose)
-        tx.run_lines(setup_lines(args.tx_setup), verbose=args.verbose)
-        rx.cmd(f"rx {args.rx_len}")
-        tx.cmd(f"seq {args.seq_index}")
-        tx.cmd(f"txp {args.period} {args.count} {payload.hex()}")
-        duration = args.count * args.period / 1e6 + 1.0
-        if tx.wait_event("@ev txdone", duration) is None:
-            print("warning: TX did not report completion", file=sys.stderr)
-        time.sleep(0.2)
-        seen, good, crc_bad = set(), 0, 0
-        while not rx.events.empty():
-            ev = rx.events.get_nowait()
-            if not ev.startswith("@rx"):
-                continue
-            pkt = RxPacket.parse(ev)
-            if pkt.crc_ok is False:
-                crc_bad += 1
-                continue
-            good += 1
-            idx = args.seq_index + args.rx_offset
-            if idx < len(pkt.data):
-                seen.add(pkt.data[idx])
-            if args.verbose:
-                print(f"rx {pkt.data.hex()} {pkt.flags}")
-        rx_stats = rx.cmd("stop")
-        tx_stats = tx.cmd("stop")
-        expected = min(args.count, 256)
-        print(f"sent={args.count} good={good} ({100 * good / args.count:.1f}%) "
-              f"distinct_seq={len(seen)}/{expected} crc_bad={crc_bad}")
-        print(f"tx: {tx_stats}\nrx: {rx_stats}")
-        return 0 if len(seen) == expected else 1
-
-
 def shell(bench: Bench):
     def printer():
         while True:
@@ -257,19 +217,6 @@ def main():
     p = sub.add_parser("exec")
     p.add_argument("commands", nargs="+")
     p.add_argument("--listen", type=float, default=0, help="print events for N seconds after the commands")
-    p = sub.add_parser("link")
-    p.add_argument("--tx", required=True, help="port, or mpm / cc / v2")
-    p.add_argument("--rx", required=True, help="port, or mpm / cc / v2")
-    p.add_argument("--tx-setup")
-    p.add_argument("--rx-setup")
-    p.add_argument("--payload", required=True, help="hex payload sent by the TX device")
-    p.add_argument("--rx-len", type=int, default=0, help="argument of the 'rx' command")
-    p.add_argument("--rx-offset", type=int, default=0,
-                   help="offset of the TX payload in the received data (ex: 1 for a CC2500 length byte)")
-    p.add_argument("--seq-index", type=int, default=1, help="payload byte replaced by the sequence number")
-    p.add_argument("--period", type=int, default=10000, help="TX period in us")
-    p.add_argument("--count", type=int, default=200)
-    p.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
     if args.action == "ports":
@@ -277,11 +224,6 @@ def main():
             vid = f"{port.vid:04x}:{port.pid:04x}" if port.vid is not None else "-"
             print(f"{port.device}\t{vid}\t{port.description}")
         return 0
-    if args.action == "link":
-        try:
-            return link_test(args)
-        except (serial.SerialException, BenchError) as e:
-            raise SystemExit(f"error: {e}") from None
 
     port = find_port(args.port)
     try:
