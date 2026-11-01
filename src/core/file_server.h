@@ -2,10 +2,9 @@
 
 #include <stdint.h>
 
-#include <lfs.h>
-
 // Files of the file system read and written from a host (tools/mpm_fs.py),
-// one request at a time. The transport (mpm_port.c: frames starting with
+// one request at a time (file_server.c). Boards without a file system:
+// file_server_ram.c, the file "eeprom" only, the EEPROM's RAM copy. The transport (mpm_port.c: frames starting with
 // "FS" on the USB link, replies in MPM_TELEM_FILE telemetry) carries:
 //
 //   request:  seq, op, payload, CRC-32 (zlib's, little endian, of seq to the
@@ -60,10 +59,11 @@
 #define FILE_SERVER_REPLY_MAX  250
 #define FILE_SERVER_UPLOAD     ".upload"
 
-// lfs: a mounted file system, or NULL (every request: LFS_ERR_IO).
-// changed (or NULL): called with each path an upload replaced, REMOVE
-// removed, RENAME renamed (both)
-void file_server_init(lfs_t* lfs, void (*changed)(const char* path));
+// lfs: a mounted file system, or NULL (every request: LFS_ERR_IO; unused by
+// file_server_ram.c). changed (or NULL): called with each path an upload
+// replaced, REMOVE removed, RENAME renamed (both)
+struct lfs;
+void file_server_init(struct lfs* lfs, void (*changed)(const char* path));
 
 // Before the file system is written elsewhere (an EEPROM flush): closes the
 // file READ keeps open, which would go on reading a replaced file's old

@@ -23,6 +23,10 @@ void eeprom_write(uint16_t address, uint8_t value);
 // Written since the last flush
 bool eeprom_dirty();
 
+// A file the host changed (file_server.h's changed): the RAM copy read
+// again if it is the EEPROM file (erased if it was removed). eeprom.c only
+void eeprom_file_changed(const char* path);
+
 // Writes a copy of the content taken at the start: the flash waits may run
 // callbacks that write again (dirty again). 0 or an error (then RAM only from
 // there on)

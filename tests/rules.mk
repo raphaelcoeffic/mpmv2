@@ -10,7 +10,7 @@ BUILD := build
 all: $(TESTS:%=$(BUILD)/%)
 	@fail=0; for t in $^; do echo "== $$t"; ./$$t > $$t.log 2>&1 || { cat $$t.log; fail=1; }; tail -1 $$t.log; done; exit $$fail
 
-$(BUILD)/%: %.c $(CODE) $(DEPS) ../platform.h ../test.h | $(BUILD)
+$(BUILD)/%: %.c $(CODE) $(DEPS) $(wildcard ../*.h) | $(BUILD)
 	$(CC) $(CFLAGS) $(DEFS) $(INC) -I.. -o $@ $< $(CODE)
 
 $(BUILD):

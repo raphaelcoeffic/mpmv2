@@ -53,6 +53,15 @@ void eeprom_write(uint16_t address, uint8_t value)
 
 bool eeprom_dirty() { return _dirty; }
 
+void eeprom_file_changed(const char* path)
+{
+  if (!_lfs) return;
+  while (*path == '/') path++;
+  if (strcmp(path, EEPROM_FILE) != 0) return;
+  eeprom_init(_lfs);
+  debugln("eeprom reloaded");
+}
+
 int eeprom_flush()
 {
   if (!_dirty) return LFS_ERR_OK;

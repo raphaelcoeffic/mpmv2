@@ -34,6 +34,13 @@ static void _flash_yield()
   } while (mpm_time_left() < FLASH_SLICE_US && micros() - start < FLASH_WAIT_MAX_US);
 }
 
+// A file the host changed: the EEPROM's RAM copy and the settings follow it
+static void _file_changed(const char* path)
+{
+  eeprom_file_changed(path);
+  settings_file_changed(path);
+}
+
 static void _storage_init()
 {
   // The protocols' EEPROM (CYRF ID, RX ids) in the external flash. RAM only
@@ -47,8 +54,9 @@ static void _storage_init()
   eeprom_init(err == 0 ? &_lfs : 0);
   // ppm.txt, debug.txt
   settings_init(err == 0 ? &_lfs : 0);
-  // Files from the host over USB (tools/mpm_fs.py), settings applied at once
-  file_server_init(err == 0 ? &_lfs : 0, settings_file_changed);
+  // Files from the host over USB (tools/mpm_fs.py), the EEPROM and the
+  // settings applied at once
+  file_server_init(err == 0 ? &_lfs : 0, _file_changed);
 }
 #endif
 

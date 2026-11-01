@@ -1,5 +1,6 @@
 // eeprom.h on the CC2755P10 LaunchPad: RAM only, erased (0xFF) at power up
-// (no file system; the FrSky and DSM bind data come again from a bind)
+// (no file system; the FrSky and DSM bind data come again from a bind, or
+// from the host: file_server_ram.c)
 #include "eeprom.h"
 
 #include <string.h>

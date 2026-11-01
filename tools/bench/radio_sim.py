@@ -18,12 +18,19 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
                                          S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
                                          (sportTelemetryPush/Pop): the UNI firmware's setup fields
                                          (UNI-Setup7.lua), or the --push frames; the replies decoded
+
+Any command: --eeprom FILE uploads FILE as the module's EEPROM before the
+frames start (binds of an earlier run, or of another module: mpm_fs.py get
+eeprom, an STM32 module's dump), --save-eeprom FILE reads it back at the end
+(the LaunchPad keeps it in RAM only: lost at power off). The file "eeprom"
+of mpm_fs.py (tools/), here on the link while no frames are sent.
 """
 
 from __future__ import annotations
 
 import argparse
 import math
+import os
 import queue
 import struct
 import sys
@@ -36,6 +43,9 @@ import serial
 
 import rig
 from mpm_bench import Bench, find_port
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import mpm_fs  # noqa: E402
 
 FRAME_PERIOD = 0.007
 CH_MIN, CH_CENTER, CH_MAX = 204, 1024, 1844
@@ -221,6 +231,32 @@ class Radio:
 
     def __exit__(self, *exc):
         self.close()
+
+
+def eeprom_put(port: str, path: str):
+    with open(path, "rb") as f:
+        data = f.read()
+    fs = mpm_fs.Fs(port)
+    try:
+        fs.put("eeprom", data)
+    except mpm_fs.FsError as e:
+        raise SystemExit(f"{path} -> eeprom: {e}")
+    finally:
+        fs.close()
+    print(f"{path} -> eeprom: {len(data)} bytes")
+
+
+def eeprom_get(port: str, path: str):
+    fs = mpm_fs.Fs(port)
+    try:
+        data = fs.get("eeprom")
+    except mpm_fs.FsError as e:
+        raise SystemExit(f"eeprom -> {path}: {e}")
+    finally:
+        fs.close()
+    with open(path, "wb") as f:
+        f.write(data)
+    print(f"eeprom -> {path}: {len(data)} bytes")
 
 
 def cmd_status(r: Radio, a):
@@ -587,13 +623,22 @@ def main():
     ap.add_argument("--ch9-16", action="store_true", help="drive: FrSky X bind option, receiver outputs CH9-16")
     ap.add_argument("--push", action="append", help="sport: PHYS:PRIM:APP:VALUE (hex), as sportTelemetryPush()")
     ap.add_argument("--timeout", type=float, default=0.5, help="sport: seconds for a reply")
+    ap.add_argument("--eeprom", metavar="FILE", help="the module's EEPROM from FILE before the frames start")
+    ap.add_argument("--save-eeprom", metavar="FILE", help="the module's EEPROM into FILE at the end")
     a = ap.parse_args()
     if a.option is None:
         a.option = 40 if a.proto == PROTO_TEST else 0
-    with Radio(find_port(a.port)) as r:
-        rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link,
-              "drive": cmd_drive, "sport": cmd_sport}[a.command](r, a)
-        print(f"frames sent {r.frames_sent}")
+    port = find_port(a.port)
+    if a.eeprom:
+        eeprom_put(port, a.eeprom)
+    try:
+        with Radio(port) as r:
+            rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link,
+                  "drive": cmd_drive, "sport": cmd_sport}[a.command](r, a)
+            print(f"frames sent {r.frames_sent}")
+    finally:
+        if a.save_eeprom:
+            eeprom_get(port, a.save_eeprom)
     sys.exit(rc)
 
 

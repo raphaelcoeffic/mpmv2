@@ -23,7 +23,9 @@ USB-C, while the MPM core runs: the protocols keep running
                                    until Ctrl-C; debug.txt ("usb = on") turns
                                    it on from power up, no tool needed
 
-Port: --port, else $V2_PORT, else the first CH343. Requests: "FS", seq, op,
+Port: --port, else $V2_PORT, else the first CH343. The CC2755P10
+LaunchPad's MPM port (no file system): --port its XDS110 port, the file
+"eeprom" alone, its RAM copy (src/core/file_server_ram.c). Requests: "FS", seq, op,
 payload, CRC-32 at 100000 baud 8E2 (the MULTI link); replies in telemetry
 frames of type 0x40. Lost replies: the request again, same seq (the module
 answers it from its cache).
