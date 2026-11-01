@@ -47,6 +47,9 @@ uint8_t CH_EATR[16] = {ELEVATOR, AILERON, THROTTLE, RUDDER, CH5,  CH6,  CH7,  CH
 uint8_t prev_power = 0xFD;
 uint8_t prev_option;
 bool lbt_power;
+bool rx_data_started, rx_data_received;
+bool rx_disable_lna;
+uint16_t rx_rc_chan[16];
 
 uint8_t packet_in[TELEMETRY_BUFFER_SIZE];
 uint8_t telemetry_in_buffer[TELEMETRY_BUFFER_SIZE];
@@ -63,6 +66,11 @@ uint8_t SportHead, SportTail;
 uint8_t eeprom_read_byte(EE_ADDR address) { return eeprom_read(address); }
 
 void eeprom_write_byte(EE_ADDR address, uint8_t value) { eeprom_write(address, value); }
+
+int16_t map16b(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max)
+{
+  return (int32_t)(x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 // Called by the core before each protocol start: what protocol_init() resets
 void mpm_protocol_prepare()
@@ -84,6 +92,7 @@ void mpm_protocol_prepare()
   CYRF_Reset();
 #endif
   init_frskyd_link_telemetry();
+  for (uint8_t ch = 0; ch < 16; ch++) rx_rc_chan[ch] = 1024;  // RX protocols
   pps_timer = millis();
   pps_counter = 0;
 }

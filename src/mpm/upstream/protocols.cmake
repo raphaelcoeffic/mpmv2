@@ -12,6 +12,8 @@ set(mpm_protocol_sources
     frsky.c
     FlySky_a7105.c
     AFHDS2A_a7105.c
+    AFHDS2A_Rx_a7105.c
+    Bayang_Rx_nrf24l01.c
     dsm_all.c
 )
 list(TRANSFORM mpm_protocol_sources PREPEND ${CMAKE_CURRENT_LIST_DIR}/)

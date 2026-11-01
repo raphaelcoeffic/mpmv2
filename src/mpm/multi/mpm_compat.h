@@ -250,6 +250,10 @@ extern uint8_t calData[75];
 extern uint8_t CH_AETR[16], CH_TAER[16], CH_EATR[16];
 extern uint8_t prev_power;
 extern uint8_t prev_option;
+// RX protocols: the channels received, forwarded as telemetry
+extern bool rx_data_started, rx_data_received;
+extern bool rx_disable_lna;
+extern uint16_t rx_rc_chan[16];
 
 // Telemetry (Multiprotocol.ino, Telemetry.ino: telemetry.c)
 #define TELEMETRY_BUFFER_SIZE 32
@@ -328,14 +332,21 @@ uint16_t FrSkyX_crc(uint8_t* data, uint8_t len, uint16_t init);
 typedef uint16_t EE_ADDR;
 uint8_t eeprom_read_byte(EE_ADDR address);
 void eeprom_write_byte(EE_ADDR address, uint8_t value);
-#define AFHDS2A_EEPROM_OFFSET 50    // RX ID, 4 bytes per model id, end is 50+64=114
-#define AFHDS2A_EEPROM_OFFSET2 250  // RX ID, 4 bytes per model id, end is 250+192=442
+#define AFHDS2A_EEPROM_OFFSET 50     // RX ID, 4 bytes per model id, end is 50+64=114
+#define FRSKY_RX_EEPROM_OFFSET 178   // format, TX ID (3), freq_tune, 47 channels
+#define AFHDS2A_RX_EEPROM_OFFSET 230 // TX ID (4), 16 channels
+#define AFHDS2A_EEPROM_OFFSET2 250   // RX ID, 4 bytes per model id, end is 250+192=442
+#define BAYANG_RX_EEPROM_OFFSET 762  // TX ID (5), 4 channels
 #define FRSKYD_CLONE_EEPROM_OFFSET 771
 #define FRSKYX_CLONE_EEPROM_OFFSET 822
 #define FRSKYX2_CLONE_EEPROM_OFFSET 873
+#define DSM_RX_EEPROM_OFFSET 877     // TX ID (4), format
 #define DSM_CLONE_EEPROM_OFFSET 1074
 #define EEPROM_CID_INIT_OFFSET 0  // 1 byte flag that Cyrf ID is initialized
 #define EEPROM_CID_OFFSET 1       // 6 bytes Cyrf ID
+
+// Arduino.ino
+int16_t map16b(int16_t x, int16_t in_min, int16_t in_max, int16_t out_min, int16_t out_max);
 
 // Arduino random(max)
 long mpm_random(long max);

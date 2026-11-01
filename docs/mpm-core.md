@@ -149,10 +149,12 @@ as the MPM builds its `.ino` files. The protocol files come with
 | `Bayang_nrf24l01.c` | Bayang |
 | `V2X2_nrf24l01.c` | V2x2: Std, JXD506, MR101 |
 | `XK_ccnrf.c` | XK (X450, X420, Cars) and MoFly, on the XN297 emulation |
-| `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`) |
+| `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`), FrSkyRX (`FrSky_Rx_cc2500.c`) |
 | `FlySky_a7105.c` | FlySky (AFHDS): Std, V9x9, V6x6, V912, CX20 |
 | `AFHDS2A_a7105.c` | AFHDS2A |
-| `dsm_all.c` | DSM (`DSM.c`, `DSM_cyrf6936.c`; macOS file names are case insensitive: not `dsm.c`) |
+| `AFHDS2A_Rx_a7105.c` | FS2A_RX |
+| `Bayang_Rx_nrf24l01.c` | BayanRX |
+| `dsm_all.c` | DSM (`DSM.c`, `DSM_cyrf6936.c`; macOS file names are case insensitive: not `dsm.c`), DSM_RX (`DSM_Rx_cyrf6936.c`) |
 
 The protocol table entries follow the MPM's: sub protocol names with their
 length byte first (`STR_SUBTYPE_*`), the callback returns `uint16_t`, an
@@ -381,6 +383,44 @@ X8R with UNI-RX needs 1 m from the 4-in-1 (at 50 cm: no frame). The
 X8R takes neither FrSky X v1 sub protocol: its firmware was found by binding
 the four X / X2 variants in turn from the 4-in-1 (bench `proto`), then
 sending each with different servo positions.
+
+### RX protocols
+
+The MPM's receiver protocols: the module receives a transmitter and sends
+what it gets as MULTI telemetry (type 13: LQI, RSSI, the channels), with
+their telemetry options (`*_RX_TELEMETRY`). FrSkyRX (55: Multi, CloneTX,
+EraseTX; option the RF tune, 0 the bind's), FS2A_RX (56), BayanRX (59),
+DSM_RX (70: Multi, CloneTX, EraseTX). Not in the reduced build. CloneTX
+binds as a receiver and stores the transmitter's ID (and FrSky's hop table)
+as the EEPROM's clone entry, which FrSky X / D and DSM "Cloned" send with.
+
+One change in `FrSky_Rx_cc2500.c` (marked `mpm-v2`, for upstream too): the
+tune steps and the bind read `packet_length + 2` bytes, not the whole
+FIFO. An 18 ms tune step holds two packets; with both read as one, the
+length check failed and the tune search never locked. The data phase
+reads one packet at a time as before.
+
+`tools/bench/rx_test.py <case>`: the 4-in-1 (bench `proto`) binds and then
+sends known channels, the port (`-p`: the LaunchPad by default, or the
+MPM v2's USB) runs the RX protocol over radio_sim's link, bound first
+unless `--no-bind`. It passes when, after the first channels, every second
+has frames with the channels within a tolerance of the 4-in-1's.
+`--rx-sub 1` captures a clone (no data phase), `--save-eeprom FILE` keeps
+the result. MPM v2 (2026-11-01):
+
+| Case | 4-in-1 -> RX protocol | Bind | Data |
+|---|---|---|---|
+| `frskyx` | FrSky X (15) -> FrSkyRX | 3.8 s (tune search) | 111 frames/s, CH1-8 exact |
+| `frskyd` | FrSky D (3) -> FrSkyRX | 3.9 s | 82 frames/s, exact |
+| `frskyx2` | FrSky X2 (64) -> FrSkyRX | 3.3 s | 112 frames/s, exact |
+| `afhds2a` | AFHDS2A (28) -> FS2A_RX | 0.4 s | about 130 frames/s, exact |
+| `bayang` | Bayang (14) -> BayanRX | 0.4 s | 378 frames/s, CH1-5 exact (CH6 an analog aux, then flags) |
+| `dsm` | DSM (6) -> DSM_RX | 1 in 3: the 4-in-1 binds 1.8 s only (`DSM_BIND_COUNT`) | `--no-bind`: DSM2 channel scan about 2 s, then 182 frames/s, within 9 counts (11 bit scale both ways) |
+
+CloneTX: FrSkyRX on the MPM v2 stored the 4-in-1's FrSky X ID (259e02) and
+hop table as clone entry, format 1. Not yet tried: a receiver bound to the
+4-in-1 driven by FrSky X "Cloned" from the MPM v2. CC2755 LaunchPad: X and
+X2 as on the MPM v2; D8 open (binds at times, no data).
 
 ## Storage
 

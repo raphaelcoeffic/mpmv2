@@ -5,3 +5,4 @@
 #include "FrSkyD_cc2500.c"
 #include "FrSkyV_cc2500.c"
 #include "FrSkyX_cc2500.c"
+#include "FrSky_Rx_cc2500.c"

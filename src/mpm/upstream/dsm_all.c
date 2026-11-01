@@ -4,3 +4,4 @@
 #pragma GCC diagnostic ignored "-Wmisleading-indentation"
 #include "DSM.c"
 #include "DSM_cyrf6936.c"
+#include "DSM_Rx_cyrf6936.c"

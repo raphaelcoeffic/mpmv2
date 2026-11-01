@@ -46,3 +46,19 @@ uint16_t FLYSKY_callback();
 void AFHDS2A_init();
 uint16_t AFHDS2A_callback();
 #endif
+#ifdef FRSKY_RX_CC2500_INO
+void FRSKY_RX_init();
+uint16_t FRSKY_RX_callback();
+#endif
+#ifdef AFHDS2A_RX_A7105_INO
+void AFHDS2A_RX_init();
+uint16_t AFHDS2A_RX_callback();
+#endif
+#ifdef BAYANG_RX_NRF24L01_INO
+void BAYANG_RX_init();
+uint16_t BAYANG_RX_callback();
+#endif
+#ifdef DSM_RX_CYRF6936_INO
+void DSM_RX_init();
+uint16_t DSM_RX_callback();
+#endif

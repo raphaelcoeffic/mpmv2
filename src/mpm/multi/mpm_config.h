@@ -40,6 +40,8 @@
 #define V2X2_NRF24L01_INO
 #define XK_CCNRF_INO
 #define BAYANG_HUB_TELEMETRY
+#define BAYANG_RX_NRF24L01_INO
+#define BAYANG_RX_TELEMETRY  // the channels received to the radio
 
 // CC2500 family: CC2500 emulation on the CC2652 (cc2500.c)
 #define CC2500_INSTALLED
@@ -48,6 +50,10 @@
 #define FRSKYD_CC2500_INO
 #define FRSKYV_CC2500_INO
 #define FRSKYX_CC2500_INO
+// FrSky RX, its clone subtype: the TX ID and hop table of FrSky D / X / X2
+// for their "Cloned" subtypes
+#define FRSKY_RX_CC2500_INO
+#define FRSKY_RX_TELEMETRY
 
 // A7105 family: A7105 emulation on the CC2652 (a7105.c)
 #define A7105_INSTALLED
@@ -57,6 +63,8 @@
 #define FLYSKY_A7105_INO
 #define AFHDS2A_A7105_INO
 #define AFHDS2A_FW_TELEMETRY
+#define AFHDS2A_RX_A7105_INO
+#define AFHDS2A_RX_TELEMETRY
 
 // CYRF6936 family: CYRF6936 emulation on the CC2652 (cyrf6936.c)
 #define CYRF6936_INSTALLED
@@ -66,4 +74,6 @@
 #define DSM_TELEMETRY
 #define DSM_X_PLUS               // _Config.h defaults
 #define DSM_THROTTLE_KILL_CH 14
+// DSM RX, its clone subtype: the TX ID for DSM's clone option
+#define DSM_RX_CYRF6936_INO
 #endif
