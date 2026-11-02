@@ -2,8 +2,16 @@
 // XN297 on an NRF24L01 (or a CC2500 at 250 kbps), here the RF core sends and
 // receives the XN297 frames that frame.c builds. As the NRF24L01: TX starts
 // with XN297_WritePayload() in TX mode, RX runs from XN297_SetTxRxMode(RX_EN)
-// until the next mode change, a packet is kept until read
+// until the next mode change, a packet is kept until read. On the NRF24L01
+// path (1 Mbps, or force_nrf) the NRF24L01 emulation's registers follow as
+// upstream writes them (initialised, CONFIG without CRC in TX, RF_CH,
+// RF_SETUP power): MJXq's H26D / H26WH send plain NRF24L01 packets
+// (TX_ADDR, NRF24L01_WritePayload()) after XN297_Configure()
 #include "xn297.h"
+
+#ifdef NRF24L01_INSTALLED
+#include "chips.h"  // the NRF24L01 emulation
+#endif
 
 #include "board.h"
 #include "frame.h"
@@ -21,6 +29,7 @@
 
 static radio_phy_t _phy;
 static bool _crc, _scramble, _250k;
+static bool _nrf;  // on the MPM's NRF24L01, not its CC2500
 static uint8_t _db_low;  // bind and range check level
 static uint8_t _addr_len = 5;
 static frame_t _tx, _tx_enh; // TX address: standard and enhanced framing
@@ -69,7 +78,14 @@ bool xn297_configure(bool crc_en, bool scramble_en, bool bitrate, bool force_nrf
   _air_len = 0;
   _freq_offset_khz = 0;
   // The MPM uses its CC2500 at 250 kbps when it has one
-  _db_low = _250k && !force_nrf ? DB_LOW_CC2500 : DB_LOW_NRF;
+  _nrf = !_250k || force_nrf;
+  _db_low = _nrf ? DB_LOW_NRF : DB_LOW_CC2500;
+#ifdef NRF24L01_INSTALLED
+  if (_nrf) {
+    NRF24L01_Initialize();
+    if (_250k) NRF24L01_SetBitrate(NRF24L01_BR_250K);
+  }
+#endif
   _power = rf_power_word(_db_low);  // bind power until XN297_SetPower()
 
   static const uint8_t zero[5] = {0};
@@ -80,7 +96,7 @@ bool xn297_configure(bool crc_en, bool scramble_en, bool bitrate, bool force_nrf
 
   // The MPM uses its CC2500 at 250 kbps when it has one (RF tune option): its
   // channels and deviation (bench presets xn250k, nrf1m)
-  if (_250k && !force_nrf) option_override = MPM_OPTION_RFTUNE;
+  if (!_nrf) option_override = MPM_OPTION_RFTUNE;
   _phy = (radio_phy_t){
       .symbol_rate = _250k ? 250000 : 1000000,
       .deviation = _250k ? 127000 : 160000,
@@ -130,6 +146,10 @@ void XN297_SetTxRxMode(enum TXRX_State mode)
 {
   _mode = mode;
   _pkt_ready = false;
+#ifdef NRF24L01_INSTALLED
+  // As upstream in TX (PWR_UP, no CRC); off otherwise, the RX here
+  if (_nrf) NRF24L01_WriteReg(NRF24L01_00_CONFIG, mode == TX_EN ? 1 << NRF24L01_00_PWR_UP : 0);
+#endif
   if (mode != RX_EN) {
     radio_rx_stop();
     return;
@@ -199,12 +219,18 @@ void XN297_RFChannel(uint8_t number)
 {
   _channel = number;
   _tune();
+#ifdef NRF24L01_INSTALLED
+  if (_nrf) NRF24L01_WriteReg(NRF24L01_05_RF_CH, number);
+#endif
   // The NRF24L01 keeps receiving on the new channel
   if (_mode == RX_EN) XN297_SetTxRxMode(RX_EN);
 }
 
 void XN297_SetPower()
 {
+#ifdef NRF24L01_INSTALLED
+  if (_nrf) NRF24L01_SetPower();
+#endif
   uint8_t db = IS_BIND_DONE ? 0 : _db_low;
 #ifdef NRF24L01_ENABLE_LOW_POWER
   if (IS_BIND_DONE && !IS_POWER_FLAG_on) db = DB_REDUCED;

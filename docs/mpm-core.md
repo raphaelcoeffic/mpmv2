@@ -133,7 +133,7 @@ as the MPM builds its `.ino` files. The protocol files come with
 | `multi_enums.h` | The protocol and sub protocol enums of `Multiprotocol.h`, unchanged |
 | `mpm_config.h` | The protocols built, as `_Config.h` / `Validate.h` |
 | `mpm_compat.h/c` | The globals and helpers of `Multiprotocol.ino`, `Multiprotocol.h` and `TX_Def.h`; the MPM names of the core's state (`Channel_data`, `rx_tx_addr`, `option`, the `IS_*` flags) are macros on `mpm` |
-| `xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames |
+| `xn297.h`, `xn297.c` | The MPM's XN297 emulation (`XN297_EMU.ino`) on the CC2652: same functions, `frame.c` builds and decodes the frames. On the NRF24L01 path (1 Mbps) it writes the NRF24L01 emulation's registers as upstream does (initialised, CONFIG without CRC in TX, RF_CH, power), for protocols that then send plain NRF24L01 packets (MJXq H26D / H26WH); off in RX |
 | `nrf24l01.c` | NRF24L01 emulation (`NRF24l01_SPI.ino`): the registers become `frame.c`'s NRF framing (ShockBurst, or Enhanced ShockBurst with EN_AA / DYNPD) and the RF core PHY (1 Mbps, 2 Mbps, 250 kbps); a payload goes on air when written in TX mode, pipe 0 RX into a 3 payload FIFO. Not emulated: acks and retransmissions (TX_DS once sent, MAX_RT never), ack payloads, pipes 1 to 5 |
 | `cc2500.c` | CC2500 emulation (`CC2500_SPI.ino`), see below |
 | `a7105.c` | A7105 emulation (`A7105_SPI.ino`), see below |
