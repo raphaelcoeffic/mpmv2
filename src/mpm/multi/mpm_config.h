@@ -48,6 +48,7 @@
 #define BAYANG_NRF24L01_INO
 #define V2X2_NRF24L01_INO
 #define XK_CCNRF_INO
+#define MJXQ_CCNRF_INO
 #define BAYANG_HUB_TELEMETRY
 #define BAYANG_RX_NRF24L01_INO
 #define BAYANG_RX_TELEMETRY  // the channels received to the radio

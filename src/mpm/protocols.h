@@ -22,6 +22,10 @@ uint16_t V2X2_callback();
 void XK_init();
 uint16_t XK_callback();
 #endif
+#ifdef MJXQ_CCNRF_INO
+void MJXQ_init();
+uint16_t MJXQ_callback();
+#endif
 #ifdef DSM_CYRF6936_INO
 void DSM_init();
 uint16_t DSM_callback();

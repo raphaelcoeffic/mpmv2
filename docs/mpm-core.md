@@ -149,6 +149,7 @@ as the MPM builds its `.ino` files. The protocol files come with
 | `Bayang_nrf24l01.c` | Bayang |
 | `V2X2_nrf24l01.c` | V2x2: Std, JXD506, MR101 |
 | `XK_ccnrf.c` | XK (X450, X420, Cars) and MoFly, on the XN297 emulation |
+| `MJXQ_ccnrf.c` | MJXq: WLH08, X600, X800, E010, Phoenix on the XN297 emulation; H26D, H26WH plain NRF24L01 packets |
 | `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`), FrSkyRX (`FrSky_Rx_cc2500.c`) |
 | `FlySky_a7105.c` | FlySky (AFHDS): Std, V9x9, V6x6, V912, CX20 |
 | `AFHDS2A_a7105.c` | AFHDS2A |
@@ -294,6 +295,7 @@ same channels, the MPM v2 board receives each in the bind phase and after.
 | DSM (6, DSMX 11 ms) | same payload, 10001 µs | same, 253 ms between packets of the channel's CRC seed |
 | V2x2 (5, Std) | same payload, 4000 µs, both packets of a channel visit (port at -72 dBm: a few lost, bind power) | same payload, 4005 µs (MPM 4002) |
 | XK (62, X450 / X420 / Cars) | same payload, 4000 µs | same payload, 4000 µs (MPM 4002) |
+| MJXq (18, all 7 subs) | same payloads, 32 ms between visits of the channel | same payloads; E010 / Phoenix data channel from `E010_map_rfchan[]`, H26D / H26WH received as plain NRF24L01 without CRC |
 
 XK: also the other way round, the port on the MPM v2 (driven by
 `radio_sim.py -p v2` over its USB) received by the 4-in-1's nRF24L01 (X420,
@@ -370,6 +372,7 @@ carry the data, the module's buffer-low flag holds them back.
 | Lemon-RX DSMP (7 channels) | DSM (6) sub 4 (Auto): bind response 0xB2 (DSMX 11 ms), 7 channels | binds (bind plug in, power cycled by `servo_mon.py`), AUX1 45 pulses/s at 22 ms as with the 4-in-1 (10 to 22 before the CYRF TX timing fix); telemetry (32 chip codes) 44 to 46 frames/s, one every other 11 ms frame (16 to 20 before the decoding between callbacks): QoS (frame loss A 90 to 96, RX 4.95 V), TM1000 (temperature), sensors 0x03, 0x0A, 0x12, 0x34, 0x40 |
 | WLtoys K989 car (1/28, V2x2 receiver) | V2x2 (5) sub 0, rx_num 0 | as with the 4-in-1: binds when powered up during the bind (no bind button, a new ID: the car's own transmitter binds on the ID 0 hop table, not needed), LED solid; throttle on CH2 (low = forward; the first reverse after forward brakes, the next reverses), steering on CH4 (high = left), centred channels (byte 80) hold still; keeps the bind across a car power cycle (solid 1 s after power up); signal off: wheels stop at once, LED blinks, back as soon as the signal is. No telemetry |
 | WLtoys 284131 car (1/28, XK receiver), on the MPM v2 driven over its USB (`car_drive.py`) | XK (62) sub 2 (Cars), rx_num 0 | binds when asked (car on, its transmitter off; Cars does not autobind), LED solid after the 3 s bind; throttle on CH2 (low = forward; reverse right after forward brakes, the next reverses), steering on CH4 (high = left), CH3 and CH5..16 at minimum (bytes 0, 10, 11, 14 at 00 as its transmitter sends); differences with its transmitter (trims 40 40 40 instead of 3b 40 00, low bits in bytes 12 / 13) do not matter; keeps the bind across a car power cycle; signal off: wheels stop at once, back as soon as the signal is. Its own transmitter (`xk_sniff.py`): bind address and channels as MPM's, GID c20745, data address and channel derived from the GID as `XK_initialize_txid()` does, steering in byte 1 and throttle in byte 2 (01..7f right / forward, 81..ff left / reverse), the THR D/R knob scales the throttle. No telemetry |
+| Eachine E010 quadcopter (Mike Blandford's, 2026-11-02, his build of the same changes) | MJXq (18) sub 4 (E010) | works |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
 frequency estimates of both); option -24 moves it there. The option moves

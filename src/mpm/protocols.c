@@ -32,6 +32,10 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_FRSKYX, "FrSky X", STR_SUBTYPE_FRSKYX, 6, MPM_OPTION_RFTUNE, true, false, FRSKYX_init,
    FRSKYX_callback, 0},
 #endif
+#ifdef MJXQ_CCNRF_INO
+  {PROTO_MJXQ, "MJXq", "\x07" "WLH08\0 " "X600\0  " "X800\0  " "H26D\0  " "E010\0  " "H26WH\0 " "Phoenix", 7,
+   MPM_OPTION_NONE, false, false, MJXQ_init, MJXQ_callback, end_bind_counter},
+#endif
 #ifdef FRSKYV_CC2500_INO
   {PROTO_FRSKYV, "FrSky V", 0, 0, MPM_OPTION_RFTUNE, false, false, FRSKYV_init, FRSKYV_callback, 0},
 #endif

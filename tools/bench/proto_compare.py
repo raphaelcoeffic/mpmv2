@@ -14,6 +14,7 @@ and after; the payloads and packet intervals are compared.
   proto_compare.py flysky --sub 1
   proto_compare.py v2x2
   proto_compare.py xk --sub 2
+  proto_compare.py mjxq --sub 4
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
@@ -250,6 +251,33 @@ def xk_capture(addr: bytes, sub: int) -> list[Capture]:
                     valid=xk_ok)]
 
 
+MJXQ_RFCHAN = [[0x0A, 0x46, 0x3A, 0x42], [0x0A, 0x3C, 0x36, 0x3F], [0x0A, 0x43, 0x36, 0x3F]]  # MJXQ_map_rfchan[][]
+E010_RFCHAN = [  # E010_map_rfchan[][0]
+    0x3A, 0x2E, 0x32, 0x2E, 0x2F, 0x33, 0x33, 0x34, 0x34, 0x39, 0x2E, 0x2E, 0x2E, 0x3A, 0x32, 0x33]
+
+
+def mjxq_capture(addr: bytes, sub: int) -> list[Capture]:
+    """Bind and data on hopping_frequency[0] of MJXQ_RF_init() / MJXQ_init2():
+    WLH08, X600, X800 XN297 at 1 Mbps, E010, Phoenix at 250 kbps, H26D and
+    H26WH plain NRF24L01 without CRC (XN297_SetTxRxMode() clears EN_CRC),
+    address 6d 6a 77 77 77 (X600 / X800:
+    6d 6a 73 73 73)"""
+    xaddr = "6d6a737373" if sub in (1, 2) else "6d6a777777"
+    if sub in (3, 5):  # H26D, H26WH
+        setup = f"preset nrf1m;nrf {xaddr} 0"
+        bind_ch, data_ch = 0x2E, 0x32 if sub == 3 else 0x37
+    else:
+        setup = f"xn 1 1 {int(sub in (4, 6))};xaddr {xaddr}"
+        if sub == 0:  # WLH08
+            bind_ch = data_ch = 0x12
+        elif sub in (4, 6):  # E010, Phoenix
+            bind_ch, data_ch = 0x2E, E010_RFCHAN[addr[3] & 0x0F]
+        else:
+            bind_ch, data_ch = 0x0A, MJXQ_RFCHAN[addr[3] % 3][0]
+    return [Capture("bind", f"{setup};ch {bind_ch}", 16, bind=True, valid=xk_ok),
+            Capture("data", f"{setup};ch {data_ch}", 16, valid=xk_ok)]
+
+
 def dsm_capture(addr: bytes, sub: int, module_id: int = 0, rx_num: int = 0) -> list[Capture]:
     """DSMX: bind on channel 13 (SDR), data on hopping_frequency[0] with its
     SOP / data codes and the CH2 CRC seed (the first packet there; it
@@ -277,7 +305,7 @@ CASES = {"flysky": (1, flysky_capture), "bayang": (14, bayang_capture), "frskyd"
          "frskyv": (25, frskyv_capture), "frskyx": (15, frskyx_capture),
          "frskyx2": (64, frskyx2_capture),
          "afhds2a": (28, afhds2a_capture), "dsm": (6, dsm_capture), "v2x2": (5, v2x2_capture),
-         "xk": (62, xk_capture)}
+         "xk": (62, xk_capture), "mjxq": (18, mjxq_capture)}
 
 
 def masked(p: str, mask: tuple) -> str:
