@@ -15,10 +15,13 @@ and after; the payloads and packet intervals are compared.
   proto_compare.py v2x2
   proto_compare.py xk --sub 2
   proto_compare.py mjxq --sub 4
+  proto_compare.py afhds2a --range --id 0x2BF3BE8E
 
 Devices: the LaunchPad runs the firmware without BENCH (MPM core, driven by
 radio_sim.py's frames over its XDS110 port), the 4-in-1 the MPM bench
 firmware (its "id" command), the MPM v2 the mpm-v2 bench firmware.
+--low-power / --range: the LaunchPad's power flag (9 / 34 dB down), the
+4-in-1 at full power. --id: the LaunchPad's module id (CC2755: 0x2BF3BE8E).
 """
 
 from __future__ import annotations
@@ -345,6 +348,8 @@ def main():
     ap.add_argument("--id", type=lambda s: int(s, 0), default=0x1CA156B8,
                     help="the LaunchPad's module id (IEEE address, last 32 bits)")
     ap.add_argument("--secs", type=float, default=4.0)
+    ap.add_argument("--low-power", action="store_true", help="the LaunchPad's low power flag")
+    ap.add_argument("--range", action="store_true", help="the LaunchPad's range check flag")
     a = ap.parse_args()
 
     proto, captures = CASES[a.case]
@@ -356,7 +361,8 @@ def main():
         mpm.cmd(f"id {a.id:#x}")
         for i, v in enumerate(CHANNELS):
             mpm.cmd(f"chan {i} {v}")
-        radio.set(protocol=0, channels=CHANNELS)  # protocol list: no RF until started
+        radio.set(protocol=0, channels=CHANNELS,  # protocol list: no RF until started
+                  low_power=a.low_power, range_check=a.range)
 
         kw = {"module_id": (a.id + a.rx_num) & 0xFFFFFFFF} if a.case == "afhds2a" else {}
         if a.case == "dsm":
