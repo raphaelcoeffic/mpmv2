@@ -76,6 +76,16 @@ int main()
   hex("12a8d30dcc80e7e8fd6b123790783b24cd7118991c84", want);
   CHECK(!memcmp(p, want, sizeof(p)));
 
+  // Unpack: the hop index and step back; a flipped bit fails the CRC
+  uint8_t plain[FASST_PACKET_LEN], uk, ustep;
+  for (uint8_t k = 0; k < FASST_HOPS; k++) {
+    fasst_packet(p, k, 28, ch, k & 1, 0, NULL, 0);
+    CHECK(fasst_unpack(p, plain, &uk, &ustep) && uk == k && ustep == 28);
+  }
+  CHECK(plain[0] == FASST_ID_BYTE0);
+  p[7] ^= 0x10;
+  CHECK(!fasst_unpack(p, plain, &uk, &ustep));
+
   // Hops: 36 channels, each once per period, CHQ 2349..2419
   uint8_t seen[FASST_HOPS] = {0}, k = FASST_HOP_FIRST;
   for (int i = 0; i < FASST_HOPS; i++, k = fasst_next_hop(k, FASST_HOP_STEP)) {

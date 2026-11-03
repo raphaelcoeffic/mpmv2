@@ -63,9 +63,21 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
         errors, fs_cycles, radio_last_status());
 }
 
-// FASST RX: parked on hop k, every packet despread (fasst_frame.h)
+// FASST RX: parked on hop k or following the hops, every packet despread
+// (fasst_frame.h)
 static radio_packet_t _pkt;
 static uint8_t _bits[(FASST_RX_BITS_MAX + 7) / 8 + 1], _corr[FASST_RX_BITS_MAX];
+// The packet's bytes after the sync word and their worst bit correlation
+static uint8_t _bytes[FASST_RX_BYTES_MAX], _q[FASST_RX_BYTES_MAX];
+
+// One bit: 11 chips at 1.5 Mchip/s, us
+#define BIT_US(n) ((n) * 22 / 3)
+
+// Following the hops: RX on FASST_RX_LEAD_US before the next packet's sync
+// word (its preamble starts about 500 us before), the packet given up
+// FASST_RX_LATE_US after its RX would have ended
+#define FASST_RX_LEAD_US 1000
+#define FASST_RX_LATE_US 500
 
 static uint32_t _rx_bits(const fasst_rx_cfg_t* cfg)
 {
@@ -74,6 +86,29 @@ static uint32_t _rx_bits(const fasst_rx_cfg_t* cfg)
 
 // 8 bits from bit b, LSB first
 static uint8_t _byte_at(uint32_t b) { return _bits[b / 8] >> (b % 8) | _bits[b / 8 + 1] << (8 - b % 8); }
+
+// _pkt despread into _bytes and _q: the bits from the RF core's sync word to
+// the real one (sync bits 6..15: next, or up to FASST_RX_EARLY_BITS later
+// when the RF core found its sync word in the preamble), -1 if not found
+static int32_t _despread(const fasst_rx_cfg_t* cfg)
+{
+  fasst_despread(_pkt.data, FASST_RX_SKIP_CHIPS, _rx_bits(cfg), _bits, _corr);
+  uint16_t left = fasst_rx_sync_left(), mask = (1 << FASST_RX_SYNC_LEFT) - 1;
+  uint32_t shift = 0;
+  while (shift <= FASST_RX_EARLY_BITS &&
+         ((_byte_at(shift) | (uint16_t)_byte_at(shift + 8) << 8) & mask) != left)
+    shift++;
+  if (shift > FASST_RX_EARLY_BITS) return -1;
+
+  uint32_t b0 = shift + FASST_RX_SYNC_LEFT;
+  for (uint32_t i = 0; i < cfg->bytes; i++) {
+    _bytes[i] = _byte_at(b0 + 8 * i);
+    _q[i] = 11;
+    for (int j = 0; j < 8; j++)
+      if (_corr[b0 + 8 * i + j] < _q[i]) _q[i] = _corr[b0 + 8 * i + j];
+  }
+  return shift;
+}
 
 // v[0..n) in hex, 2 digits each, or 1 (values 0..15)
 static void _print_hex_line(fasst_print_t print, const uint8_t* v, uint32_t n, int digits)
@@ -92,38 +127,19 @@ static void _print_hex_line(fasst_print_t print, const uint8_t* v, uint32_t n, i
   }
 }
 
-static void _print_rx(fasst_print_t print, const fasst_rx_cfg_t* cfg)
+// _pkt, heard on hop k, after _despread()
+static void _print_rx(fasst_print_t print, const fasst_rx_cfg_t* cfg, uint8_t k, int32_t shift)
 {
-  fasst_despread(_pkt.data, FASST_RX_SKIP_CHIPS, _rx_bits(cfg), _bits, _corr);
-  print("@fasst %lu %u rssi=%d", _pkt.timestamp_us, cfg->k, _pkt.rssi);
+  print("@fasst %lu %u rssi=%d", _pkt.timestamp_us, k, _pkt.rssi);
   if (_pkt.freq_offset != RADIO_FREQ_OFFSET_NONE) print(" foff=%d", _pkt.freq_offset);
-
-  // The rest of the sync word: next, or up to FASST_RX_EARLY_BITS later (the
-  // RF core found its sync word in the preamble)
-  uint16_t left = fasst_rx_sync_left(), mask = (1 << FASST_RX_SYNC_LEFT) - 1;
-  uint32_t shift = 0;
-  while (shift <= FASST_RX_EARLY_BITS &&
-         ((_byte_at(shift) | (uint16_t)_byte_at(shift + 8) << 8) & mask) != left)
-    shift++;
-  if (shift > FASST_RX_EARLY_BITS) {
+  if (shift < 0) {
     print(" sync=none\r\n");
     return;
   }
-  print(" shift=%lu ", shift);
-
-  // The packet's bytes, then q: their worst bit correlation, one hex digit
-  // each (11 = b)
-  uint8_t v[FASST_RX_BITS_MAX / 8];
-  uint32_t b0 = shift + FASST_RX_SYNC_LEFT;
-  for (uint32_t i = 0; i < cfg->bytes; i++) v[i] = _byte_at(b0 + 8 * i);
-  _print_hex_line(print, v, cfg->bytes, 2);
+  print(" shift=%ld ", shift);
+  _print_hex_line(print, _bytes, cfg->bytes, 2);
   print(" q=");
-  for (uint32_t i = 0; i < cfg->bytes; i++) {
-    v[i] = 11;
-    for (int j = 0; j < 8; j++)
-      if (_corr[b0 + 8 * i + j] < v[i]) v[i] = _corr[b0 + 8 * i + j];
-  }
-  _print_hex_line(print, v, cfg->bytes, 1);
+  _print_hex_line(print, _q, cfg->bytes, 1);
   print("\r\n");
 }
 
@@ -142,12 +158,47 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
     return;
   }
 
-  uint32_t packets = 0, restarts = 0, t_end = micros() + cfg->secs * 1000000;
+  // Locked: on hop k, the next packet's sync word at t_next. A packet with a
+  // good CRC (re)locks: its hop index and step give the next hop. A miss
+  // keeps the timing, one hop further; FASST_HOPS in a row: parked again
+  uint8_t k = cfg->k, step = 0;
+  bool locked = false, listening = true;
+  uint32_t t_next = 0, misses = 0, rx_us = BIT_US(_rx_bits(cfg));
+  uint32_t packets = 0, good = 0, missed = 0, locks = 0, restarts = 0;
+  uint32_t t_end = micros() + cfg->secs * 1000000;
   while (micros_before(t_end)) {
     if (radio_receive(&_pkt)) {
       packets++;
-      _print_rx(print, cfg);
-    } else if (!radio_rx_active()) {
+      int32_t shift = _despread(cfg);
+      uint8_t plain[FASST_PACKET_LEN], pk, pstep, heard = k;
+      bool ok = shift >= 0 && cfg->bytes >= FASST_PACKET_LEN && fasst_unpack(_bytes, plain, &pk, &pstep);
+      good += ok;
+      if (cfg->follow && ok) {
+        locks += !locked;
+        locked = true;
+        misses = 0;
+        step = pstep;
+        k = fasst_next_hop(pk, step);
+        t_next = _pkt.timestamp_us + BIT_US(shift) + FASST_FRAME_US;
+        radio_set_frequency(fasst_freq_khz(k));
+        listening = false;
+      }
+      _print_rx(print, cfg, heard, shift);
+    } else if (locked && !listening && !micros_before(t_next - FASST_RX_LEAD_US)) {
+      radio_rx_start(len);
+      listening = true;
+    } else if (locked && listening && !micros_before(t_next + rx_us + FASST_RX_LATE_US)) {
+      missed++;
+      k = fasst_next_hop(k, step);
+      t_next += FASST_FRAME_US;
+      if (++misses >= FASST_HOPS) {
+        locked = false;
+        k = cfg->k;
+      }
+      radio_set_frequency(fasst_freq_khz(k));
+      listening = !locked;
+      if (listening) radio_rx_start(len);
+    } else if (listening && !radio_rx_active()) {
       restarts++;
       radio_rx_start(len);
     }
@@ -155,5 +206,6 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
   radio_rx_stats_t st;
   radio_rx_stats(&st);
   radio_off();
-  print("@end fasstrx packets=%lu restarts=%lu buf_full=%u\r\n", packets, restarts, st.buf_full);
+  print("@end fasstrx packets=%lu crc_ok=%lu missed=%lu locks=%lu restarts=%lu buf_full=%u\r\n",
+        packets, good, missed, locks, restarts, st.buf_full);
 }

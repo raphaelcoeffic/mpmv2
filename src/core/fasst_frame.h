@@ -57,6 +57,11 @@ uint32_t fasst_freq_khz(uint8_t k);
 void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt, uint8_t type,
                   const uint16_t* fs, uint16_t hold);
 
+// A received packet (FASST_PACKET_LEN bytes as on air): plain = the packet
+// unwhitened; true if its CRC is right and its hop field valid, with its hop
+// index and step
+bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step);
+
 // The packet's chips (FASST_CHIPS_LEN bytes, MSB first): preamble, sync,
 // packet
 void fasst_spread(uint8_t* chips, const uint8_t* p);

@@ -24,11 +24,14 @@ typedef void (*fasst_print_t)(const char* fmt, ...);
 // Blocks for cfg->secs; the radio needs radio_init() again after it
 void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print);
 
-// FASST RX (sniffer), parked on hop k: each packet despread, printed as
+// FASST RX (sniffer) on hop k: each packet despread, printed as
 // @fasst <time_us> <k> rssi=<dBm> [foff=<kHz>] shift=<n> <hex> q=<hex>: the
-// packet's first bytes (bits LSB first, as on air) and per byte its worst
-// bit correlation (0..b, b = all 11 chips right). shift: bits from the RF
-// core's sync word to the real one; sync=none instead if not found
+// hop it came on, the packet's first bytes (bits LSB first, as on air) and
+// per byte its worst bit correlation (0..b, b = all 11 chips right). shift:
+// bits from the RF core's sync word to the real one; sync=none instead if
+// not found. With follow, a 10ch packet with a good CRC locks on the hops
+// (fasst_unpack(): the next hop and its time); an unknown format stays
+// parked on k
 //
 // The RF core also finds its sync word at the very start of a packet (the
 // sender's synthesizer settling; the sync bits 6..15 came 68 bits later):
@@ -43,6 +46,7 @@ typedef struct {
   uint16_t bytes;          // packet bytes to print, 1..FASST_RX_BYTES_MAX
   uint8_t rx_bw;           // RF core RX bandwidth code
   uint8_t sync_threshold;  // 0 = default
+  bool follow;             // follow the hops (10ch)
 } fasst_rx_cfg_t;
 
 // Blocks for cfg->secs; the radio needs radio_init() again after it

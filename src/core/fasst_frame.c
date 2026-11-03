@@ -120,6 +120,17 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
   for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
 }
 
+bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
+{
+  for (int i = 0; i < FASST_PACKET_LEN; i++) plain[i] = p[i] ^ _white[i];
+  if (_crc_kermit(plain, 20) != (plain[20] | plain[21] << 8)) return false;
+  // Hop position k + 1, the step: fasst_packet()
+  uint8_t pos = plain[4] << 1 | plain[5] >> 7;
+  *k = pos - 1;
+  *step = plain[5] & 0x7F;
+  return pos >= 1 && *k < FASST_HOPS && *step >= 1 && *step < 37;
+}
+
 void fasst_spread(uint8_t* chips, const uint8_t* p)
 {
   memset(chips, 0, FASST_CHIPS_LEN);
