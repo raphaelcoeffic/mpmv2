@@ -103,6 +103,28 @@ J-Link Commander instead (`$JLINK_DEVICE`, default `CC2652RB`). Both take
 ROM boot loader answers over USB (DTR/RTS drive RESET and BOOT); it doesn't
 flash. The board itself is described in [hardware.md](hardware.md).
 
+### Sonoff ZBDongle-P
+
+The bench on a Sonoff Zigbee 3.0 USB Dongle Plus (CC2652P), as a FASST
+sniffer (`fasstrx`): one image at 0x0 with the CCFG, no boot loader of
+ours. The chip's ROM boot loader flashes it over the dongle's USB (CP2102N:
+RTS on reset, DTR on BOOT, DIO15), as Sonoff's own flasher does. The CCFG
+is Sonoff's (boot loader backdoor, 48 MHz crystal trim, forced VDDR,
+DC/DC off), but for MODE_CONF VDDR_CAP (unused on the CC26x2). Console: the same USB port, UART0 (DIO12 / DIO13)
+at 921600; `info` says `dev=cc2652p`. No LED, no `timing`, no SX1281; the
+RF switch (DIO29) stays on the normal path, TX power words are the
+CC2652R's (not measured).
+
+```sh
+cmake -S . -B build-zbp -G Ninja -DBOARD=ZBDONGLE_P
+tools/rom_flash.py --sonoff --read zbdongle-p-stock.bin   # first: keep Sonoff's firmware
+ninja -C build-zbp flash-bench          # tools/rom_flash.py --sonoff build-zbp/zbdongle-p-bench.bin
+```
+
+`tools/rom_flash.py --sonoff zbdongle-p-stock.bin` puts the saved Zigbee
+firmware back. The host tools take the dongle's port as the CC2652's:
+`CC_PORT=/dev/cu.usbserial-<id>` (or `-p`).
+
 ### CC2755P10 LaunchPad
 
 The bench (`src/core/bench.c`, `frame.c`, `main_bench.c` as on the MPM v2)

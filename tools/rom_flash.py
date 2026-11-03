@@ -10,6 +10,10 @@ application, CCFG); later updates go through the MPM v2 boot loader instead
 
   rom_flash.py [FILE]          erase, write, verify by CRC, reset
   rom_flash.py --info          the chip and the boot loader, nothing written
+  rom_flash.py --read OUT      save the whole flash (checked by CRC)
+
+  --sonoff: a Sonoff ZBDongle-P (CC2652P, CP2102N) instead: its own lines
+  for the boot loader, FILE build-zbp/zbdongle-p-bench.bin
 
 FILE: a binary of the whole flash from 0x0 (default: build/mpm-v2-full.bin).
 The 0xFF (erased) ranges are not sent; the CCFG sector goes last, so an
@@ -17,10 +21,13 @@ interrupted write never leaves a CCFG pointing at a missing boot loader.
 
 The ROM boot loader opens through the CH343: DTR resets the CC2652, RTS
 holds BOOT (DIO19) low as the reset ends (CCFG's backdoor, kept by the MPM v2
-boot loader). A blank chip opens it at any reset. Protocol: TI's CC13x2 /
-CC26x2 technical reference manual (SWCU185), "ROM Bootloader".
+boot loader). A blank chip opens it at any reset. On the ZBDongle-P, RTS
+resets and DTR holds BOOT (DIO15) low, as Sonoff's own flasher does.
+Protocol: TI's CC13x2 / CC26x2 technical reference manual (SWCU185), "ROM
+Bootloader".
 
-Port: --port, else $V2_PORT, else the first CH343.
+Port: --port, else $V2_PORT, else the first CH343 (--sonoff: the first
+CP2102N).
 """
 
 import argparse
@@ -30,7 +37,7 @@ import time
 import zlib
 from pathlib import Path
 
-from v2_serial import find_port, serial
+from v2_serial import find_port, list_ports, serial
 
 ACK, NACK = b"\x00\xcc", b"\x00\x33"
 
@@ -50,33 +57,52 @@ class BlError(Exception):
 
 
 class RomBl:
-    def __init__(self, port: str, baud: int):
+    def __init__(self, port: str, baud: int, sonoff: bool = False):
         self.ser = serial.Serial(port, baud, timeout=1)
+        self.sonoff = sonoff
 
     def close(self):
         self.ser.close()
 
     def enter(self):
         """Reset with BOOT low (the backdoor), then autobaud"""
-        # Q1 as on ESP32 boards: DTR low and RTS high reset, the other way
-        # round BOOT low, both the same level nothing (pyserial: False = low)
-        self.ser.rts = True
-        self.ser.dtr = False
-        time.sleep(0.1)
-        self.ser.rts = False
-        self.ser.dtr = True
-        time.sleep(0.1)
-        self.ser.rts = True
-        time.sleep(0.1)
+        if self.sonoff:
+            # ZBDongle-P (CP2102N): RTS resets, DTR holds BOOT (DIO15) low;
+            # the sequence of Sonoff's flasher and cc2538-bsl
+            # --bootloader-sonoff-usb (pyserial: True = asserted)
+            self.ser.dtr = False
+            self.ser.rts = True
+            time.sleep(0.1)
+            self.ser.dtr = True
+            self.ser.rts = False
+            time.sleep(0.5)
+            self.ser.dtr = False
+        else:
+            # Q1 as on ESP32 boards: DTR low and RTS high reset, the other way
+            # round BOOT low, both the same level nothing (pyserial: False = low)
+            self.ser.rts = True
+            self.ser.dtr = False
+            time.sleep(0.1)
+            self.ser.rts = False
+            self.ser.dtr = True
+            time.sleep(0.1)
+            self.ser.rts = True
+            time.sleep(0.1)
         self.ser.reset_input_buffer()
         self.ser.write(b"\x55\x55")
         r = self.ser.read(2)
         if r != ACK:
             raise BlError(f"no answer from the ROM boot loader ({r.hex() or 'nothing'}): "
-                          "the CH343 lines, or another program on the port?")
+                          f"the {'CP2102N' if self.sonoff else 'CH343'} lines, or another program on the port?")
 
     def leave(self):
         """Reset into the firmware (BOOT high)"""
+        if self.sonoff:
+            self.ser.dtr = False
+            self.ser.rts = True
+            time.sleep(0.05)
+            self.ser.rts = False
+            return
         self.ser.dtr = False
         time.sleep(0.05)
         self.ser.rts = True
@@ -132,6 +158,20 @@ class RomBl:
         self.cmd(MEMORY_READ, struct.pack(">IBB", addr, 1, 1))
         return struct.unpack("<I", self._response())[0]
 
+    def read(self, addr: int, size: int, progress=None) -> bytes:
+        """size bytes from addr (a multiple of 4), 63 words per command"""
+        out = bytearray()
+        while len(out) < size:
+            n = min(63, (size - len(out)) // 4)
+            self.cmd(MEMORY_READ, struct.pack(">IBB", addr + len(out), 1, n))
+            data = self._response()
+            if len(data) != 4 * n:
+                raise BlError(f"read 0x{addr + len(out):05x}: {len(data)} bytes, expected {4 * n}")
+            out += data
+            if progress:
+                progress(len(data))
+        return bytes(out)
+
     def crc32(self, addr: int, size: int) -> int:
         self.cmd(CRC32, struct.pack(">III", addr, size, 0))
         return struct.unpack(">I", self._response())[0]
@@ -169,6 +209,17 @@ def ranges(img: bytes, flash_size: int) -> list[tuple[int, bytes]]:
     return [r for r in out if r[0] < flash_size - SECTOR] + ccfg
 
 
+CP210X = (0x10C4, 0xEA60)  # the ZBDongle-P's CP2102N
+
+
+def find_sonoff_port() -> str:
+    """The first CP2102N"""
+    ports = sorted(p.device for p in list_ports.comports() if (p.vid, p.pid) == CP210X)
+    if not ports:
+        sys.exit("No ZBDongle-P (CP2102N) found: plug it in, or give the port (--port)")
+    return ports[0]
+
+
 def main():
     default = Path(__file__).resolve().parent.parent / "build" / "mpm-v2-full.bin"
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -177,10 +228,14 @@ def main():
     ap.add_argument("-b", "--baud", type=int, default=460800,
                     help="the ROM boot loader detects it (default 460800; 115200 if it fails)")
     ap.add_argument("--info", action="store_true", help="read the chip only")
+    ap.add_argument("--read", metavar="OUT", help="save the whole flash to OUT, nothing written")
+    ap.add_argument("--sonoff", action="store_true",
+                    help="Sonoff ZBDongle-P: its boot loader lines, port the first CP2102N")
     a = ap.parse_args()
 
-    img = b"" if a.info else Path(a.file).read_bytes()
-    bl = RomBl(a.port or find_port(), a.baud)
+    img = b"" if a.info or a.read else Path(a.file).read_bytes()
+    port = a.port or (find_sonoff_port() if a.sonoff else find_port())
+    bl = RomBl(port, a.baud, a.sonoff)
     try:
         bl.enter()
         chip = bl.chip_id()
@@ -192,9 +247,29 @@ def main():
         if a.info:
             bl.leave()
             return
+        if a.read:
+            t = time.monotonic()
+            done = 0
+
+            def read_progress(n):
+                nonlocal done
+                done += n
+                if sys.stderr.isatty():
+                    print(f"\rreading {done}/{flash_size} bytes", end="", file=sys.stderr)
+
+            data = bl.read(0, flash_size, read_progress)
+            if sys.stderr.isatty():
+                print(file=sys.stderr)
+            if bl.crc32(0, flash_size) != zlib.crc32(data):
+                sys.exit("read: the chip's CRC of the flash does not match the data read")
+            Path(a.read).write_bytes(data)
+            print(f"{a.read}: {flash_size} bytes read and checked by CRC in "
+                  f"{time.monotonic() - t:.1f} s", file=sys.stderr)
+            bl.leave()
+            return
         if len(img) != flash_size:
             sys.exit(f"{a.file}: {len(img)} bytes, not the flash size ({flash_size}): "
-                     "the whole flash from 0x0 (mpm-v2-full.bin) is expected")
+                     "the whole flash from 0x0 (mpm-v2-full.bin, zbdongle-p-bench.bin) is expected")
 
         todo = ranges(img, flash_size)
         total = sum(len(d) for _, d in todo)
@@ -221,7 +296,8 @@ def main():
               file=sys.stderr)
         bl.cmd(RESET)
         bl.leave()
-        print("reset: the MPM v2 boot loader starts the application", file=sys.stderr)
+        print("reset: the image starts" if a.sonoff else
+              "reset: the MPM v2 boot loader starts the application", file=sys.stderr)
     except BlError as e:
         sys.exit(f"rom_flash: {e}")
     finally:
