@@ -125,6 +125,17 @@ ninja -C build-zbp flash-bench          # tools/rom_flash.py --sonoff build-zbp/
 firmware back. The host tools take the dongle's port as the CC2652's:
 `CC_PORT=/dev/cu.usbserial-<id>` (or `-p`).
 
+**Sniffer page for helpers** (`tools/sniffer_web/index.html`): a static page
+using Web Serial (Chrome, Edge, Firefox 151+, desktop) that loads the bench on the
+dongle through the ROM boot loader (`rom_flash.py --sonoff` in JavaScript,
+backup button included), then runs guided `fasstrx 0 0 48` recordings
+(stopped by a newline) and saves them as one text file: `# key: value`
+header lines, then per recording `@step`, `@note`, `@time` and the bench's
+lines. `ninja -C build-zbp sniffer-web` puts the page and the image
+(`fasst-sniffer-zbdongle-p.bin`) in `build-zbp/sniffer-web/`, ready to
+publish (e.g. Cloudflare Pages); it also lists the XDS110, so recording
+can be tried on the CC2652 LaunchPad (no flashing there).
+
 ### CC2755P10 LaunchPad
 
 The bench (`src/core/bench.c`, `frame.c`, `main_bench.c` as on the MPM v2)
@@ -606,7 +617,7 @@ length data); the framing of each chip is done in software (`frame.c`). The
 | `peek <addr> [n]` / `poke <addr> <val>` | Read up to 16 words / write one (RF core registers: see [rf-core-notes.md](rf-core-notes.md) for what hangs the bus or stops RX) |
 | `sched <period_us> [n]` | `timer_set_alarm()` chained on absolute deadlines (previous + period), `n` alarms (default 100): `@timing sched_late`, the callback start after its deadline. An `rx` job goes on meanwhile |
 | `fasst [secs] [invert] [chip_rate] [dev_hz] [fs_every] [sweep] [step] [id]` | Futaba FASST 10ch TX for `secs` (default 10, blocking; [mpm-core.md](mpm-core.md#futaba-fasst)): channels 200 + 170 i, CH1 swept (16 every `sweep` frames, default 2, 0 = fixed), the F/S cycle (positions 1600 - 100 i) every `fs_every` frames (default 0: none). `step`: the hop step (1 to 36, default 27, the TM-10's). `id`: the plain ID, packet bytes 0 to 3 (default `0x12689fe0`, the TM-10's). Defaults 1.5 Mchip/s, 500 kHz, `pwr` as set; the PHY in use is set up again after it |
-| `fasstrx [secs] [k] [bytes] [rx_bw] [syncthr] [follow]` | Futaba FASST receiver (sniffer) on hop `k` (0 to 35, default 0) for `secs` (default 10, blocking): each packet despread on the MCU, `@fasst <time_us> <k> rssi= [foff=] shift=<n> <hex> q=<digits>`: the hop it was heard on, the first `bytes` packet bytes after the sync word (default 23, bits LSB first as on air, still whitened) and per byte its worst Barker correlation (`b` = all 11 chips right, `1` = noise: past the packet's end). `shift`: bits from the RF core's sync match to the real sync word (it also matches at the start of the preamble), `sync=none` if not found. With `follow` (default 1), a 10ch packet with a good CRC locks on the hops: its hop index and step give the next hop, 7 ms later; a hop without a good packet keeps the timing, 36 in a row go back to `k`. Ends with `@end fasstrx packets= crc_ok= missed= locks= restarts= buf_full=` (`missed`: hops followed without a good packet). RX bandwidth code default 100 (2458 kHz) |
+| `fasstrx [secs] [k] [bytes] [rx_bw] [syncthr] [follow]` | Futaba FASST receiver (sniffer) on hop `k` (0 to 35, default 0) for `secs` (default 10, 0 = until stopped; blocking: a newline ends it, other bytes are dropped meanwhile): each packet despread on the MCU, `@fasst <time_us> <k> rssi= [foff=] shift=<n> <hex> q=<digits>`: the hop it was heard on, the first `bytes` packet bytes after the sync word (default 23, bits LSB first as on air, still whitened) and per byte its worst Barker correlation (`b` = all 11 chips right, `1` = noise: past the packet's end). `shift`: bits from the RF core's sync match to the real sync word (it also matches at the start of the preamble), `sync=none` if not found. With `follow` (default 1), a 10ch packet with a good CRC locks on the hops: its hop index and step give the next hop, 7 ms later; a hop without a good packet keeps the timing, 36 in a row go back to `k`. Ends with `@end fasstrx packets= crc_ok= missed= locks= restarts= buf_full=` (`missed`: hops followed without a good packet). RX bandwidth code default 100 (2458 kHz) |
 | `timing [n] [len]` | RF core latencies on the current PHY, framing and channel, `n` runs each (default 20), `len` byte payloads (default 16): `@timing <what> n= min= avg= max=` in us, `@edges <what>` the PA / LNA enable edges of the first run. The RF core's PA enable (`RFC_GPO1`) is read back on the MPM v2's PA pin, on the LaunchPad it and the LNA enable (`RFC_GPO0`) go to the LEDs during the test. See `timing.py` |
 | `tx`, `txp`, `seq`, `rx <len> [fixed]`, `stop`, `info` | As on the MPM, but the `@rx` time is when the RF core found the sync word. With a length field (`esb` with `dpl`, XN297 enhanced, HS6200, `cc2500` `var`), `rx` receives each packet up to its length (`radio_rx_start_var()`, the reply shows `var=<header bytes>`), `fixed`: the maximum length instead. `@rx` lines have `rssi=<dBm>` and `foff=<kHz>`, the modem's estimate of the sender's frequency above the CC2652 (+-20%, not for acks). The `rx` reply shows the RX sync word and threshold. `stop` adds the RF core counters after `rx` |
 

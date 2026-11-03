@@ -34,3 +34,14 @@ add_custom_target(flash-bench
     USES_TERMINAL
     VERBATIM
 )
+
+# sniffer-web: the static FASST sniffer page (tools/sniffer_web) with the
+# image, ready to publish as is (e.g. Cloudflare Pages: sniffer-web/)
+set(web_dir ${CMAKE_BINARY_DIR}/sniffer-web)
+add_custom_target(sniffer-web
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${web_dir}
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tools/sniffer_web/index.html ${web_dir}/
+    COMMAND ${CMAKE_COMMAND} -E copy ${bench_image} ${web_dir}/fasst-sniffer-zbdongle-p.bin
+    DEPENDS bench
+    VERBATIM
+)

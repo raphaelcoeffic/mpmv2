@@ -166,7 +166,7 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
   uint32_t t_next = 0, misses = 0, rx_us = BIT_US(_rx_bits(cfg));
   uint32_t packets = 0, good = 0, missed = 0, locks = 0, restarts = 0;
   uint32_t t_end = micros() + cfg->secs * 1000000;
-  while (micros_before(t_end)) {
+  while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
     if (radio_receive(&_pkt)) {
       packets++;
       int32_t shift = _despread(cfg);

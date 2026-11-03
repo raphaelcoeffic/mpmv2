@@ -1578,6 +1578,9 @@ static void _cmd_fasst(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// A newline from the host ends a blocking run (the byte taken)
+static bool _host_stop() { return uart_rx_fifo_available(UART0) && uart_get_char(UART0) == '\n'; }
+
 // FASST RX (bench_fasst.c), blocking
 static void _cmd_fasstrx(char* args)
 {
@@ -1588,7 +1591,8 @@ static void _cmd_fasstrx(char* args)
   cfg.rx_bw = _number_or(&args, 100);
   cfg.sync_threshold = _number_or(&args, 0);
   cfg.follow = _number_or(&args, 1);
-  if (cfg.secs == 0 || cfg.secs > 3600 || cfg.k >= FASST_HOPS || cfg.bytes == 0 ||
+  cfg.stop = _host_stop;
+  if (cfg.secs > 3600 || cfg.k >= FASST_HOPS || cfg.bytes == 0 ||
       cfg.bytes > FASST_RX_BYTES_MAX || cfg.rx_bw < 64 || cfg.rx_bw > 103 || cfg.sync_threshold > 0x7F) {
     _print("@err usage: fasstrx [secs] [k] [bytes] [rx_bw] [syncthr] [follow]\r\n");
     return;

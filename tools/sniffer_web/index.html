@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FASST Sniffer</title>
+<meta name="description" content="Record Futaba FASST packets with a Sonoff ZBDongle-P, in the browser">
+<!--
+  FASST sniffer for helpers: flashes the radio bench (build-zbp
+  zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
+  ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
+  --sonoff), then records guided fasstrx runs (docs/bench.md) into one text
+  file. Web Serial: Chrome, Edge, Firefox 151+ (desktop).
+
+  Capture file: "# " header lines (key: value), then per recording
+  "@step <n> <title>", "@note <text>", "@time <ISO date>", the bench's
+  "@ok fasstrx ..." line, its "@fasst ..." lines and "@end fasstrx ...".
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+  --accent: #1f6feb; --accent-text: #ffffff; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+  --code: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --card: #1b2029; --text: #e4e8ef; --muted: #98a2b3; --line: #2c3340;
+    --accent: #4c8dff; --accent-text: #0b0e13; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --code: #232a35;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --card: #1b2029; --text: #e4e8ef; --muted: #98a2b3; --line: #2c3340;
+  --accent: #4c8dff; --accent-text: #0b0e13; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  --code: #232a35;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+h2 { font-size: 1.15rem; margin: 0 0 8px; }
+p { margin: 8px 0; }
+.sub { color: var(--muted); margin-bottom: 20px; }
+section {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; margin: 16px 0;
+}
+section.off { opacity: .5; pointer-events: none; }
+.num {
+  display: inline-grid; place-items: center; width: 1.6em; height: 1.6em; border-radius: 50%;
+  background: var(--accent); color: var(--accent-text); font-size: .85em; margin-right: 6px;
+}
+button {
+  font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--accent-text); cursor: pointer;
+}
+button.plain { background: transparent; color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+input, select, textarea {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px; width: 100%;
+}
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: .95em; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.status { margin-top: 10px; font-size: .95em; color: var(--muted); white-space: pre-wrap; }
+.status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.warn { color: var(--warn); }
+progress { width: 100%; height: 10px; margin-top: 10px; }
+.steps { list-style: none; padding: 0; margin: 0; }
+.step { border-top: 1px solid var(--line); padding: 12px 0; }
+.step:first-child { border-top: 0; }
+.step h3 { font-size: 1rem; margin: 0; }
+.step .what { color: var(--muted); font-size: .95em; margin: 2px 0 6px; }
+.step .live { font-variant-numeric: tabular-nums; font-size: .9em; margin-top: 6px; }
+.badge { font-size: .8em; padding: 1px 8px; border-radius: 10px; border: 1px solid currentColor; margin-left: 6px; }
+.done { color: var(--ok); }
+details { margin-top: 12px; color: var(--muted); font-size: .95em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<h1>FASST Sniffer</h1>
+<p class="sub">Records what a Futaba FASST transmitter sends, with a Sonoff ZBDongle-P USB
+stick. Nothing to install: this page talks to the stick directly.</p>
+
+<section id="unsupported" hidden>
+<h2>This browser can't talk to USB serial ports</h2>
+<p>Open this page in <b>Chrome</b>, <b>Edge</b> or <b>Firefox 151 or newer</b> on a computer
+(Windows, macOS or Linux). Phones and Safari don't work.</p>
+</section>
+
+<section id="s-connect">
+<h2><span class="num">1</span>Plug in the stick</h2>
+<p>Plug the Sonoff <b>ZBDongle-P</b> (the "Plus" with a <b>P</b>: CC2652P) into a USB port, then
+pick it in the list (<i>CP2102N USB to UART</i>, or a COM port on Windows).</p>
+<div class="row"><button id="b-connect">Choose the stick</button></div>
+<div class="status" id="st-connect"></div>
+<details><summary>Windows doesn't list it?</summary>
+<p>Windows normally installs the driver by itself after a minute. If it doesn't, install
+Silicon Labs' <a href="https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers" target="_blank" rel="noopener">CP210x driver</a>
+and plug the stick in again. Close any other program that uses it (Zigbee2MQTT, Home
+Assistant, a terminal).</p>
+</details>
+</section>
+
+<section id="s-flash" class="off">
+<h2><span class="num">2</span>Load the sniffer</h2>
+<p>This replaces the stick's Zigbee firmware with the sniffer (about 20 seconds). Skip it
+if the page says the sniffer is already there.</p>
+<div class="row">
+  <button id="b-flash">Load the sniffer</button>
+</div>
+<progress id="pr-flash" value="0" max="1" hidden></progress>
+<div class="status" id="st-flash"></div>
+<details><summary>Getting Zigbee back afterwards</summary>
+<p>Sonoff's <a href="https://dongle.sonoff.tech/sonoff-dongle-flasher/" target="_blank" rel="noopener">web flasher</a>
+puts a Zigbee firmware back on the stick. To keep the exact firmware you have now, save it
+first:</p>
+<div class="row"><button class="plain" id="b-backup">Save the current firmware</button></div>
+</details>
+</section>
+
+<section id="s-info" class="off">
+<h2><span class="num">3</span>About your transmitter</h2>
+<label for="f-radio">Radio and module (e.g. "T10CG", "8FG + TM-8")</label>
+<input id="f-radio" autocomplete="off">
+<label for="f-mode">Mode it is set to</label>
+<select id="f-mode">
+  <option>FASST multi-channel (MULT)</option>
+  <option>FASST 7 channels (7CH)</option>
+  <option>FASST 10 channels (TM-10 / TM-14)</option>
+  <option>Don't know</option>
+</select>
+<label for="f-notes">Anything else (receiver it's bound to, failsafe settings...)</label>
+<textarea id="f-notes" rows="2"></textarea>
+<p class="status">Keep the transmitter about 1 m from the stick. Don't use a "range check"
+mode unless a step asks for it.</p>
+</section>
+
+<section id="s-record" class="off">
+<h2><span class="num">4</span>Record</h2>
+<p>Do the steps in order. Each one records for a fixed time; you can stop early or redo
+one. The counters should move while the transmitter is on.</p>
+<ul class="steps" id="steps"></ul>
+<div class="row"><button class="plain" id="b-extra">Add a free recording</button></div>
+</section>
+
+<section id="s-save" class="off">
+<h2><span class="num">5</span>Save and send</h2>
+<p>Saves all recordings in one text file. Send it to whoever asked you for it.</p>
+<div class="row"><button id="b-save">Save the file</button></div>
+<div class="status" id="st-save"></div>
+</section>
+</main>
+
+<script>
+"use strict";
+
+const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
+const PAGE_VERSION = "1";
+const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
+const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
+const BENCH_BAUD = 921600;
+const RX_BYTES = 48;  // fasstrx bytes per packet: unknown formats may be longer than 22
+
+// Guided recordings
+const STEPS = [
+  { title: "Transmitter on, sticks centred", secs: 20,
+    what: "Switch the transmitter on (if it is on, leave it), sticks centred, switches as they are." },
+  { title: "Channel 1 end to end", secs: 25,
+    what: "Move only channel 1 slowly from one end to the other and back, 3 times. Check the radio's servo monitor for which stick it is." },
+  { title: "Channel 2 end to end", secs: 25, what: "The same with channel 2 only." },
+  { title: "Channel 3 end to end", secs: 25, what: "The same with channel 3 only." },
+  { title: "Channel 4 end to end", secs: 25, what: "The same with channel 4 only." },
+  { title: "Switches", secs: 30,
+    what: "Flip each switch and turn each knob, one after the other, a few seconds each. Write the order in the note." },
+  { title: "Off and on", secs: 30,
+    what: "Switch the transmitter off, wait 5 seconds, switch it on again, and leave it on until the end." },
+];
+
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function status(id, text, kind = "") {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+function enable(id, on) { $(id).classList.toggle("off", !on); }
+
+// ---------------------------------------------------------------------------
+// Serial link: bytes (boot loader) or lines (bench)
+
+class Link {
+  constructor(port) {
+    this.port = port;
+    this.chunks = [];
+    this.len = 0;
+    this.wake = null;
+    this.onLine = null;
+    this.text = "";
+    this.isOpen = false;
+  }
+
+  async open(baudRate) {
+    await this.port.open({ baudRate, bufferSize: 1 << 16 });
+    this.isOpen = true;
+    this.reader = this.port.readable.getReader();
+    this.writer = this.port.writable.getWriter();
+    this.chunks = [];
+    this.len = 0;
+    this.text = "";
+    this.loop = this._loop();
+  }
+
+  async close() {
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    try { await this.reader.cancel(); } catch (e) {}
+    await this.loop;
+    this.reader.releaseLock();
+    this.writer.releaseLock();
+    await this.port.close();
+  }
+
+  async _loop() {
+    const dec = new TextDecoder();
+    try {
+      for (;;) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (this.onLine) {
+          this.text += dec.decode(value, { stream: true });
+          let i;
+          while ((i = this.text.indexOf("\n")) >= 0) {
+            const line = this.text.slice(0, i).trim();
+            this.text = this.text.slice(i + 1);
+            if (line) this.onLine(line);
+          }
+        } else {
+          this.chunks.push(value);
+          this.len += value.length;
+          this._wake();
+        }
+      }
+    } catch (e) {
+      this.error = e;
+    }
+    this._wake();
+  }
+
+  _wake() { const w = this.wake; this.wake = null; if (w) w(); }
+
+  flush() { this.chunks = []; this.len = 0; }
+
+  // n bytes, or null after ms
+  async read(n, ms) {
+    const end = performance.now() + ms;
+    while (this.len < n) {
+      const left = end - performance.now();
+      if (left <= 0 || !this.isOpen) return null;
+      await new Promise((r) => { this.wake = r; setTimeout(r, left); });
+    }
+    const out = new Uint8Array(n);
+    let k = 0;
+    while (k < n) {
+      const c = this.chunks[0];
+      const take = Math.min(c.length, n - k);
+      out.set(c.subarray(0, take), k);
+      k += take;
+      if (take === c.length) this.chunks.shift();
+      else this.chunks[0] = c.subarray(take);
+    }
+    this.len -= n;
+    return out;
+  }
+
+  write(bytes) { return this.writer.write(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)); }
+  writeText(s) { return this.write(new TextEncoder().encode(s)); }
+  signals(s) { return this.port.setSignals(s); }
+}
+
+// ---------------------------------------------------------------------------
+// CC2652 ROM boot loader (TI SWCU185 "ROM Bootloader"; tools/rom_flash.py)
+
+const PING = 0x20, DOWNLOAD = 0x21, GET_STATUS = 0x23, SEND_DATA = 0x24, RESET = 0x25;
+const SECTOR_ERASE = 0x26, CRC32 = 0x27, GET_CHIP_ID = 0x28, MEMORY_READ = 0x2a, BANK_ERASE = 0x2c;
+const BL_STATUS = { 0x40: "success", 0x41: "unknown command", 0x42: "invalid command",
+                    0x43: "invalid address", 0x44: "flash failure" };
+const SECTOR = 0x2000;
+const FLASH_SIZE_REG = 0x4003002c;
+const DATA_MAX = 252;
+
+const be32 = (x) => [x >>> 24, (x >>> 16) & 0xff, (x >>> 8) & 0xff, x & 0xff];
+
+class Bl {
+  constructor(link) { this.link = link; }
+
+  // ZBDongle-P: RTS resets, DTR holds BOOT (DIO15) low; Sonoff's sequence
+  async enter() {
+    const l = this.link;
+    await l.signals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(100);
+    await l.signals({ dataTerminalReady: true, requestToSend: false });
+    await sleep(500);
+    await l.signals({ dataTerminalReady: false });
+    await sleep(50);
+    l.flush();
+    await l.write([0x55, 0x55]);
+    const r = await l.read(2, 1000);
+    if (!r || r[0] !== 0x00 || r[1] !== 0xcc) throw new Error("no answer from the stick's boot loader");
+  }
+
+  // Reset into the firmware
+  async leave() {
+    await this.link.signals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(50);
+    await this.link.signals({ requestToSend: false });
+  }
+
+  async _ack(what) {
+    for (;;) {
+      const b = await this.link.read(1, 2000);
+      if (!b) throw new Error(`${what}: no answer`);
+      if (b[0] === 0x00) continue;
+      if (b[0] === 0xcc) return;
+      throw new Error(`${what}: ${b[0] === 0x33 ? "refused" : "bad answer"}`);
+    }
+  }
+
+  async cmd(c, payload = [], what = "") {
+    const data = [c, ...payload];
+    const sum = data.reduce((a, b) => a + b, 0) & 0xff;
+    await this.link.write([data.length + 2, sum, ...data]);
+    await this._ack(what || `command 0x${c.toString(16)}`);
+  }
+
+  async response() {
+    let n;
+    do {
+      n = await this.link.read(1, 2000);
+      if (!n) throw new Error("no response");
+    } while (n[0] === 0);
+    const head = await this.link.read(1, 1000);
+    const data = await this.link.read(n[0] - 2, 1000);
+    if (!head || !data || (data.reduce((a, b) => a + b, 0) & 0xff) !== head[0]) {
+      await this.link.write([0x00, 0x33]);
+      throw new Error("bad response");
+    }
+    await this.link.write([0x00, 0xcc]);
+    return data;
+  }
+
+  async status() { await this.cmd(GET_STATUS); return (await this.response())[0]; }
+
+  async check(what) {
+    const s = await this.status();
+    if (s !== 0x40) throw new Error(`${what}: ${BL_STATUS[s] || "status 0x" + s.toString(16)}`);
+  }
+
+  async chipId() {
+    await this.cmd(GET_CHIP_ID);
+    const r = await this.response();
+    return ((r[0] << 24) | (r[1] << 16) | (r[2] << 8) | r[3]) >>> 0;
+  }
+
+  async read(addr, words) {
+    await this.cmd(MEMORY_READ, [...be32(addr), 1, words]);
+    const r = await this.response();
+    if (r.length !== 4 * words) throw new Error(`read 0x${addr.toString(16)}: short answer`);
+    return r;
+  }
+
+  async read32(addr) {
+    const r = await this.read(addr, 1);
+    return (r[0] | (r[1] << 8) | (r[2] << 16) | (r[3] << 24)) >>> 0;
+  }
+
+  async crc32(addr, size) {
+    await this.cmd(CRC32, [...be32(addr), ...be32(size), 0, 0, 0, 0]);
+    const r = await this.response();
+    return ((r[0] << 24) | (r[1] << 16) | (r[2] << 8) | r[3]) >>> 0;
+  }
+
+  async eraseAll(sectors) {
+    await this.cmd(BANK_ERASE, [], "erase");
+    if ((await this.status()) === 0x40) return;
+    for (let s = 0; s < sectors; s++) {
+      await this.cmd(SECTOR_ERASE, be32(s * SECTOR), "erase");
+      await this.check("erase");
+    }
+  }
+
+  async write(addr, data, progress) {
+    await this.cmd(DOWNLOAD, [...be32(addr), ...be32(data.length)], "write");
+    await this.check(`write 0x${addr.toString(16)}`);
+    for (let off = 0; off < data.length; off += DATA_MAX) {
+      const part = data.subarray(off, off + DATA_MAX);
+      await this.cmd(SEND_DATA, Array.from(part), "write");
+      await this.check(`write 0x${(addr + off).toString(16)}`);
+      progress(part.length);
+    }
+  }
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(data) {
+  let c = 0xffffffff;
+  for (const b of data) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// The data to write, per sector without the erased words at both ends; the
+// CCFG sector last (an interrupted write leaves no CCFG)
+function ranges(img, flashSize) {
+  const out = [];
+  for (let s = 0; s < flashSize; s += SECTOR) {
+    let a = -1, b = -1;
+    for (let i = s; i < s + SECTOR; i += 4) {
+      if (img[i] !== 0xff || img[i + 1] !== 0xff || img[i + 2] !== 0xff || img[i + 3] !== 0xff) {
+        if (a < 0) a = i;
+        b = i + 4;
+      }
+    }
+    if (a >= 0) out.push([a, img.subarray(a, b)]);
+  }
+  const last = flashSize - SECTOR;
+  return [...out.filter((r) => r[0] < last), ...out.filter((r) => r[0] >= last)];
+}
+
+// ---------------------------------------------------------------------------
+// The port: one per page, kept for flashing and recording
+
+let port = null, link = null, mode = null;  // mode: "bl" or "bench"
+let bench = { pending: null, onEvent: null, info: "" };
+
+async function openBl(baud) {
+  await closeLink();
+  link = new Link(port);
+  await link.open(baud);
+  mode = "bl";
+  const bl = new Bl(link);
+  await bl.enter();
+  return bl;
+}
+
+// The boot loader at 460800, else 115200
+async function enterBl() {
+  try {
+    return await openBl(460800);
+  } catch (e) {
+    return await openBl(115200);
+  }
+}
+
+async function closeLink() {
+  if (link) await link.close();
+  link = null;
+  mode = null;
+}
+
+async function openBench() {
+  if (mode === "bench") return true;
+  await closeLink();
+  link = new Link(port);
+  link.onLine = benchLine;
+  await link.open(BENCH_BAUD);
+  mode = "bench";
+  await link.signals({ dataTerminalReady: false, requestToSend: false });
+  // A newline ends a run left going, then: is the sniffer there?
+  await link.writeText("\n");
+  await sleep(150);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      bench.info = await benchCmd("info", 700);
+      return /bench=1/.test(bench.info);
+    } catch (e) {
+      if (attempt) break;
+      // Reset into the firmware (it may sit in the boot loader)
+      await link.signals({ requestToSend: true });
+      await sleep(50);
+      await link.signals({ requestToSend: false });
+      await sleep(600);
+    }
+  }
+  return false;
+}
+
+function benchLine(line) {
+  if (line.startsWith("@ok") || line.startsWith("@err")) {
+    const p = bench.pending;
+    bench.pending = null;
+    if (p) p(line);
+    if (bench.onEvent && line.startsWith("@ok fasstrx")) bench.onEvent(line);
+  } else if (line.startsWith("@") && bench.onEvent) {
+    bench.onEvent(line);
+  }
+}
+
+function benchCmd(cmd, ms = 1500) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { bench.pending = null; reject(new Error(`no answer to ${cmd}`)); }, ms);
+    bench.pending = (line) => {
+      clearTimeout(t);
+      if (line.startsWith("@err")) reject(new Error(line.slice(5)));
+      else resolve(line.slice(4));
+    };
+    link.writeText(cmd + "\n");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Steps 1, 2
+
+$("b-connect").onclick = async () => {
+  try {
+    port = await navigator.serial.requestPort({ filters: [CP2102N, XDS110] });
+  } catch (e) {
+    return;  // nothing chosen
+  }
+  await afterConnect();
+};
+
+async function afterConnect() {
+  enable("s-flash", true);
+  status("st-connect", "Checking the stick...");
+  try {
+    if (await openBench()) {
+      const dev = (bench.info.match(/dev=(\S+)/) || [])[1] || "?";
+      if (await sniffingWorks()) {
+        status("st-connect", `Stick ready, the sniffer is on it (${dev}).`, "ok");
+        status("st-flash", "Already loaded, you can skip this.", "ok");
+        enable("s-info", true);
+        enable("s-record", true);
+        enable("s-save", true);
+      } else {
+        status("st-connect", "Stick found, its sniffer is out of date: load it again (step 2).", "warn");
+      }
+    } else {
+      status("st-connect", "Stick found. Next: load the sniffer (step 2).", "ok");
+    }
+  } catch (e) {
+    status("st-connect", "Can't open the stick: " + e.message +
+      "\nClose other programs using it, unplug it, plug it in again and reload this page.", "bad");
+  }
+}
+
+// fasstrx that stops on request (the page's needs)
+async function sniffingWorks() {
+  try {
+    await benchCmd("fasstrx 0 0 1");
+    await link.writeText("\n");
+    await sleep(200);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+$("b-flash").onclick = async () => {
+  const btn = $("b-flash"), pr = $("pr-flash");
+  btn.disabled = true;
+  pr.hidden = false;
+  pr.value = 0;
+  try {
+    status("st-flash", "Downloading the sniffer...");
+    const resp = await fetch(FIRMWARE, { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`can't download ${FIRMWARE} (${resp.status})`);
+    const img = new Uint8Array(await resp.arrayBuffer());
+
+    status("st-flash", "Starting the stick's boot loader...");
+    const bl = await enterBl();
+    await bl.chipId();
+    const sectors = (await bl.read32(FLASH_SIZE_REG)) & 0xff;
+    const flashSize = sectors * SECTOR;
+    if (img.length !== flashSize)
+      throw new Error(`this stick has ${flashSize / 1024} KB of flash, the sniffer is for the ` +
+                      `ZBDongle-P (${img.length / 1024} KB): is it a ZBDongle-P?`);
+
+    const todo = ranges(img, flashSize);
+    const total = todo.reduce((a, r) => a + r[1].length, 0);
+    status("st-flash", "Erasing...");
+    await bl.eraseAll(sectors);
+    let done = 0;
+    pr.max = total;
+    for (const [addr, data] of todo) {
+      await bl.write(addr, data, (n) => {
+        done += n;
+        pr.value = done;
+        status("st-flash", `Writing ${Math.round((100 * done) / total)} %`);
+      });
+    }
+    status("st-flash", "Checking...");
+    for (const [addr, data] of todo) {
+      if ((await bl.crc32(addr, data.length)) !== crc32(data))
+        throw new Error(`check failed at 0x${addr.toString(16)}: try again`);
+    }
+    await bl.cmd(RESET);
+    await bl.leave();
+    await sleep(500);
+    if (!(await openBench())) throw new Error("written, but the sniffer doesn't answer: unplug the stick, plug it in and reload");
+    status("st-flash", "Sniffer loaded and running.", "ok");
+    status("st-connect", "Stick ready.", "ok");
+    enable("s-info", true);
+    enable("s-record", true);
+    enable("s-save", true);
+  } catch (e) {
+    status("st-flash", "Failed: " + e.message, "bad");
+    try { await closeLink(); } catch (e2) {}
+  }
+  btn.disabled = false;
+};
+
+$("b-backup").onclick = async () => {
+  const btn = $("b-backup"), pr = $("pr-flash");
+  btn.disabled = true;
+  pr.hidden = false;
+  try {
+    status("st-flash", "Starting the stick's boot loader...");
+    const bl = await enterBl();
+    const flashSize = ((await bl.read32(FLASH_SIZE_REG)) & 0xff) * SECTOR;
+    const out = new Uint8Array(flashSize);
+    pr.max = flashSize;
+    for (let a = 0; a < flashSize;) {
+      const words = Math.min(63, (flashSize - a) / 4);
+      out.set(await bl.read(a, words), a);
+      a += 4 * words;
+      pr.value = a;
+      status("st-flash", `Reading ${Math.round((100 * a) / flashSize)} %`);
+    }
+    if ((await bl.crc32(0, flashSize)) !== crc32(out)) throw new Error("the copy doesn't match: try again");
+    await bl.leave();
+    download(new Blob([out], { type: "application/octet-stream" }), "zbdongle-p-backup.bin");
+    status("st-flash", "Saved zbdongle-p-backup.bin (the stick still has its firmware).", "ok");
+  } catch (e) {
+    status("st-flash", "Failed: " + e.message, "bad");
+  }
+  try { await closeLink(); } catch (e) {}
+  btn.disabled = false;
+};
+
+// ---------------------------------------------------------------------------
+// Steps 4, 5: recordings
+
+// FASST 10ch: whitening and CRC (core/fasst_frame.c), for the live count only
+const WHITE = [0x00, 0xc0, 0x4c, 0xed, 0xde, 0x9b, 0xff, 0xc6, 0x11, 0x77, 0x70, 0x1b, 0x0f,
+               0x08, 0x98, 0x65, 0x09, 0x95, 0x4e, 0x26, 0x57, 0xfe];
+function crc10ch(hex) {
+  if (hex.length < 44) return false;
+  const p = [];
+  for (let i = 0; i < 22; i++) p.push(parseInt(hex.substr(2 * i, 2), 16) ^ WHITE[i]);
+  let c = 0;
+  for (let i = 0; i < 20; i++) {
+    c ^= p[i];
+    for (let j = 0; j < 8; j++) c = c & 1 ? (c >>> 1) ^ 0x8408 : c >>> 1;
+  }
+  return c === (p[20] | (p[21] << 8));
+}
+
+const recordings = [];  // { step, title, note, time, lines, packets, good }
+let running = null;     // { rec, timer, ui, stop() }
+
+function stepUi(step, index) {
+  const li = document.createElement("li");
+  li.className = "step";
+  li.innerHTML = `<h3></h3><div class="what"></div>
+    <input class="note" placeholder="Note (optional): what you did, positions...">
+    <div class="row"><button class="go">Record ${step.secs} s</button></div>
+    <div class="live"></div>`;
+  li.querySelector("h3").textContent = `${index + 1}. ${step.title}`;
+  li.querySelector(".what").textContent = step.what;
+  li.querySelector(".go").onclick = () => (running && running.li === li ? running.stop() : record(step, index, li));
+  $("steps").appendChild(li);
+}
+STEPS.forEach(stepUi);
+
+$("b-extra").onclick = () => {
+  const n = $("steps").children.length;
+  stepUi({ title: "Free recording", secs: 30, what: "Anything else: describe it in the note." }, n);
+};
+
+async function record(step, index, li) {
+  if (running) return;
+  const go = li.querySelector(".go"), live = li.querySelector(".live");
+  const rec = { step: index + 1, title: step.title, note: li.querySelector(".note").value.trim(),
+                time: new Date().toISOString(), lines: [], packets: 0, good: 0 };
+  try {
+    if (!(await openBench())) throw new Error("the sniffer doesn't answer: load it (step 2)");
+  } catch (e) {
+    live.textContent = e.message;
+    live.className = "live status bad";
+    return;
+  }
+  let ended;
+  const endSeen = new Promise((r) => (ended = r));
+  const t0 = performance.now();
+  let lastShown = 0, recent = [], timer = null;
+  const show = () => {
+    const secs = Math.round((performance.now() - t0) / 1000);
+    let text = `${secs} / ${step.secs} s · ${rec.packets} packets · ${recent.length}/s`;
+    if (rec.good) text += ` · ${rec.good} decoded (10 channels)`;
+    live.textContent = text;
+    live.className = "live status" + (recent.length ? " ok" : "");
+  };
+  bench.onEvent = (line) => {
+    rec.lines.push(line);
+    if (line.startsWith("@fasst ")) {
+      rec.packets++;
+      const parts = line.split(" ");
+      const hex = parts.find((p, i) => i > 3 && !p.includes("="));
+      if (hex && crc10ch(hex)) rec.good++;
+      const now = performance.now();
+      recent.push(now);
+      while (recent.length && now - recent[0] > 1000) recent.shift();
+      if (now - lastShown > 200) {
+        lastShown = now;
+        show();
+      }
+    } else if (line.startsWith("@end")) {
+      ended();
+    }
+  };
+  const tick = setInterval(show, 500);
+  go.textContent = "Stop";
+  let stopped = false;
+  running = {
+    li,
+    stop: async () => {
+      if (stopped) return;
+      stopped = true;
+      clearTimeout(timer);
+      await link.writeText("\n");
+      await Promise.race([endSeen, sleep(2000)]);
+      clearInterval(tick);
+      bench.onEvent = null;
+      running = null;
+      // Keep the latest take of each step
+      const old = recordings.findIndex((r) => r.li === li);
+      rec.li = li;
+      if (old >= 0) recordings.splice(old, 1);
+      recordings.push(rec);
+      recordings.sort((a, b) => a.step - b.step);
+      show();
+      live.textContent += rec.packets ? "  ✓ saved" : "  — nothing received: is the transmitter on and in FASST mode?";
+      live.className = "live status " + (rec.packets ? "ok" : "warn");
+      go.textContent = "Record again";
+      $("st-save").textContent = `${recordings.length} recording(s) ready to save.`;
+    },
+  };
+  try {
+    await benchCmd(`fasstrx 0 0 ${RX_BYTES} 100 0 1`);
+  } catch (e) {
+    clearInterval(tick);
+    bench.onEvent = null;
+    running = null;
+    go.textContent = `Record ${step.secs} s`;
+    live.textContent = "Failed: " + e.message;
+    live.className = "live status bad";
+    return;
+  }
+  if (!stopped) timer = setTimeout(() => running && running.stop(), step.secs * 1000);
+}
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+$("b-save").onclick = () => {
+  if (!recordings.length) {
+    status("st-save", "Nothing recorded yet.", "warn");
+    return;
+  }
+  const one = (s) => s.replace(/[\r\n]+/g, " ");
+  const out = [
+    "# fasst-capture 1",
+    `# page: ${PAGE_VERSION}`,
+    `# device: ${one(bench.info)}`,
+    `# radio: ${one($("f-radio").value)}`,
+    `# mode: ${one($("f-mode").value)}`,
+    `# notes: ${one($("f-notes").value)}`,
+    `# saved: ${new Date().toISOString()}`,
+    `# browser: ${one(navigator.userAgent)}`,
+  ];
+  for (const r of recordings) {
+    out.push(`@step ${r.step} ${r.title}`, `@note ${one(r.note)}`, `@time ${r.time}`, ...r.lines);
+  }
+  const radio = $("f-radio").value.trim().replace(/[^A-Za-z0-9_-]+/g, "-") || "radio";
+  const day = new Date().toISOString().slice(0, 10);
+  download(new Blob([out.join("\n") + "\n"], { type: "text/plain" }), `fasst-${radio}-${day}.txt`);
+  status("st-save", "Saved. Send that file, thanks!", "ok");
+};
+
+// ---------------------------------------------------------------------------
+
+if (!("serial" in navigator)) {
+  $("unsupported").hidden = false;
+  enable("s-connect", false);
+} else {
+  // A stick allowed before: use it at once
+  navigator.serial.getPorts().then(async (ports) => {
+    if (ports.length === 1 && !port) {
+      port = ports[0];
+      await afterConnect();
+    }
+  });
+  navigator.serial.addEventListener("disconnect", (e) => {
+    if (e.target !== port) return;
+    port = null; link = null; mode = null; running = null;
+    status("st-connect", "The stick was unplugged: plug it in and choose it again.", "warn");
+    ["s-flash", "s-info", "s-record", "s-save"].forEach((id) => enable(id, false));
+  });
+}
+</script>
+</body>
+</html>

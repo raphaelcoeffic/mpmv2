@@ -41,13 +41,15 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print);
 #define FASST_RX_BITS_MAX ((8 * (RADIO_MAX_PKT_LEN - 2) - FASST_RX_SKIP_CHIPS) / 11)
 #define FASST_RX_BYTES_MAX ((FASST_RX_BITS_MAX - FASST_RX_SYNC_LEFT - FASST_RX_EARLY_BITS) / 8)
 typedef struct {
-  uint32_t secs;
+  uint32_t secs;           // 0: until stopped
   uint8_t k;               // hop index 0..35
   uint16_t bytes;          // packet bytes to print, 1..FASST_RX_BYTES_MAX
   uint8_t rx_bw;           // RF core RX bandwidth code
   uint8_t sync_threshold;  // 0 = default
   bool follow;             // follow the hops (10ch)
+  bool (*stop)();          // true: end the run now (the host asked), or NULL
 } fasst_rx_cfg_t;
 
-// Blocks for cfg->secs; the radio needs radio_init() again after it
+// Blocks for cfg->secs or until cfg->stop(); the radio needs radio_init()
+// again after it
 void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print);
