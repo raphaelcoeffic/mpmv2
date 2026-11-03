@@ -142,3 +142,27 @@ uint32_t fasst_sync_word(const uint8_t* chips)
 {
   return (uint32_t)chips[0] << 24 | (uint32_t)chips[1] << 16 | (uint32_t)chips[2] << 8 | chips[3];
 }
+
+uint32_t fasst_rx_sync_word()
+{
+  // 33 chips of sync bits 3..5, the last one dropped
+  uint64_t w = 0;
+  for (int i = 3; i < 6; i++) w = w << 11 | (SYNC >> i & 1 ? ~BARKER & 0x7FF : BARKER);
+  return (uint32_t)(w >> 1);
+}
+
+uint16_t fasst_rx_sync_left() { return SYNC >> (16 - FASST_RX_SYNC_LEFT); }
+
+void fasst_despread(const uint8_t* chips, uint32_t first, uint32_t n, uint8_t* out, uint8_t* corr)
+{
+  memset(out, 0, (n + 7) / 8);
+  for (uint32_t i = 0, c = first; i < n; i++, c += 11) {
+    // 11 chips from chip c: within the 3 bytes from c / 8
+    const uint8_t* p = chips + c / 8;
+    uint32_t w = (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2];
+    uint32_t x = (w >> (13 - c % 8) & 0x7FF) ^ BARKER;
+    int d = __builtin_popcount(x);  // chips off the Barker code (bit 0)
+    if (d > 5) out[i / 8] |= 1 << (i % 8);
+    corr[i] = d > 5 ? 2 * d - 11 : 11 - 2 * d;
+  }
+}

@@ -96,5 +96,26 @@ int main()
   for (int i = 0; i < 176; i++) ok &= bits[80 + i] == (p[i / 8] >> (i % 8) & 1);
   CHECK(ok);
   CHECK(fasst_sync_word(chips) == ((uint32_t)chips[0] << 24 | chips[1] << 16 | chips[2] << 8 | chips[3]));
+
+  // RX: the sync word = the 32 chips from sync bit 3, then the rest of the
+  // sync and the packet, despread with one chip flipped per bit
+  uint32_t c0 = (64 + 3) * 11, sw = 0;
+  for (int i = 0; i < 32; i++) sw = sw << 1 | (chips[(c0 + i) / 8] >> (7 - (c0 + i) % 8) & 1);
+  CHECK(fasst_rx_sync_word() == sw);
+  uint8_t rx[FASST_CHIPS_LEN + 2] = {0}, out[32], corr[FASST_RX_SYNC_LEFT + 176];
+  uint32_t n_rx = FASST_CHIPS_LEN * 8 - c0 - 32;
+  for (uint32_t i = 0; i < n_rx; i++) {
+    uint32_t c = c0 + 32 + i;
+    uint8_t v = (chips[c / 8] >> (7 - c % 8) & 1) ^ ((i + 11 - FASST_RX_SKIP_CHIPS) % 11 == 5);
+    if (v) rx[i / 8] |= 0x80 >> (i % 8);
+  }
+  fasst_despread(rx, FASST_RX_SKIP_CHIPS, FASST_RX_SYNC_LEFT + 176, out, corr);
+  ok = 1;
+  for (int i = 0; i < FASST_RX_SYNC_LEFT + 176; i++) {
+    int b = i < FASST_RX_SYNC_LEFT ? fasst_rx_sync_left() >> i & 1
+                                   : p[(i - FASST_RX_SYNC_LEFT) / 8] >> ((i - FASST_RX_SYNC_LEFT) % 8) & 1;
+    ok &= (out[i / 8] >> (i % 8) & 1) == b && corr[i] == 9;
+  }
+  CHECK(ok);
   return test_done();
 }

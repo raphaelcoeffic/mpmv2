@@ -1578,6 +1578,27 @@ static void _cmd_fasst(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// FASST RX (bench_fasst.c), blocking
+static void _cmd_fasstrx(char* args)
+{
+  fasst_rx_cfg_t cfg;
+  cfg.secs = _number_or(&args, 10);
+  cfg.k = _number_or(&args, 0);
+  cfg.bytes = _number_or(&args, FASST_PACKET_LEN + 1);
+  cfg.rx_bw = _number_or(&args, 100);
+  cfg.sync_threshold = _number_or(&args, 0);
+  if (cfg.secs == 0 || cfg.secs > 3600 || cfg.k >= FASST_HOPS || cfg.bytes == 0 ||
+      cfg.bytes > FASST_RX_BYTES_MAX || cfg.rx_bw < 64 || cfg.rx_bw > 103 || cfg.sync_threshold > 0x7F) {
+    _print("@err usage: fasstrx [secs] [k] [bytes] [rx_bw] [syncthr]\r\n");
+    return;
+  }
+  _job_stop();
+  _printf("@ok fasstrx secs=%lu k=%u bytes=%u rx_bw=%u syncthr=0x%02x sync=%08lx\r\n", cfg.secs, cfg.k,
+          cfg.bytes, cfg.rx_bw, cfg.sync_threshold, fasst_rx_sync_word());
+  fasst_rx_run(&cfg, _printf);
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // Time to settle after a radio call before reading the edges, us
 #define TIMING_SETTLE_US 300
 
@@ -1873,6 +1894,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "timing")) _cmd_timing(args);
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
   else if (!strcmp(cmd, "fasst")) _cmd_fasst(args);
+  else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else _printf("@err unknown command %s\r\n", cmd);
 }
 

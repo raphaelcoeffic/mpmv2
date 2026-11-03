@@ -43,7 +43,8 @@ void fasst_set_id(uint32_t id);
 void fasst_phy(radio_phy_t* phy, uint16_t tx_power);
 
 // Hop index k (0..35): the first, the next (k + step mod 37, skipping 36;
-// the packets carry the step), and its frequency. The TM-10's step: 27
+// the packets carry the step), and its frequency. The TM-10 chooses its
+// step (27 in one session, 28 in another); ours: 27
 #define FASST_HOP_FIRST 0
 #define FASST_HOP_STEP 27
 uint8_t fasst_next_hop(uint8_t k, uint8_t step);
@@ -64,3 +65,21 @@ void fasst_spread(uint8_t* chips, const uint8_t* p);
 uint32_t fasst_sync_word(const uint8_t* chips);
 #define fasst_chips(chips) ((chips) + 4)
 #define FASST_CHIPS_TX_LEN (FASST_CHIPS_LEN - 4)
+
+// Reception: the RF core's RX sync word is the first 32 chips of sync bits
+// 3..5 (0 1 1). Bits 1..3 (0 0 0) also matched at the very start of the
+// TM-10's packets, the demodulator then settled wrong for the whole packet.
+// After the sync word: FASST_RX_SKIP_CHIPS chips (the rest of bit 5), the
+// FASST_RX_SYNC_LEFT sync bits 6..15, then the packet
+uint32_t fasst_rx_sync_word();
+#define FASST_RX_SKIP_CHIPS 1
+#define FASST_RX_SYNC_LEFT 10
+uint16_t fasst_rx_sync_left();  // sync bits 6..15, bit 0 first
+// RX length in bytes for n bits after the sync word (sync bits 6..15
+// included)
+#define FASST_RX_LEN(n) ((FASST_RX_SKIP_CHIPS + 11 * (n) + 7) / 8)
+
+// n bits from chips (MSB first), 11 chips each from chip `first`: bit i to
+// out[i / 8] bit i % 8 (LSB first, as on air), corr[i] = |correlation| with
+// the Barker code, 0..11 (11: all chips right, 1: noise)
+void fasst_despread(const uint8_t* chips, uint32_t first, uint32_t n, uint8_t* out, uint8_t* corr);

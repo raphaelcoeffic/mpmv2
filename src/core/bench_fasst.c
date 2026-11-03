@@ -62,3 +62,98 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
   print("@ok fasst frames=%lu late=%lu errors=%lu fs_cycles=%lu status=0x%04x\r\n", frames, late,
         errors, fs_cycles, radio_last_status());
 }
+
+// FASST RX: parked on hop k, every packet despread (fasst_frame.h)
+static radio_packet_t _pkt;
+static uint8_t _bits[(FASST_RX_BITS_MAX + 7) / 8 + 1], _corr[FASST_RX_BITS_MAX];
+
+static uint32_t _rx_bits(const fasst_rx_cfg_t* cfg)
+{
+  return FASST_RX_SYNC_LEFT + FASST_RX_EARLY_BITS + 8 * cfg->bytes;
+}
+
+// 8 bits from bit b, LSB first
+static uint8_t _byte_at(uint32_t b) { return _bits[b / 8] >> (b % 8) | _bits[b / 8 + 1] << (8 - b % 8); }
+
+// v[0..n) in hex, 2 digits each, or 1 (values 0..15)
+static void _print_hex_line(fasst_print_t print, const uint8_t* v, uint32_t n, int digits)
+{
+  static const char hex[] = "0123456789abcdef";
+  char line[2 * 32 + 1];
+  uint32_t k = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (digits == 2) line[k++] = hex[v[i] >> 4];
+    line[k++] = hex[v[i] & 0xF];
+    if (k >= sizeof(line) - 2 || i == n - 1) {
+      line[k] = 0;
+      print("%s", line);
+      k = 0;
+    }
+  }
+}
+
+static void _print_rx(fasst_print_t print, const fasst_rx_cfg_t* cfg)
+{
+  fasst_despread(_pkt.data, FASST_RX_SKIP_CHIPS, _rx_bits(cfg), _bits, _corr);
+  print("@fasst %lu %u rssi=%d", _pkt.timestamp_us, cfg->k, _pkt.rssi);
+  if (_pkt.freq_offset != RADIO_FREQ_OFFSET_NONE) print(" foff=%d", _pkt.freq_offset);
+
+  // The rest of the sync word: next, or up to FASST_RX_EARLY_BITS later (the
+  // RF core found its sync word in the preamble)
+  uint16_t left = fasst_rx_sync_left(), mask = (1 << FASST_RX_SYNC_LEFT) - 1;
+  uint32_t shift = 0;
+  while (shift <= FASST_RX_EARLY_BITS &&
+         ((_byte_at(shift) | (uint16_t)_byte_at(shift + 8) << 8) & mask) != left)
+    shift++;
+  if (shift > FASST_RX_EARLY_BITS) {
+    print(" sync=none\r\n");
+    return;
+  }
+  print(" shift=%lu ", shift);
+
+  // The packet's bytes, then q: their worst bit correlation, one hex digit
+  // each (11 = b)
+  uint8_t v[FASST_RX_BITS_MAX / 8];
+  uint32_t b0 = shift + FASST_RX_SYNC_LEFT;
+  for (uint32_t i = 0; i < cfg->bytes; i++) v[i] = _byte_at(b0 + 8 * i);
+  _print_hex_line(print, v, cfg->bytes, 2);
+  print(" q=");
+  for (uint32_t i = 0; i < cfg->bytes; i++) {
+    v[i] = 11;
+    for (int j = 0; j < 8; j++)
+      if (_corr[b0 + 8 * i + j] < v[i]) v[i] = _corr[b0 + 8 * i + j];
+  }
+  _print_hex_line(print, v, cfg->bytes, 1);
+  print("\r\n");
+}
+
+void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
+{
+  radio_phy_t phy;
+  fasst_phy(&phy, 0);
+  phy.rx_bw = cfg->rx_bw;
+  phy.sync_threshold = cfg->sync_threshold;
+  radio_set_sync_word(0, fasst_rx_sync_word());
+  uint16_t len = FASST_RX_LEN(_rx_bits(cfg));
+  if (radio_init(&phy) != RADIO_OK || radio_set_frequency(fasst_freq_khz(cfg->k)) != RADIO_OK ||
+      radio_rx_start(len) != RADIO_OK) {
+    print("@err fasstrx radio status=0x%04x\r\n", radio_last_status());
+    radio_off();
+    return;
+  }
+
+  uint32_t packets = 0, restarts = 0, t_end = micros() + cfg->secs * 1000000;
+  while (micros_before(t_end)) {
+    if (radio_receive(&_pkt)) {
+      packets++;
+      _print_rx(print, cfg);
+    } else if (!radio_rx_active()) {
+      restarts++;
+      radio_rx_start(len);
+    }
+  }
+  radio_rx_stats_t st;
+  radio_rx_stats(&st);
+  radio_off();
+  print("@end fasstrx packets=%lu restarts=%lu buf_full=%u\r\n", packets, restarts, st.buf_full);
+}
