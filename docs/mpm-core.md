@@ -690,7 +690,9 @@ LaunchPad, R6008HS linked to it (module id `1ca156b8`: FASST ID
 1=1844,7=204` links within 0.5 s, out1 follows the CH1
 sweep (1021 to 2020 µs), out7 1521 µs; 1 s after the frames stop, out1
 2020 µs and out7 1021 µs (the failsafe values). Low power: no gaps; range
-check: a few gaps of several frames at that distance. Margins of the PHY
+check: a few gaps of several frames at that distance. The CC2755
+LaunchPad (`cc27-mpm`) the same: linked on the first press with the F/S
+cycle on, outputs and failsafe as above. Margins of the PHY
 (chip rate 1.46 to 1.545 Mchip/s without loss, deviation 200 to 512 kHz
 alike): with the bench's `fasst` command (`core/bench_fasst.c`).
 
