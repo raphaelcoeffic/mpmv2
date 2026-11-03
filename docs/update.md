@@ -125,9 +125,11 @@ which EdgeTX doesn't send). EdgeTX keeps the full address in a `uint32_t`
 and sends only its low 16 bits, always in order, one page after the other
 from 0x1000. The boot loader follows the wrap: it keeps the full address and
 takes the next one forward. So the whole 336 KB can be used with no EdgeTX
-change (tested with a 200 KB image). A host that goes back to the start
-(a read back pass after the writes) must start a new session; reading each
-page back right after writing it works.
+change (tested with a 200 KB image). The reads follow on their own from the
+start: avrdude's verify, a read back pass after all the writes, works, as
+reading each page back right after writing it. With the `0x4D` command
+(avrdude for an ATmega2560 part) the address is exact. A second read back
+pass needs a new session (`stk500_flash.py --readback [--ext]` tests both).
 
 ## Power up
 

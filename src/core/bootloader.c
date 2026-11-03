@@ -53,6 +53,7 @@
 #define STK_ENTER_PROGMODE  0x50
 #define STK_LEAVE_PROGMODE  0x51
 #define STK_LOAD_ADDRESS    0x55
+#define STK_UNIVERSAL       0x56
 #define STK_PROG_PAGE       0x64
 #define STK_READ_PAGE       0x74
 #define STK_READ_SIGN       0x75
@@ -225,33 +226,56 @@ static bool flash_write(uint32_t addr, uint8_t* data, uint32_t len)
 
 static bool _addr_set;      // LOAD_ADDRESS seen in this session
 static uint32_t _base_w;    // first word address: APP_START
-static uint32_t _cur_w;     // current word address, past 16 bits
+static uint16_t _load_w;    // last LOAD_ADDRESS: low 16 bits
+static int32_t _ext;        // bits 16+ from avrdude, -1: none
+static uint32_t _wr_w;      // word address of the writes, past 16 bits
+static uint32_t _rd_w;      // and of the reads
+static bool _rd_set;        // first read seen
 static bool _first_ok;      // first page at APP_START written
 
 static void session_reset()
 {
   _addr_set = false;
+  _ext = -1;
+  _rd_set = false;
   _first_ok = false;
   memset(_erased, 0, sizeof(_erased));
 }
 
 // EdgeTX sends the low 16 bits of the word address, pages in order: follow
-// the wrap past 0xFFFF (128 KB)
+// the wrap past 0xFFFF (128 KB). The reads follow on their own, from the
+// start: avrdude reads the image back after all the writes. avrdude for an
+// ATmega2560 part sends the bits above with STK_UNIVERSAL "load extended
+// address": exact
+static uint32_t follow(uint32_t cur, uint16_t a)
+{
+  if (_ext >= 0) return (uint32_t)_ext << 16 | a;
+  uint32_t w = (cur & ~0xFFFFu) | a;
+  if (w + 0x8000 < cur) w += 0x10000;
+  return w;
+}
+
 static void load_address(uint16_t a)
 {
   if (!_addr_set) {
     _addr_set = true;
-    _base_w = _cur_w = a;
-    return;
+    _base_w = _wr_w = follow(0, a);
   }
-  uint32_t w = (_cur_w & ~0xFFFFu) | a;
-  if (w + 0x8000 < _cur_w) w += 0x10000;
-  _cur_w = w;
+  _load_w = a;
 }
 
-static uint32_t byte_address()
+static uint32_t write_address()
 {
-  return APP_START + (_cur_w - _base_w) * 2;
+  _wr_w = follow(_wr_w, _load_w);
+  return APP_START + (_wr_w - _base_w) * 2;
+}
+
+static uint32_t read_address()
+{
+  if (!_addr_set) return APP_START;
+  _rd_w = follow(_rd_set ? _rd_w : _base_w, _load_w);
+  _rd_set = true;
+  return APP_START + (_rd_w - _base_w) * 2;
 }
 
 static uint8_t prog_page(uint8_t* page, uint32_t size)
@@ -259,7 +283,7 @@ static uint8_t prog_page(uint8_t* page, uint32_t size)
   // EdgeTX: word 0x1000 (256 byte pages), or 0 (128 byte pages)
   if (!_addr_set || (_base_w != 0x1000 && _base_w != 0)) return STK_FAILED;
 
-  uint32_t addr = byte_address();
+  uint32_t addr = write_address();
   if (addr == APP_START) {
     // Before anything is erased: an application for this chip?
     app_header_t* h = size >= APP_HDR_MIN ? header_find(page, size) : 0;
@@ -351,6 +375,15 @@ static void serve()
         }
         break;
 
+      case STK_UNIVERSAL:
+        // avrdude: an SPI programming instruction. Only "load extended
+        // address" (4D 00 <bits 16+> 00) matters here
+        if (args(a, 4)) {
+          if (a[0] == 0x4D) _ext = a[2];
+          reply((const uint8_t*)"\0", 1);
+        }
+        break;
+
       case STK_PROG_PAGE: {
         if (!get(&a[0]) || !get(&a[1]) || !get(&a[2])) break;
         uint32_t size = a[0] << 8 | a[1];
@@ -368,7 +401,7 @@ static void serve()
       case STK_READ_PAGE:
         if (args(a, 3)) {
           uint32_t size = a[0] << 8 | a[1];
-          uint32_t addr = _addr_set ? byte_address() : APP_START;
+          uint32_t addr = read_address();
           put(STK_INSYNC);
           for (uint32_t i = 0; i < size; i++, addr++)
             put(addr < APP_END ? *(const uint8_t*)addr : 0xFF);

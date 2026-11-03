@@ -10,6 +10,10 @@ padded with zeros, LEAVE_PROGMODE at the end or on error.
 
   stk500_flash.py build/mpm-v2.bin                  USB-C (CH343): reset, sync
   stk500_flash.py build/mpm-v2.bin --verify         read every page back
+  stk500_flash.py build/mpm-v2.bin --readback --ext as avrdude -p m2560: the
+                                                    address bits 16+ through
+                                                    STK_UNIVERSAL, the image
+                                                    read back after the writes
   stk500_flash.py any.bin --no-check                send a file EdgeTX would refuse
   stk500_flash.py --port /dev/cu.usbserial-X --no-reset --invert ...
                                                     radio bay through a USB
@@ -52,6 +56,7 @@ from v2_serial import find_port, serial
 
 STK_OK, STK_FAILED, STK_INSYNC, CRC_EOP = 0x10, 0x11, 0x14, 0x20
 GET_SYNC, LEAVE_PROGMODE, LOAD_ADDRESS, PROG_PAGE, READ_PAGE, READ_SIGN = 0x30, 0x51, 0x55, 0x64, 0x74, 0x75
+UNIVERSAL, LOAD_EXT_ADDR = 0x56, 0x4D
 SIG_LEN = 24
 
 
@@ -156,6 +161,8 @@ def main():
     ap.add_argument("--invert", action="store_true", help="inverted serial (radio bay through a plain adapter)")
     ap.add_argument("--no-check", action="store_true", help="skip the file signature check")
     ap.add_argument("--verify", action="store_true", help="read each page back after writing it")
+    ap.add_argument("--readback", action="store_true", help="read the image back after all the writes")
+    ap.add_argument("--ext", action="store_true", help="address bits 16+ with STK_UNIVERSAL load extended address")
     a = ap.parse_args()
 
     data = open(a.file, "rb").read()
@@ -188,12 +195,21 @@ def main():
         raise SystemExit("not an STK500 device")
     page_size, word = (256, 0x1000) if sig[1] == 0x55 and sig[2] in (0xAA, 0x26) else (128, 0)
 
+    ext = None
+
+    def load_address(w: int):
+        nonlocal ext
+        if a.ext and w >> 16 != ext:  # avrdude: when the bits change
+            ext = w >> 16
+            stk.cmd(UNIVERSAL, LOAD_EXT_ADDR, 0, ext, 0, n=1)
+        stk.cmd(LOAD_ADDRESS, w & 0xFF, (w >> 8) & 0xFF)
+
     t0 = time.time()
     err = None
     n = 0
     for off in range(0, len(data), page_size):
         page = data[off:off + page_size].ljust(page_size, b"\0")
-        stk.cmd(LOAD_ADDRESS, word & 0xFF, (word >> 8) & 0xFF)
+        load_address(word + off // 2)
         r = stk.prog_page(page)
         if r != STK_OK:
             err = f"page at +0x{off:x}: {'STK_FAILED' if r == STK_FAILED else r}"
@@ -204,9 +220,20 @@ def main():
             err = f"verify: page at +0x{off:x} differs"
             break
         n += 1
-        word += page_size // 2
         print(f"\r{off + page_size}/{len(data)} bytes", end="", flush=True)
     print(f" in {time.time() - t0:.1f} s" + (f", {n} pages verified" if a.verify else ""))
+
+    # As avrdude verifies: a second pass from the start
+    if a.readback and not err:
+        t0 = time.time()
+        for off in range(0, len(data), page_size):
+            page = data[off:off + page_size].ljust(page_size, b"\0")
+            load_address(word + off // 2)
+            if stk.read_page(page_size) != page:
+                err = f"read back: page at +0x{off:x} differs"
+                break
+            print(f"\r{off + page_size}/{len(data)} bytes read back", end="", flush=True)
+        print(f" in {time.time() - t0:.1f} s")
 
     stk.leave()
     if err:
