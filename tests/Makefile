@@ -1,5 +1,5 @@
 # All the host tests: make -C tests (clean: make -C tests clean)
-DIRS := frame mpm storage eeprom_ram
+DIRS := frame fasst mpm storage eeprom_ram
 
 all clean:
 	@fail=0; for d in $(DIRS); do $(MAKE) -C $$d $@ || fail=1; done; exit $$fail

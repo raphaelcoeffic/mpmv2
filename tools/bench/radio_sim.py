@@ -12,6 +12,7 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
   radio_sim.py bind [--proto 127]        bind flag set for 1 s, then cleared
   radio_sim.py link [--count 500]        test protocol -> 4-in-1 MPM bench (NRF RX)
   radio_sim.py drive --proto 25 [--bind [--bind-time 60] [--options -90:90:10] [--telem-off] [--ch9-16]] [--option 0] [--time 0]
+                     [--failsafe 1=1844,7=204]
                      [--run-options -60:60:5,60:-60:-5 [--step 4] [--settle 1.5] [--run-wait 120]] [--range] [--low-power]
                                          a real receiver: CH1-4 sweep (--sweep-ch, --sweep-from), status and telemetry each second
   radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
@@ -48,6 +49,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import mpm_fs  # noqa: E402
 
 FRAME_PERIOD = 0.007
+FAILSAFE_EVERY = 100  # frames between failsafe frames (EdgeTX: about 1000)
 CH_MIN, CH_CENTER, CH_MAX = 204, 1024, 1844
 PROTO_TEST = 127
 TEST_ADDR = "32764d504d"  # TX_ADDR order: "MPMv2" on air
@@ -158,6 +160,9 @@ class Radio:
         # FrSky X bind options sent while binding (EdgeTX sendD16BindOption()):
         # bit 0 receiver telemetry off, bit 1 receiver outputs CH9-16. None: not sent
         self.bind_opt: int | None = None
+        # Failsafe values (16, 0 = no pulses, 2047 = hold): a failsafe frame
+        # in place of every FAILSAFE_EVERY-th frame, from the first. None: never
+        self.failsafe: list[int] | None = None
         self._push: bytes = b""
         self._stop = False
         self._threads = [threading.Thread(target=f, daemon=True) for f in (self._tx_loop, self._rx_loop)]
@@ -183,7 +188,10 @@ class Radio:
                 data, self._push = self._push, b""
                 if not data and self.bind_opt is not None and self.frame.get("bind") and not self.buf_low:
                     data = bytes([self.bind_opt])
-                self.ser.write(encode(**self.frame, data=data) if data else encode(**self.frame))
+                if self.failsafe and self.frames_sent % FAILSAFE_EVERY == 0:
+                    self.ser.write(encode(**{**self.frame, "channels": self.failsafe}, failsafe=True))
+                else:
+                    self.ser.write(encode(**self.frame, data=data) if data else encode(**self.frame))
                 self.frames_sent += 1
             next_t += FRAME_PERIOD
             time.sleep(max(0.0, next_t - time.monotonic()))
@@ -382,6 +390,12 @@ def cmd_drive(r: Radio, a):
           range_check=a.range, low_power=a.low_power)
     # --set 9=204,10=204: channels held at these values (the swept ones aside)
     fixed = {int(k): int(v) for k, v in (kv.split("=") for kv in a.set.split(","))} if a.set else {}
+    if a.failsafe:
+        fs = [2047] * 16
+        for kv in a.failsafe.split(","):
+            k, v = kv.split("=")
+            fs[int(k) - 1] = int(v)
+        r.failsafe = fs
     if a.telem_off or a.ch9_16:
         r.bind_opt = (1 if a.telem_off else 0) | (2 if a.ch9_16 else 0)
     t0 = time.monotonic()
@@ -611,6 +625,7 @@ def main():
     ap.add_argument("--sweep-ch", type=int, default=4, help="drive: channels swept")
     ap.add_argument("--sweep-from", type=int, default=1, help="drive: first channel swept")
     ap.add_argument("--set", help="drive: channels held at a value, CH=VALUE[,CH=VALUE...] (204..1844)")
+    ap.add_argument("--failsafe", help="drive: failsafe frames, CH=VALUE[,CH=VALUE...] (0 no pulses, 2047 hold), the others hold")
     ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options / --run-options value")

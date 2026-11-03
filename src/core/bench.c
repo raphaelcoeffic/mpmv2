@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "bench.h"
+#include "bench_fasst.h"
+#include "fasst_frame.h"
 #include "bench_port.h"
 #include "board.h"
 #include "frame.h"
@@ -1550,6 +1552,32 @@ static void _cmd_rx(char* args)
   _print("\r\n");
 }
 
+// FASST 10ch TX experiment (bench_fasst.c), blocking
+static void _cmd_fasst(char* args)
+{
+  fasst_cfg_t cfg = {.tx_power = _tx_power};
+  cfg.secs = _number_or(&args, 10);
+  cfg.invert = _number_or(&args, 0);
+  cfg.chip_rate = _number_or(&args, 1500000);
+  cfg.deviation = _number_or(&args, 500000);
+  cfg.fs_every = _number_or(&args, 0);
+  cfg.sweep = _number_or(&args, 2);
+  cfg.step = _number_or(&args, FASST_HOP_STEP);
+  cfg.id = _number_or(&args, FASST_ID_DEFAULT);
+  if (cfg.secs == 0 || cfg.secs > 600 || cfg.deviation > 511750 || cfg.chip_rate < 1000000 ||
+      cfg.chip_rate > 2000000 || (cfg.fs_every && cfg.fs_every < 6) || cfg.step == 0 ||
+      cfg.step > 36) {
+    _print("@err usage: fasst [secs] [invert] [chip_rate] [dev_hz] [fs_every] [sweep] [step] [id]\r\n");
+    return;
+  }
+  _job_stop();
+  _printf("@ok fasst secs=%lu invert=%u rate=%lu dev=%lu fs_every=%lu sweep=%u step=%u id=%08lx\r\n",
+          cfg.secs, cfg.invert, cfg.chip_rate, cfg.deviation, cfg.fs_every, cfg.sweep, cfg.step,
+          cfg.id);
+  fasst_run(&cfg, _printf);
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // Time to settle after a radio call before reading the edges, us
 #define TIMING_SETTLE_US 300
 
@@ -1844,6 +1872,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "stop")) _cmd_stop();
   else if (!strcmp(cmd, "timing")) _cmd_timing(args);
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
+  else if (!strcmp(cmd, "fasst")) _cmd_fasst(args);
   else _printf("@err unknown command %s\r\n", cmd);
 }
 

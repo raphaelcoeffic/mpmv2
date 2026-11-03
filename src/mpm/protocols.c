@@ -70,6 +70,10 @@ const mpm_protocol_t mpm_protocols[] = {
 #ifdef XK_CCNRF_INO
   {PROTO_MOFLY, "MoFly", 0, 0, MPM_OPTION_RFTUNE, false, false, XK_init, XK_callback, end_bind_counter},
 #endif
+#ifdef FASST_INO
+  {PROTO_FASST, "FASST", "\x04" "10ch", 1, MPM_OPTION_NONE, true, false, FASST_init, FASST_callback,
+   0},
+#endif
   {PROTO_TEST, "Test", "\x04" "1M  250k", 2, MPM_OPTION_RFCHAN, false, false, TEST_init, TEST_callback, 0},
 };
 // clang-format on

@@ -14,6 +14,7 @@ is not a drop-in build of the MPM sources: protocols are ported to it.
 | `mpm_port.c` | The board port: UART0 at 100000 baud 8E2 (LaunchPad: XDS110 back channel, MPM v2: USB console) |
 | `protocols.c/h` | The protocol table |
 | `proto_test.c` | Test protocol 127 |
+| `proto_fasst.c` | Futaba FASST 10ch, protocol 110 ([below](#futaba-fasst)), framing in `core/fasst_frame.c` |
 | `upstream/` | Protocol files of the MPM, and what they need from it ([below](#mpm-protocol-files)) |
 
 ## Behaviour
@@ -653,9 +654,50 @@ range, low power, failsafe), rx_num, sub protocol, the 16 channels packed as
 in the radio frames, and `micros()` at the callback. Sub protocols: 1 Mbps,
 250 kbps. Option: the RF channel (0 to 125, else 40). Bind lasts 2 s.
 
+## Futaba FASST
+
+Protocol 110, "FASST", sub protocol 10ch: mpm-v2's own, not a MULTI-Module
+protocol (110 is not assigned upstream; the last there is MoFly, 109). The
+protocol was traced from a TM-10 module driving an R6008HS
+(`doc/futaba.md`, not in the repository). `core/fasst_frame.c` builds the
+packets, the hop sequence and the chips; `proto_fasst.c` sends them.
+
+- **On air:** one 22-byte packet per 7 ms on 36 channels (2405.4 to
+  2477.1 MHz, 2.048 MHz apart), each bit as 11 Barker chips, the chips as
+  2-FSK symbols at 1.5 Mchip/s, ±500 kHz: 352 bytes for the RF core, its
+  sync word the first 32 chips. The receiver's DOUT despread gives the
+  TM-10's bytes (`tests/fasst`).
+- **Packet:** ID, hop position and step, four groups of two 11-bit
+  channels, two type bytes, CRC-16/KERMIT; the whole packet whitened by a
+  fixed 16-bit LFSR stream. The receiver hops with the step the packets
+  carry (27, 5 and 13 tried); the protocol keeps the TM-10's 27.
+- **ID:** 0x12, then the low 24 bits of the module id + rx_num (one
+  receiver binding per model). A FASST transmitter has no bind: the
+  receiver links to the transmitter nearby while its Link button is held
+  (R6008HS: more than 2 s, receiver on), so bind ends at once. The R6008HS
+  took a made-up ID that way and then ignored the TM-10's.
+- **Channels:** the radio's CH1 to CH10 as FASST ch1 to ch10; ±100% =
+  1020 to 2020 µs, as SFHSS (values 224 to 1824, 1024 = 1520 µs).
+- **Failsafe:** once the radio has sent failsafe values, the F/S cycle
+  (6 frames, the positions of two channels each) once per second; hold and
+  no pulses: the channel holds. The receiver forgets its failsafe when
+  powered down, so it is sent all the time.
+- **Power:** low power 9 dB down, range check 34 dB down, as the CC2500
+  emulation. No telemetry.
+
+LaunchPad, R6008HS linked to it (module id `1ca156b8`: FASST ID
+`12 a1 56 b8`), ~1 m: `radio_sim.py drive --proto 110 --failsafe
+1=1844,7=204` links within 0.5 s, out1 follows the CH1
+sweep (1021 to 2020 µs), out7 1521 µs; 1 s after the frames stop, out1
+2020 µs and out7 1021 µs (the failsafe values). Low power: no gaps; range
+check: a few gaps of several frames at that distance. Margins of the PHY
+(chip rate 1.46 to 1.545 Mchip/s without loss, deviation 200 to 512 kHz
+alike): with the bench's `fasst` command (`core/bench_fasst.c`).
+
 ## Tests
 
 ```sh
+make -C tests/fasst    # host: FASST packets and chips against the TM-10's
 make -C tests/mpm      # host: frame format against the MPM decoder, core with a fake port
 make -C tests/storage  # host: littlefs and the EEPROM file on a simulated NOR flash
 ```

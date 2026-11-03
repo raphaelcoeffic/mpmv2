@@ -7,6 +7,14 @@
 void TEST_init();
 uint16_t TEST_callback();
 
+// Futaba FASST (proto_fasst.c): mpm-v2's own, not a MULTI-Module protocol;
+// its number is not assigned upstream (the last there: MoFly, 109)
+#ifdef FASST_INO
+#define PROTO_FASST 110
+void FASST_init();
+uint16_t FASST_callback();
+#endif
+
 // The MULTI-Module protocols (mpm_config.h)
 void end_bind_counter();
 
