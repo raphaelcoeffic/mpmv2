@@ -176,6 +176,7 @@ radio_status_t radio_set_frequency(uint32_t freq_khz)
 // Idle: the synthesizer tuned for the next TX (rf_fs_start())
 radio_status_t radio_set_frequency_start(uint32_t freq_khz)
 {
+  if (_state == STATE_TX) radio_tx_wait();  // as radio.h: after the packet
   if (_state != STATE_IDLE || !_phy_ok) return radio_set_frequency(freq_khz);
   _freq_hz = freq_khz * 1000;
   return _result(rf_fs_start(_freq_hz));
@@ -192,6 +193,8 @@ void radio_set_rx_sync_alt(uint32_t rx_sync) { _rx_sync_alt = rx_sync; }
 radio_status_t radio_tx_start_at(const uint8_t* data, uint16_t len, uint32_t at_us)
 {
   if (!_phy_ok) return RADIO_ERR_PARAM;
+  // A packet still going out (or due): sent first, as radio.h, not cut
+  if (_state == STATE_TX) radio_tx_wait();
   _stop();
   uint32_t at = 0;
   if (at_us) {
