@@ -91,6 +91,13 @@ void spi_init(spi_t spi, const spi_device_t* dev)
 
   SSIIntRegister(base, _spi_irq_handler[spi]);
   SSIEnable(base);
+
+  // A boot loader may leave words in the RX FIFO (disabling the SSI keeps
+  // them): the polled transfers would read them first, all later reads
+  // shifted by as many words
+  while (HWREG(base + SSI_O_SR) & SSI_RX_NOT_EMPTY) {
+    (void)HWREG(base + SSI_O_DR);
+  }
 }
 
 void spi_select(spi_t spi)
