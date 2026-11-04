@@ -266,9 +266,9 @@ packets 102.4 ms apart.
    MULTI-Module, works over USB and over the module bay (radio simulator
    on an RP2040-Zero: EdgeTX's sequence, the window with and without a
    radio, serial frames ending it, the application's frames and telemetry);
-   EdgeTX branch `mpm-v2-flash` for the MPM v2 files (on 2.12:
-   `mpm-v2-passthrough-2.12`, with the pass-through from the radio's USB,
-   EdgeTX PR #7927). Tested on a TX15: an update from the radio, one
+   EdgeTX branch `mpm-v2-flash` for the MPM v2 files (draft PR #7994 on
+   main; 2.12 test builds with the pass-through from the radio's USB, merged
+   on main as PR #7927: draft PR #7993). Tested on a TX15: an update from the radio, one
    through its USB. Left: an image past 128 KB, a wrong file, a pulled
    module. See [update.md](update.md).
    First install without a debugger: `mpm-v2-full.bin` through the ROM boot

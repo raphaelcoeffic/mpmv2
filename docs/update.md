@@ -7,8 +7,8 @@ and EdgeTX writes it through the module bay, no USB and no tools.
 Status: the boot loader (`src/core/bootloader.c`, the chip's part in
 `src/platforms/<family>/bl_port.c`, always built, both applications run
 behind it) works over USB with a host tool that does what
-EdgeTX does; the EdgeTX side is on branch `mpm-v2-flash` (not pushed;
-`mpm-v2-flash-2.12` on EdgeTX 2.12). From a radio: one update on a TX15 over
+EdgeTX does; the EdgeTX side is branch `mpm-v2-flash` (draft PR
+EdgeTX/edgetx#7994 on main; 2.12 test builds in draft PR #7993). From a radio: one update on a TX15 over
 the external bay (2026-10-21), one on a GX15 with the boot loader without
 system reset (2026-10-24, see [Tested on a radio](#tested-on-a-radio)); the
 rest of [To test with a radio](#to-test-with-a-radio) is still open.
@@ -250,9 +250,9 @@ An internal MPM v2 has no USB, but EdgeTX gives the PC a way to it:
 So for an internal module: radio UART on DIO2 / DIO3, BOOTCMD on DIO19.
 
 An external module has its own USB-C, but the radio's USB works too with an
-EdgeTX patch (EdgeTX PR #7927 on main, branch `cli-ext-module-passthrough`;
-the same commits on 2.12 in `mpm-v2-passthrough-2.12`): EdgeTX 2.12 and
-main only pass through to the internal module
+EdgeTX patch (EdgeTX PR #7927, merged on main; on 2.12 in the test builds
+of draft PR #7993, branch `mpm-v2-passthrough-2.12`): EdgeTX 2.12 before it
+only passes through to the internal module
 (`// TODO: external module` in `cliSerialPassthrough()`).
 `serialpassthrough rfmod 1 <baud> ppm` opens the bay as "Flash external
 Multi" does (TX on the PPM pin, RX on S.Port, both
