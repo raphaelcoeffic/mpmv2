@@ -3,18 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FASST Sniffer</title>
-<meta name="description" content="Record Futaba FASST packets with a Sonoff ZBDongle-P, in the browser">
+<title>Futaba Sniffer</title>
+<meta name="description" content="Record Futaba FASST and T-FHSS packets with a Sonoff ZBDongle-P, in the browser">
 <!--
-  FASST sniffer for helpers: flashes the radio bench (build-zbp
+  FASST / T-FHSS sniffer for helpers: flashes the radio bench (build-zbp
   zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
   ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
-  --sonoff), then records guided fasstrx runs (docs/bench.md) into one text
-  file. Web Serial: Chrome, Edge, Firefox 151+ (desktop).
+  --sonoff), then records guided runs (docs/bench.md) into one text file:
+  FASST with fasstrx (follows the hops), T-FHSS on one channel per recording
+  (preset tfhss, rx 16 fixed: timing and hops not known yet). Web Serial:
+  Chrome, Edge, Firefox 151+ (desktop).
 
   Capture file: "# " header lines (key: value), then per recording
-  "@step <n> <title>", "@note <text>", "@time <ISO date>", the bench's
-  "@ok fasstrx ..." line, its "@fasst ..." lines and "@end fasstrx ...".
+  "@step <n> <title>", "@system <FASST|T-FHSS> [ch=<n>]", "@note <text>",
+  "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx ...", its
+  "@fasst ..." lines and "@end fasstrx ...". T-FHSS: the "@ok" answers to
+  preset, ch and rx, the "@rx ..." lines and "@ok stop ...".
 -->
 <style>
 :root {
@@ -83,8 +87,8 @@ a { color: var(--accent); }
 </head>
 <body>
 <main>
-<h1>FASST Sniffer</h1>
-<p class="sub">Records what a Futaba FASST transmitter sends, with a Sonoff ZBDongle-P USB
+<h1>Futaba Sniffer</h1>
+<p class="sub">Records what a Futaba FASST or T-FHSS transmitter sends, with a Sonoff ZBDongle-P USB
 stick. Nothing to install: this page talks to the stick directly.</p>
 
 <section id="unsupported" hidden>
@@ -128,12 +132,19 @@ first:</p>
 <h2><span class="num">3</span>About your transmitter</h2>
 <label for="f-radio">Radio and module (e.g. "T10CG", "8FG + TM-8")</label>
 <input id="f-radio" autocomplete="off">
+<label for="f-system">System</label>
+<select id="f-system">
+  <option value="fasst">FASST</option>
+  <option value="tfhss">T-FHSS</option>
+</select>
 <label for="f-mode">Mode it is set to</label>
-<select id="f-mode">
-  <option>FASST multi-channel (MULT)</option>
-  <option>FASST 7 channels (7CH)</option>
-  <option>FASST 10 channels (TM-10 / TM-14)</option>
-  <option>Don't know</option>
+<select id="f-mode"></select>
+<label for="f-area">Area (region) setting, if the radio has one</label>
+<select id="f-area">
+  <option>Don't know / no such setting</option>
+  <option>General</option>
+  <option>France</option>
+  <option>Other (write it in the notes)</option>
 </select>
 <label for="f-notes">Anything else (receiver it's bound to, failsafe settings...)</label>
 <textarea id="f-notes" rows="2"></textarea>
@@ -161,14 +172,14 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "1";
+const PAGE_VERSION = "2";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
 const RX_BYTES = 48;  // fasstrx bytes per packet: unknown formats may be longer than 22
 
 // Guided recordings
-const STEPS = [
+const COMMON_STEPS = [
   { title: "Transmitter on, sticks centred", secs: 20,
     what: "Switch the transmitter on (if it is on, leave it), sticks centred, switches as they are." },
   { title: "Channel 1 end to end", secs: 25,
@@ -181,6 +192,30 @@ const STEPS = [
   { title: "Off and on", secs: 30,
     what: "Switch the transmitter off, wait 5 seconds, switch it on again, and leave it on until the end." },
 ];
+
+// T-FHSS: one channel per recording, n = 1..31 at 2407.5 + 2 (n - 1) MHz (bench
+// ch = CC2500 CHANNR = 5 (n - 1)). 10 and 22: between Wi-Fi channels 1/6 and 6/11
+const TFHSS_CH = 10, TFHSS_CH2 = 22;
+const SYSTEMS = {
+  fasst: {
+    name: "FASST", file: "fasst",
+    modes: ["FASST multi-channel (MULT)", "FASST 7 channels (7CH)",
+            "FASST 10 channels (TM-10 / TM-14)", "Don't know"],
+    steps: COMMON_STEPS,
+  },
+  tfhss: {
+    name: "T-FHSS", file: "tfhss",
+    modes: ["T-FHSS", "T-FHSS SR", "Don't know"],
+    steps: [
+      ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH })),
+      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_CH,
+        what: "Only if you have a T-FHSS receiver: put it in link (bind) mode as its manual says, close to the transmitter, and link it. Skip this step if you have none." },
+      { title: "Another channel", secs: 30, ch: TFHSS_CH2,
+        what: "Transmitter on, sticks centred, nothing to do: this one listens on a second channel." },
+    ],
+  },
+};
+const system = () => SYSTEMS[$("f-system").value];
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -557,9 +592,10 @@ async function afterConnect() {
   }
 }
 
-// fasstrx that stops on request (the page's needs)
+// fasstrx that stops on request and the tfhss preset (the page's needs)
 async function sniffingWorks() {
   try {
+    await benchCmd("preset tfhss");
     await benchCmd("fasstrx 0 0 1");
     await link.writeText("\n");
     await sleep(200);
@@ -657,6 +693,25 @@ $("b-backup").onclick = async () => {
 // FASST 10ch: whitening and CRC (core/fasst_frame.c), for the live count only
 const WHITE = [0x00, 0xc0, 0x4c, 0xed, 0xde, 0x9b, 0xff, 0xc6, 0x11, 0x77, 0x70, 0x1b, 0x0f,
                0x08, 0x98, 0x65, 0x09, 0x95, 0x4e, 0x26, 0x57, 0xfe];
+// T-FHSS: 12 bytes XOR a key (TX ID, hop channel), CRC-16/MCRF4XX of the plain
+// bytes, low byte first. The CRC is affine, so crc(raw) ^ crc field = crc(key)
+// with a zero start: the same for all packets of one TX on one channel (0:
+// not whitened, e.g. bind). The live count shows the most common value's
+function crcMcrf(bytes) {
+  let c = 0xffff;
+  for (const b of bytes) {
+    c ^= b;
+    for (let j = 0; j < 8; j++) c = c & 1 ? (c >>> 1) ^ 0x8408 : c >>> 1;
+  }
+  return c;
+}
+function tfhssSyndrome(hex) {
+  if (hex.length < 28) return -1;
+  const p = [];
+  for (let i = 0; i < 14; i++) p.push(parseInt(hex.substr(2 * i, 2), 16));
+  return crcMcrf(p.slice(0, 12)) ^ (p[12] | (p[13] << 8));
+}
+
 function crc10ch(hex) {
   if (hex.length < 44) return false;
   const p = [];
@@ -669,7 +724,7 @@ function crc10ch(hex) {
   return c === (p[20] | (p[21] << 8));
 }
 
-const recordings = [];  // { step, title, note, time, lines, packets, good }
+const recordings = [];  // { step, title, system, note, time, lines, packets, good }
 let running = null;     // { rec, timer, ui, stop() }
 
 function stepUi(step, index) {
@@ -684,18 +739,37 @@ function stepUi(step, index) {
   li.querySelector(".go").onclick = () => (running && running.li === li ? running.stop() : record(step, index, li));
   $("steps").appendChild(li);
 }
-STEPS.forEach(stepUi);
+function showSteps() {
+  $("steps").textContent = "";
+  system().steps.forEach(stepUi);
+}
+function showModes() {
+  const sel = $("f-mode");
+  sel.textContent = "";
+  for (const m of system().modes) sel.appendChild(new Option(m));
+}
+$("f-system").onchange = () => {
+  if (running) return;
+  showModes();
+  showSteps();
+};
+showModes();
+showSteps();
 
 $("b-extra").onclick = () => {
   const n = $("steps").children.length;
-  stepUi({ title: "Free recording", secs: 30, what: "Anything else: describe it in the note." }, n);
+  stepUi({ title: "Free recording", secs: 30, ch: TFHSS_CH, what: "Anything else: describe it in the note." }, n);
 };
 
 async function record(step, index, li) {
   if (running) return;
   const go = li.querySelector(".go"), live = li.querySelector(".live");
-  const rec = { step: index + 1, title: step.title, note: li.querySelector(".note").value.trim(),
+  const sys = system(), tfhss = sys === SYSTEMS.tfhss;
+  const rec = { step: index + 1, title: step.title,
+                system: sys.name + (tfhss ? ` ch=${step.ch}` : ""),
+                note: li.querySelector(".note").value.trim(),
                 time: new Date().toISOString(), lines: [], packets: 0, good: 0 };
+  const syndromes = new Map();
   try {
     if (!(await openBench())) throw new Error("the sniffer doesn't answer: load it (step 2)");
   } catch (e) {
@@ -710,17 +784,24 @@ async function record(step, index, li) {
   const show = () => {
     const secs = Math.round((performance.now() - t0) / 1000);
     let text = `${secs} / ${step.secs} s · ${rec.packets} packets · ${recent.length}/s`;
-    if (rec.good) text += ` · ${rec.good} decoded (10 channels)`;
+    if (rec.good) text += tfhss ? ` · ${rec.good} look like real packets` : ` · ${rec.good} decoded (10 channels)`;
     live.textContent = text;
     live.className = "live status" + (recent.length ? " ok" : "");
   };
   bench.onEvent = (line) => {
     rec.lines.push(line);
-    if (line.startsWith("@fasst ")) {
+    if (line.startsWith(tfhss ? "@rx " : "@fasst ")) {
       rec.packets++;
       const parts = line.split(" ");
-      const hex = parts.find((p, i) => i > 3 && !p.includes("="));
-      if (hex && crc10ch(hex)) rec.good++;
+      if (tfhss) {
+        const s = tfhssSyndrome(parts[3] || "");
+        if (s >= 0) syndromes.set(s, (syndromes.get(s) || 0) + 1);
+        const top = Math.max(0, ...syndromes.values());
+        rec.good = top >= 3 ? top : 0;
+      } else {
+        const hex = parts.find((p, i) => i > 3 && !p.includes("="));
+        if (hex && crc10ch(hex)) rec.good++;
+      }
       const now = performance.now();
       recent.push(now);
       while (recent.length && now - recent[0] > 1000) recent.shift();
@@ -741,8 +822,12 @@ async function record(step, index, li) {
       if (stopped) return;
       stopped = true;
       clearTimeout(timer);
-      await link.writeText("\n");
-      await Promise.race([endSeen, sleep(2000)]);
+      if (tfhss) {
+        try { rec.lines.push("@ok " + (await benchCmd("stop"))); } catch (e) {}
+      } else {
+        await link.writeText("\n");
+        await Promise.race([endSeen, sleep(2000)]);
+      }
       clearInterval(tick);
       bench.onEvent = null;
       running = null;
@@ -753,14 +838,19 @@ async function record(step, index, li) {
       recordings.push(rec);
       recordings.sort((a, b) => a.step - b.step);
       show();
-      live.textContent += rec.packets ? "  ✓ saved" : "  — nothing received: is the transmitter on and in FASST mode?";
+      live.textContent += rec.packets ? "  ✓ saved" : `  — nothing received: is the transmitter on and in ${sys.name} mode?`;
       live.className = "live status " + (rec.packets ? "ok" : "warn");
       go.textContent = "Record again";
       $("st-save").textContent = `${recordings.length} recording(s) ready to save.`;
     },
   };
   try {
-    await benchCmd(`fasstrx 0 0 ${RX_BYTES} 100 0 1`);
+    if (tfhss) {
+      for (const c of ["preset tfhss", `ch ${5 * (step.ch - 1)}`, "rx 16 fixed"])
+        rec.lines.push("@ok " + (await benchCmd(c)));
+    } else {
+      await benchCmd(`fasstrx 0 0 ${RX_BYTES} 100 0 1`);
+    }
   } catch (e) {
     clearInterval(tick);
     bench.onEvent = null;
@@ -790,21 +880,24 @@ $("b-save").onclick = () => {
   }
   const one = (s) => s.replace(/[\r\n]+/g, " ");
   const out = [
-    "# fasst-capture 1",
+    "# fasst-capture 2",
     `# page: ${PAGE_VERSION}`,
     `# device: ${one(bench.info)}`,
     `# radio: ${one($("f-radio").value)}`,
+    `# system: ${system().name}`,
     `# mode: ${one($("f-mode").value)}`,
+    `# area: ${one($("f-area").value)}`,
     `# notes: ${one($("f-notes").value)}`,
     `# saved: ${new Date().toISOString()}`,
     `# browser: ${one(navigator.userAgent)}`,
   ];
   for (const r of recordings) {
-    out.push(`@step ${r.step} ${r.title}`, `@note ${one(r.note)}`, `@time ${r.time}`, ...r.lines);
+    out.push(`@step ${r.step} ${r.title}`, `@system ${r.system}`, `@note ${one(r.note)}`, `@time ${r.time}`,
+             ...r.lines);
   }
   const radio = $("f-radio").value.trim().replace(/[^A-Za-z0-9_-]+/g, "-") || "radio";
   const day = new Date().toISOString().slice(0, 10);
-  download(new Blob([out.join("\n") + "\n"], { type: "text/plain" }), `fasst-${radio}-${day}.txt`);
+  download(new Blob([out.join("\n") + "\n"], { type: "text/plain" }), `${system().file}-${radio}-${day}.txt`);
   status("st-save", "Saved. Send that file, thanks!", "ok");
 };
 

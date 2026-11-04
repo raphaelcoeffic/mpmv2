@@ -128,10 +128,14 @@ firmware back. The host tools take the dongle's port as the CC2652's:
 **Sniffer page for helpers** (`tools/sniffer_web/index.html`): a static page
 using Web Serial (Chrome, Edge, Firefox 151+, desktop) that loads the bench on the
 dongle through the ROM boot loader (`rom_flash.py --sonoff` in JavaScript,
-backup button included), then runs guided `fasstrx 0 0 48` recordings
-(stopped by a newline) and saves them as one text file: `# key: value`
-header lines, then per recording `@step`, `@note`, `@time` and the bench's
-lines. `ninja -C build-zbp sniffer-web` puts the page and the image
+backup button included), then runs guided recordings and saves them as one
+text file: `# key: value` header lines (system, mode, area), then per
+recording `@step`, `@system`, `@note`, `@time` and the bench's lines. FASST:
+`fasstrx 0 0 48` (stopped by a newline). T-FHSS: `preset tfhss`, `ch 45` (or
+`ch 105`: channels n = 10 and 22, between the Wi-Fi channels), `rx 16 fixed`,
+`stop`; its live count is the number of packets sharing the most common CRC
+syndrome (CRC-16/MCRF4XX of the raw 12 bytes XOR the CRC field: constant for
+one TX on one channel, the whitening key being fixed there). `ninja -C build-zbp sniffer-web` puts the page and the image
 (`fasst-sniffer-zbdongle-p.bin`) in `build-zbp/sniffer-web/`; `wrangler deploy`
 (`wrangler.jsonc`) publishes that folder as a Cloudflare Worker's static
 assets (https://fasst-sniffer.edgetx.workers.dev). The page also lists the
