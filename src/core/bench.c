@@ -28,7 +28,7 @@
 //                                their framing: frskyd frskyx frskyx2 frskyxeu
 //                                frskyx2eu hott hitec redpine
 //                                redpineslow skyartec frskyv corona coronav2
-//                                fdv3 ares radiolink ikea sfhss, A7105 ones:
+//                                fdv3 ares radiolink ikea sfhss tfhss, A7105 ones:
 //                                flysky afhds2a hubsan bugs height pelikan
 //                                kyosho kyoshohype wfly2 joysway, CYRF6936: dsm (data
 //                                packets), dsmbind (bind packets: SDR), devo
@@ -778,6 +778,11 @@ static const preset_t _presets[] = {
     {"ikea", 249939, 80000, 89, true, 2432999908, 199951, 4, CC_CRC | CC_VAR | CC_FEC | CC_MSK},
     // Futaba SFHSS: 128 kbps 2-FSK, 38 kHz deviation, fixed length, CC2400 CRC
     {"sfhss", 128143, 38000, 86, true, 2399999634, 249939, 4, CC_CRC2400},  // 220 kHz
+    // Futaba T-FHSS (R334SBS firmware): 384 kbps MSK (1/8 phase step, as
+    // Redpine), sync D391 16/16, 14 bytes fixed, no CC2500 CRC (CRC-16/MCRF4XX
+    // in the payload). ch = CHANNR = 5 (n - 1), n = 1..31: 2407.5 + 2 (n - 1) MHz.
+    // RX filter: code 91 receives nothing at 384 kbps, 92 and up do
+    {"tfhss", 384033, 123000, 93, true, 2407499786, 399902, 2, CC_MSK},
     // A7105 (DATA_RATE 0x0E: 500 kbps / (n + 1), TX_II 0x2B), ch = PLL_I.
     // Deviation: the A7105 receives best at 250 kHz (186 kHz: 2.4% CRC errors
     // without FEC, 250 kHz: 0.6%, 140 / 300 kHz: worse).
