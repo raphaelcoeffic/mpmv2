@@ -30,9 +30,10 @@ CHIPS = {
 }
 
 # MULTI signature flags (Multiprotocol/Binary_Signature.ino): module type
-# 3 (CC2652, new), boot loader support, CHECK_FOR_BOOTLOADER, MULTI_TELEMETRY
-BOARD_CC2652 = 3
-FLAGS = BOARD_CC2652 | 0x80 | 0x100 | 0x800
+# 3 (MPM v2, new: its boot loader on the CC26xx and CC27xx alike), boot loader
+# support, CHECK_FOR_BOOTLOADER, MULTI_TELEMETRY
+BOARD_MPM_V2 = 3
+FLAGS = BOARD_MPM_V2 | 0x80 | 0x100 | 0x800
 
 
 def header_offset(img: bytes) -> int:
