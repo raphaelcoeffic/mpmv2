@@ -132,9 +132,11 @@ backup button included), then runs guided `fasstrx 0 0 48` recordings
 (stopped by a newline) and saves them as one text file: `# key: value`
 header lines, then per recording `@step`, `@note`, `@time` and the bench's
 lines. `ninja -C build-zbp sniffer-web` puts the page and the image
-(`fasst-sniffer-zbdongle-p.bin`) in `build-zbp/sniffer-web/`, ready to
-publish (e.g. Cloudflare Pages); it also lists the XDS110, so recording
-can be tried on the CC2652 LaunchPad (no flashing there).
+(`fasst-sniffer-zbdongle-p.bin`) in `build-zbp/sniffer-web/`; `wrangler deploy`
+(`wrangler.jsonc`) publishes that folder as a Cloudflare Worker's static
+assets (https://fasst-sniffer.edgetx.workers.dev). The page also lists the
+XDS110, so recording can be tried on the CC2652 LaunchPad (no flashing
+there).
 
 ### CC2755P10 LaunchPad
 

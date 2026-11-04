@@ -1,0 +1,7 @@
+{
+  "name": "fasst-sniffer",
+  "compatibility_date": "2026-11-03",
+  "assets": {
+    "directory": "build-zbp/sniffer-web/"
+  }
+}
