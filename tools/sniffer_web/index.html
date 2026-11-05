@@ -4,21 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Futaba Sniffer</title>
-<meta name="description" content="Record Futaba FASST and T-FHSS packets with a Sonoff ZBDongle-P, in the browser">
+<meta name="description" content="Record Futaba FASST, T-FHSS, S-FHSS and Mini-Z packets with a Sonoff ZBDongle-P, in the browser">
 <!--
   FASST / T-FHSS sniffer for helpers: flashes the radio bench (build-zbp
   zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
   ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
   --sonoff), then records guided runs (docs/bench.md) into one text file:
-  FASST with fasstrx (follows the hops), T-FHSS on one channel per recording
-  (preset tfhss, rx 16 fixed: timing and hops not known yet). Web Serial:
-  Chrome, Edge, Firefox 151+ (desktop).
+  FASST with fasstrx (follows the hops), the others on one channel per
+  recording: T-FHSS (preset tfhss, rx 16 fixed: timing and hops not known yet),
+  S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
+  Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
+  Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
   Capture file: "# " header lines (key: value), then per recording
-  "@step <n> <title>", "@system <FASST|T-FHSS> [ch=<n>]", "@note <text>",
-  "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx ...", its
-  "@fasst ..." lines and "@end fasstrx ...". T-FHSS: the "@ok" answers to
-  preset, ch and rx, the "@rx ..." lines and "@ok stop ...".
+  "@step <n> <title>", "@system <FASST|T-FHSS|S-FHSS|Mini-Z> [ch=<n>]",
+  "@note <text>", "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx
+  ...", its "@fasst ..." lines and "@end fasstrx ...". Others: the "@ok"
+  answers to preset, ch and rx, the "@rx ..." lines and "@ok stop ...". T-FHSS
+  ch is n = 1..31, the others the bench ch.
 -->
 <style>
 :root {
@@ -88,8 +91,8 @@ a { color: var(--accent); }
 <body>
 <main>
 <h1>Futaba Sniffer</h1>
-<p class="sub">Records what a Futaba FASST or T-FHSS transmitter sends, with a Sonoff ZBDongle-P USB
-stick. Nothing to install: this page talks to the stick directly.</p>
+<p class="sub">Records what a Futaba FASST, T-FHSS, S-FHSS or Mini-Z transmitter sends, with a
+Sonoff ZBDongle-P USB stick. Nothing to install: this page talks to the stick directly.</p>
 
 <section id="unsupported" hidden>
 <h2>This browser can't talk to USB serial ports</h2>
@@ -136,6 +139,8 @@ first:</p>
 <select id="f-system">
   <option value="fasst">FASST</option>
   <option value="tfhss">T-FHSS</option>
+  <option value="sfhss">S-FHSS (reference)</option>
+  <option value="miniz">Mini-Z (4PM Plus)</option>
 </select>
 <label for="f-mode">Mode it is set to</label>
 <select id="f-mode"></select>
@@ -172,7 +177,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "2";
+const PAGE_VERSION = "3";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -193,9 +198,17 @@ const COMMON_STEPS = [
     what: "Switch the transmitter off, wait 5 seconds, switch it on again, and leave it on until the end." },
 ];
 
-// T-FHSS: one channel per recording, n = 1..31 at 2407.5 + 2 (n - 1) MHz (bench
-// ch = CC2500 CHANNR = 5 (n - 1)). 10 and 22: between Wi-Fi channels 1/6 and 6/11
+// Systems other than FASST record one channel per step: cmds(step) starts the
+// bench, count "syndrome" (T-FHSS: same CRC syndrome, i.e. same TX and channel)
+// or "crc" (packets with crc=ok) gives the "good" counter.
+// T-FHSS: n = 1..31 at 2407.5 + 2 (n - 1) MHz (bench ch = CC2500 CHANNR =
+// 5 (n - 1)). 10 and 22: between Wi-Fi channels 1/6 and 6/11
 const TFHSS_CH = 10, TFHSS_CH2 = 22;
+// S-FHSS: CHANNR 6 k + 16, 2400 + 0.25 ch MHz: 100 = 2425, 190 = 2447.5
+const SFHSS_CH = 100, SFHSS_CH2 = 190;
+// Kyosho FHSS bind (MPM Kyosho sub 0): ID 5475C52A, A7105 ch 0x0D and 0x8C in
+// turn. The data packets use the TX's own ID: only bind is heard
+const KYOSHO_BIND_CH = 13, KYOSHO_BIND_CH2 = 140;
 const SYSTEMS = {
   fasst: {
     name: "FASST", file: "fasst",
@@ -205,6 +218,8 @@ const SYSTEMS = {
   },
   tfhss: {
     name: "T-FHSS", file: "tfhss",
+    cmds: (step) => ["preset tfhss", `ch ${5 * (step.ch - 1)}`, "rx 16 fixed"],
+    count: "syndrome", good: "look like real packets",
     modes: ["T-FHSS", "T-FHSS SR", "Don't know"],
     steps: [
       ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH })),
@@ -212,6 +227,33 @@ const SYSTEMS = {
         what: "Only if you have a T-FHSS receiver: put it in link (bind) mode as its manual says, close to the transmitter, and link it. Skip this step if you have none." },
       { title: "Another channel", secs: 30, ch: TFHSS_CH2,
         what: "Transmitter on, sticks centred, nothing to do: this one listens on a second channel." },
+    ],
+  },
+  sfhss: {
+    name: "S-FHSS", file: "sfhss",
+    cmds: (step) => ["preset sfhss", `ch ${step.ch}`, "rx 13"],
+    count: "crc", good: "with a good CRC",
+    modes: ["S-FHSS"],
+    steps: [
+      { ...COMMON_STEPS[0], ch: SFHSS_CH,
+        what: "A known system, to check that the stick hears your transmitter: set it to S-FHSS, switch it on, sticks centred." },
+      { ...COMMON_STEPS[1], ch: SFHSS_CH },
+      { title: "Another channel", secs: 20, ch: SFHSS_CH2,
+        what: "Transmitter on, sticks centred, nothing to do: this one listens on a second channel." },
+    ],
+  },
+  miniz: {
+    name: "Mini-Z", file: "miniz",
+    cmds: (step) => ["preset kyosho", `ch ${step.ch}`, "rx 38"],
+    count: "crc", good: "with a good CRC",
+    modes: ["Mini-Z Evo (built in)", "Mini-Z FHSS (FS-RM005 module)", "Don't know"],
+    steps: [
+      { title: "Link (bind)", secs: 40, ch: KYOSHO_BIND_CH,
+        what: "No car needed. Set the radio to Mini-Z and start its link (bind) function as the manual says; start it again if it stops. If the manual only links with the car's button, switch the transmitter off and on a few times instead." },
+      { title: "Link (bind) again", secs: 30, ch: KYOSHO_BIND_CH2,
+        what: "The same: link (bind) once more. This one listens on a second channel." },
+      { title: "Transmitter on, not linking", secs: 20, ch: KYOSHO_BIND_CH, maybeEmpty: true,
+        what: "Stop linking, transmitter on, sticks centred. This one may record nothing: that's expected." },
     ],
   },
 };
@@ -592,7 +634,8 @@ async function afterConnect() {
   }
 }
 
-// fasstrx that stops on request and the tfhss preset (the page's needs)
+// fasstrx that stops on request and the tfhss preset (the page's needs; the
+// sfhss and kyosho presets are older)
 async function sniffingWorks() {
   try {
     await benchCmd("preset tfhss");
@@ -748,8 +791,18 @@ function showModes() {
   sel.textContent = "";
   for (const m of system().modes) sel.appendChild(new Option(m));
 }
+// One system per file: switching drops the recordings (after asking)
+let shownSystem = $("f-system").value;
 $("f-system").onchange = () => {
-  if (running) return;
+  const sel = $("f-system");
+  if (running || (recordings.length &&
+      !confirm(`Switching to ${system().name} drops the ${recordings.length} recording(s) not saved yet. Switch anyway?`))) {
+    sel.value = shownSystem;
+    return;
+  }
+  shownSystem = sel.value;
+  recordings.length = 0;
+  $("st-save").textContent = "";
   showModes();
   showSteps();
 };
@@ -758,15 +811,15 @@ showSteps();
 
 $("b-extra").onclick = () => {
   const n = $("steps").children.length;
-  stepUi({ title: "Free recording", secs: 30, ch: TFHSS_CH, what: "Anything else: describe it in the note." }, n);
+  stepUi({ title: "Free recording", secs: 30, ch: system().steps[0].ch, what: "Anything else: describe it in the note." }, n);
 };
 
 async function record(step, index, li) {
   if (running) return;
   const go = li.querySelector(".go"), live = li.querySelector(".live");
-  const sys = system(), tfhss = sys === SYSTEMS.tfhss;
+  const sys = system(), oneCh = !!sys.cmds;
   const rec = { step: index + 1, title: step.title,
-                system: sys.name + (tfhss ? ` ch=${step.ch}` : ""),
+                system: sys.name + (oneCh ? ` ch=${step.ch}` : ""),
                 note: li.querySelector(".note").value.trim(),
                 time: new Date().toISOString(), lines: [], packets: 0, good: 0 };
   const syndromes = new Map();
@@ -784,16 +837,18 @@ async function record(step, index, li) {
   const show = () => {
     const secs = Math.round((performance.now() - t0) / 1000);
     let text = `${secs} / ${step.secs} s · ${rec.packets} packets · ${recent.length}/s`;
-    if (rec.good) text += tfhss ? ` · ${rec.good} look like real packets` : ` · ${rec.good} decoded (10 channels)`;
+    if (rec.good) text += ` · ${rec.good} ${sys.good || "decoded (10 channels)"}`;
     live.textContent = text;
     live.className = "live status" + (recent.length ? " ok" : "");
   };
   bench.onEvent = (line) => {
     rec.lines.push(line);
-    if (line.startsWith(tfhss ? "@rx " : "@fasst ")) {
+    if (line.startsWith(oneCh ? "@rx " : "@fasst ")) {
       rec.packets++;
       const parts = line.split(" ");
-      if (tfhss) {
+      if (sys.count === "crc") {
+        if (parts.includes("crc=ok")) rec.good++;
+      } else if (sys.count === "syndrome") {
         const s = tfhssSyndrome(parts[3] || "");
         if (s >= 0) syndromes.set(s, (syndromes.get(s) || 0) + 1);
         const top = Math.max(0, ...syndromes.values());
@@ -822,7 +877,7 @@ async function record(step, index, li) {
       if (stopped) return;
       stopped = true;
       clearTimeout(timer);
-      if (tfhss) {
+      if (oneCh) {
         try { rec.lines.push("@ok " + (await benchCmd("stop"))); } catch (e) {}
       } else {
         await link.writeText("\n");
@@ -838,16 +893,17 @@ async function record(step, index, li) {
       recordings.push(rec);
       recordings.sort((a, b) => a.step - b.step);
       show();
-      live.textContent += rec.packets ? "  ✓ saved" : `  — nothing received: is the transmitter on and in ${sys.name} mode?`;
-      live.className = "live status " + (rec.packets ? "ok" : "warn");
+      live.textContent += rec.packets ? "  ✓ saved"
+        : step.maybeEmpty ? "  ✓ saved (nothing received, as expected)"
+        : `  — nothing received: is the transmitter on and in ${sys.name} mode?`;
+      live.className = "live status " + (rec.packets || step.maybeEmpty ? "ok" : "warn");
       go.textContent = "Record again";
       $("st-save").textContent = `${recordings.length} recording(s) ready to save.`;
     },
   };
   try {
-    if (tfhss) {
-      for (const c of ["preset tfhss", `ch ${5 * (step.ch - 1)}`, "rx 16 fixed"])
-        rec.lines.push("@ok " + (await benchCmd(c)));
+    if (oneCh) {
+      for (const c of sys.cmds(step)) rec.lines.push("@ok " + (await benchCmd(c)));
     } else {
       await benchCmd(`fasstrx 0 0 ${RX_BYTES} 100 0 1`);
     }

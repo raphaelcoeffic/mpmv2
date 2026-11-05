@@ -135,7 +135,13 @@ recording `@step`, `@system`, `@note`, `@time` and the bench's lines. FASST:
 `ch 105`: channels n = 10 and 22, between the Wi-Fi channels), `rx 16 fixed`,
 `stop`; its live count is the number of packets sharing the most common CRC
 syndrome (CRC-16/MCRF4XX of the raw 12 bytes XOR the CRC field: constant for
-one TX on one channel, the whitening key being fixed there). `ninja -C build-zbp sniffer-web` puts the page and the image
+one TX on one channel, the whitening key being fixed there). Two reference
+systems count packets with `crc=ok`: S-FHSS (`preset sfhss`, `ch 100` or
+`ch 190`, `rx 13`), a known protocol that checks a helper's setup, and Mini-Z
+(`preset kyosho`, `ch 13` or `ch 140`, `rx 38`: the Kyosho FHSS bind packets,
+ID 5475C52A on A7105 channels 0x0D and 0x8C, to tell whether the 4PM Plus's
+Mini-Z Evo is that protocol; its data packets use the TX's own ID, so only
+bind is heard). `ninja -C build-zbp sniffer-web` puts the page and the image
 (`fasst-sniffer-zbdongle-p.bin`) in `build-zbp/sniffer-web/`; `wrangler deploy`
 (`wrangler.jsonc`) publishes that folder as a Cloudflare Worker's static
 assets (https://fasst-sniffer.edgetx.workers.dev). The page also lists the
