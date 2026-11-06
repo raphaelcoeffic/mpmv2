@@ -52,9 +52,15 @@ void fasst_phy(radio_phy_t* phy, uint16_t tx_power)
   };
 }
 
-// k + step mod 37, skipping 36: CHQ 2349 + 2k, f = CHQ x 1.024 MHz
+// k + step mod 37, skipping 36 (France: k + s mod 23, skipping 0): CHQ
+// 2349 + 2k, f = CHQ x 1.024 MHz
 uint8_t fasst_next_hop(uint8_t k, uint8_t step)
 {
+  if (step > FASST_FRANCE_STEP) {
+    step -= FASST_FRANCE_STEP;
+    k = (k + step) % 23;
+    return k == 0 ? step : k;
+  }
   k = (k + step) % 37;
   return k == 36 ? (k + step) % 37 : k;
 }
@@ -167,6 +173,8 @@ bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
   uint8_t pos = plain[4] << 1 | plain[5] >> 7;
   *k = pos - 1;
   *step = plain[5] & 0x7F;
+  if (*step > FASST_FRANCE_STEP)
+    return *step <= FASST_FRANCE_STEP + FASST_FRANCE_HOPS && *k >= 1 && *k <= FASST_FRANCE_HOPS;
   return pos >= 1 && *k < FASST_HOPS && *step >= 1 && *step < 37;
 }
 

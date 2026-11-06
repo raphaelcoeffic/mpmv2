@@ -96,6 +96,26 @@ int main()
   for (int i = 0; i < FASST_HOPS; i++) CHECK(seen[i] == 1);
   CHECK(fasst_freq_khz(0) == 2349 * 1024 && fasst_freq_khz(35) == 2419 * 1024);
 
+  // France (T14SG): step field 61 = k - 2, 62 = k - 1, 41 = k + 1, hops 1..22
+  CHECK(fasst_next_hop(1, 61) == 22 && fasst_next_hop(2, 61) == 21 && fasst_next_hop(3, 61) == 1);
+  CHECK(fasst_next_hop(1, 62) == 22 && fasst_next_hop(22, 41) == 1);
+  for (uint8_t s = 1; s <= FASST_FRANCE_HOPS; s++) {
+    uint8_t fseen[FASST_FRANCE_HOPS + 1] = {0};
+    k = 1;
+    for (int i = 0; i < FASST_FRANCE_HOPS; i++, k = fasst_next_hop(k, FASST_FRANCE_STEP + s)) {
+      CHECK(k >= 1 && k <= FASST_FRANCE_HOPS);
+      if (k <= FASST_FRANCE_HOPS) fseen[k]++;
+    }
+    CHECK(k == 1);
+    for (int i = 1; i <= FASST_FRANCE_HOPS; i++) CHECK(fseen[i] == 1);
+  }
+  fasst_packet(p, 1, 61, ch, false, 0, NULL, 0);
+  CHECK(fasst_unpack(p, plain, &uk, &ustep) && uk == 1 && ustep == 61);
+  fasst_packet(p, 0, 61, ch, false, 0, NULL, 0);
+  CHECK(!fasst_unpack(p, plain, &uk, &ustep));
+  fasst_packet(p, 5, 63, ch, false, 0, NULL, 0);
+  CHECK(!fasst_unpack(p, plain, &uk, &ustep));
+
   // Chips: preamble 1010..10, sync 0x2BB1 bit 0 first, the packet LSB first
   uint8_t chips[FASST_CHIPS_LEN], bits[256];
   fasst_spread(chips, p);
