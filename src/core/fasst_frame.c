@@ -60,6 +60,44 @@ uint8_t fasst_next_hop(uint8_t k, uint8_t step)
 
 uint32_t fasst_freq_khz(uint8_t k) { return (2349 + 2 * k) * 1024; }
 
+// FASSTest channel c: (2347 + c) x 1.024 MHz (FASST hop k = channel 2 + 2k)
+uint32_t fasstest_freq_khz(uint8_t c) { return (2347 + c) * 1024; }
+
+// Hop codewords, set A then set B (the R7206SB's table at 0xFFFC0E92)
+static const uint8_t _hop_codes[2][23] = {
+    {7, 9, 14, 18, 21, 27, 28, 35, 36, 42, 45, 49, 54, 56, 63, 65, 70, 72, 79, 83, 84, 90, 93},
+    {4, 10, 13, 17, 22, 24, 31, 32, 39, 41, 46, 50, 53, 59, 60, 66, 69, 75, 76, 80, 87, 89, 94},
+};
+
+bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row)
+{
+  uint8_t code = (p[1] & 0x0F) << 3 | p[0] >> 5;
+  for (int s = 0; s < 2; s++)
+    for (int r = 0; r < 23; r++)
+      if (_hop_codes[s][r] == code) {
+        *set = s;
+        *row = r;
+        return true;
+      }
+  return false;
+}
+
+// Hop i of a row: set A 2 + 3 ((5^i + row) mod 23), set B 2 + 2 ((5^i - 1
+// + row) mod 23)
+bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next)
+{
+  uint8_t ch[FASSTEST_HOPS];
+  uint32_t p = 1;
+  for (int i = 0; i < FASSTEST_HOPS; i++, p = p * 5 % 23)
+    ch[i] = set ? 2 + 2 * ((p + 22 + row) % 23) : 2 + 3 * ((p + row) % 23);
+  for (int i = 0; i < FASSTEST_HOPS; i++)
+    if (ch[i] == c) {
+      *next = ch[(i + 1) % FASSTEST_HOPS];
+      return true;
+    }
+  return false;
+}
+
 static uint16_t _crc_kermit(const uint8_t* p, uint32_t n)
 {
   uint16_t c = 0;

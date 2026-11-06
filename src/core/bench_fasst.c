@@ -143,6 +143,77 @@ static void _print_rx(fasst_print_t print, const fasst_rx_cfg_t* cfg, uint8_t k,
   print("\r\n");
 }
 
+// A FASSTest packet good enough to follow: every bit of its first
+// FASSTEST_PACKET_LEN bytes at most one chip off
+#define FASSTEST_Q_MIN 9
+
+static bool _fasstest_clean()
+{
+  for (int i = 0; i < FASSTEST_PACKET_LEN; i++)
+    if (_q[i] < FASSTEST_Q_MIN) return false;
+  return true;
+}
+
+// FASSTest: parked on channel cfg->k or following the hops (bench_fasst.h).
+// Locked: on channel c, the next TX packet's sync word at t_next on channel
+// next, the radio moving there FASST_RX_LEAD_US before (hop_pending)
+static void _fasstest_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print, uint16_t len)
+{
+  uint8_t c = cfg->k, next = 0, set = 0, row = 0;
+  bool locked = false, hop_pending = false;
+  uint32_t t_next = 0, misses = 0, rx_us = BIT_US(_rx_bits(cfg));
+  uint32_t packets = 0, clean = 0, replies = 0, missed = 0, locks = 0, restarts = 0;
+  uint32_t t_end = micros() + cfg->secs * 1000000;
+  while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
+    if (radio_receive(&_pkt)) {
+      packets++;
+      int32_t shift = _despread(cfg);
+      bool good = shift >= 0 && cfg->bytes >= FASSTEST_PACKET_LEN && _fasstest_clean();
+      clean += good;
+      if (good && (_bytes[0] & 0x1F) == FASSTEST_TYPE_REPLY) {
+        replies++;
+      } else if (good && cfg->follow && fasstest_hop_code(_bytes, &set, &row) &&
+                 fasstest_next_channel(set, row, c, &next)) {
+        locks += !locked;
+        locked = true;
+        misses = 0;
+        t_next = _pkt.timestamp_us + BIT_US(shift) + FASSTEST_FRAME_US;
+        hop_pending = true;
+      }
+      _print_rx(print, cfg, c, shift);
+    } else if (hop_pending && !micros_before(t_next - FASST_RX_LEAD_US)) {
+      radio_rx_stop();
+      c = next;
+      radio_set_frequency(fasstest_freq_khz(c));
+      radio_rx_start(len);
+      hop_pending = false;
+    } else if (locked && !hop_pending && !micros_before(t_next + rx_us + FASST_RX_LATE_US)) {
+      // No TX packet on this hop: the next one, FASSTEST_HOPS in a row: parked again
+      missed++;
+      if (++misses >= FASSTEST_HOPS) {
+        locked = false;
+        radio_rx_stop();
+        c = cfg->k;
+        radio_set_frequency(fasstest_freq_khz(c));
+        radio_rx_start(len);
+      } else {
+        fasstest_next_channel(set, row, c, &next);
+        t_next += FASSTEST_FRAME_US;
+        hop_pending = true;
+      }
+    } else if (!radio_rx_active()) {
+      restarts++;
+      radio_rx_start(len);
+    }
+  }
+  radio_rx_stats_t st;
+  radio_rx_stats(&st);
+  radio_off();
+  print("@end fasstrx packets=%lu clean=%lu replies=%lu missed=%lu locks=%lu restarts=%lu "
+        "buf_full=%u\r\n",
+        packets, clean, replies, missed, locks, restarts, st.buf_full);
+}
+
 void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
 {
   radio_phy_t phy;
@@ -151,10 +222,15 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
   phy.sync_threshold = cfg->sync_threshold;
   radio_set_sync_word(0, fasst_rx_sync_word());
   uint16_t len = FASST_RX_LEN(_rx_bits(cfg));
-  if (radio_init(&phy) != RADIO_OK || radio_set_frequency(fasst_freq_khz(cfg->k)) != RADIO_OK ||
+  uint32_t freq = cfg->fasstest ? fasstest_freq_khz(cfg->k) : fasst_freq_khz(cfg->k);
+  if (radio_init(&phy) != RADIO_OK || radio_set_frequency(freq) != RADIO_OK ||
       radio_rx_start(len) != RADIO_OK) {
     print("@err fasstrx radio status=0x%04x\r\n", radio_last_status());
     radio_off();
+    return;
+  }
+  if (cfg->fasstest) {
+    _fasstest_rx_run(cfg, print, len);
     return;
   }
 

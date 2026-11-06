@@ -31,7 +31,9 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print);
 // bits from the RF core's sync word to the real one; sync=none instead if
 // not found. With follow, a 10ch packet with a good CRC locks on the hops
 // (fasst_unpack(): the next hop and its time); an unknown format stays
-// parked on k
+// parked on k. FASSTest (CRC unchecked, the whitening needs the TX ID): a
+// TX packet with clean chips and a known hop code locks, and the RX stays
+// on its channel until just before the next hop, for the receiver's reply
 //
 // The RF core also finds its sync word at the very start of a packet (the
 // sender's synthesizer settling; the sync bits 6..15 came 68 bits later):
@@ -46,7 +48,8 @@ typedef struct {
   uint16_t bytes;          // packet bytes to print, 1..FASST_RX_BYTES_MAX
   uint8_t rx_bw;           // RF core RX bandwidth code
   uint8_t sync_threshold;  // 0 = default
-  bool follow;             // follow the hops (10ch)
+  bool follow;             // follow the hops (10ch, FASSTest)
+  bool fasstest;           // FASSTest: k = its channel 0..75 (FASSTEST_CHANNELS)
   bool (*stop)();          // true: end the run now (the host asked), or NULL
 } fasst_rx_cfg_t;
 

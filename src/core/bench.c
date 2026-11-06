@@ -1596,15 +1596,18 @@ static void _cmd_fasstrx(char* args)
   cfg.rx_bw = _number_or(&args, 100);
   cfg.sync_threshold = _number_or(&args, 0);
   cfg.follow = _number_or(&args, 1);
+  cfg.fasstest = _number_or(&args, 0);
   cfg.stop = _host_stop;
-  if (cfg.secs > 3600 || cfg.k >= FASST_HOPS || cfg.bytes == 0 ||
+  if (cfg.secs > 3600 || cfg.k >= (cfg.fasstest ? FASSTEST_CHANNELS : FASST_HOPS) || cfg.bytes == 0 ||
       cfg.bytes > FASST_RX_BYTES_MAX || cfg.rx_bw < 64 || cfg.rx_bw > 103 || cfg.sync_threshold > 0x7F) {
-    _print("@err usage: fasstrx [secs] [k] [bytes] [rx_bw] [syncthr] [follow]\r\n");
+    _print("@err usage: fasstrx [secs] [k] [bytes] [rx_bw] [syncthr] [follow] [fasstest]\r\n");
     return;
   }
   _job_stop();
-  _printf("@ok fasstrx secs=%lu k=%u bytes=%u rx_bw=%u syncthr=0x%02x follow=%u sync=%08lx\r\n",
-          cfg.secs, cfg.k, cfg.bytes, cfg.rx_bw, cfg.sync_threshold, cfg.follow, fasst_rx_sync_word());
+  _printf("@ok fasstrx secs=%lu k=%u bytes=%u rx_bw=%u syncthr=0x%02x follow=%u fasstest=%u "
+          "sync=%08lx\r\n",
+          cfg.secs, cfg.k, cfg.bytes, cfg.rx_bw, cfg.sync_threshold, cfg.follow, cfg.fasstest,
+          fasst_rx_sync_word());
   fasst_rx_run(&cfg, _printf);
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }

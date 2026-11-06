@@ -84,6 +84,23 @@ uint16_t fasst_rx_sync_left();  // sync bits 6..15, bit 0 first
 // included)
 #define FASST_RX_LEN(n) ((FASST_RX_SKIP_CHIPS + 11 * (n) + 7) / 8)
 
+// FASSTest (doc/futaba.md "Hop sequence", "T14SG on the air"): same PHY,
+// sync and Barker chips, one packet per 15 ms hop on a 1.024 MHz grid,
+// channel c = 0..75. Bytes 0..1 go out in the clear: packet type (byte 0
+// bits 0..4, 0x10 = the receiver's reply) and a 7-bit hop code (one of 46
+// codewords: set A rows 0..22 on channels 2, 5 ... 68, set B rows 0..22 on
+// 2, 4 ... 46; each row visits 22 of its 23 channels)
+#define FASSTEST_FRAME_US 15000
+#define FASSTEST_CHANNELS 76
+#define FASSTEST_HOPS 22
+#define FASSTEST_PACKET_LEN 20  // 18 bytes + CRC (the 14CH mode)
+#define FASSTEST_TYPE_REPLY 0x10
+uint32_t fasstest_freq_khz(uint8_t c);
+// The hop row from a packet's bytes 0..1: false for an unknown hop code
+bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row);
+// The channel after c in the row; false if c isn't in it
+bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next);
+
 // n bits from chips (MSB first), 11 chips each from chip `first`: bit i to
 // out[i / 8] bit i % 8 (LSB first, as on air), corr[i] = |correlation| with
 // the Barker code, 0..11 (11: all chips right, 1: noise)

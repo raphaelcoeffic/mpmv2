@@ -127,5 +127,20 @@ int main()
     ok &= (out[i / 8] >> (i % 8) & 1) == b && corr[i] == 9;
   }
   CHECK(ok);
+
+  // FASSTest: the T14SG's hop code (bytes 40 cb, its reply 50 0b) = set A
+  // row 21; the slot order heard on the even channels (2026-11-06 scan)
+  uint8_t set, row, next, tx[2] = {0x40, 0xCB}, reply[2] = {0x50, 0x0B}, bad[2] = {0x00, 0xC0};
+  CHECK(fasstest_hop_code(tx, &set, &row) && set == 0 && row == 21);
+  CHECK(fasstest_hop_code(reply, &set, &row) && set == 0 && row == 21);
+  CHECK(!fasstest_hop_code(bad, &set, &row));
+  static const uint8_t order[FASSTEST_HOPS] = {68, 11, 2,  26, 8,  56, 20, 47, 44, 29, 23,
+                                               62, 50, 59, 35, 53, 5,  41, 14, 17, 32, 38};
+  ok = 1;
+  for (int i = 0; i < FASSTEST_HOPS; i++)
+    ok &= fasstest_next_channel(0, 21, order[i], &next) && next == order[(i + 1) % FASSTEST_HOPS];
+  CHECK(ok);
+  CHECK(!fasstest_next_channel(0, 21, 65, &next));  // the row's unused channel
+  CHECK(fasstest_freq_khz(2) == fasst_freq_khz(0));
   return test_done();
 }
