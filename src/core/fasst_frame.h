@@ -91,18 +91,20 @@ uint16_t fasst_rx_sync_left(uint8_t n);  // the sync bits left, bit 0 first
 #define FASST_RX_LEN(n, b) ((FASST_RX_SKIP_CHIPS(n) + (n) * (b) + 7) / 8)
 
 // FASSTest (doc/futaba.md "Hop sequence", "T14SG on the air"): same PHY
-// and sync, Barker-11 chips (14CH) or Barker-7 (12CH, FASST_BARKER_7; its
-// hop timing not seen yet), one packet per 15 ms hop (14CH) on a 1.024 MHz grid,
+// and sync, Barker-11 chips (14CH) or Barker-7 (12CH, FASST_BARKER_7), one
+// packet per 15 ms (14CH) or 6.3 ms (12CH) hop on a 1.024 MHz grid,
 // channel c = 0..75. Bytes 0..1 go out in the clear: packet type (byte 0
-// bits 0..4, 0x10 = the receiver's reply) and a 7-bit hop code (one of 46
-// codewords: set A rows 0..22 on channels 2, 5 ... 68, set B rows 0..22 on
-// 2, 4 ... 46; each row visits 22 of its 23 channels)
+// bits 0..4: 0 / 3 data in 14CH / 12CH, 0x10 / 0x13 the receiver's reply)
+// and a 7-bit hop code (one of 46 codewords: set A rows 0..22 on channels
+// 2, 5 ... 68, set B rows 0..22 on 2, 4 ... 46; each row visits 22 of its
+// 23 channels)
 #define FASSTEST_FRAME_US 15000
+#define FASSTEST_FRAME_US_12CH 6300  // 22 hops in 138.6 ms (T14SG)
 #define FASSTEST_CHANNELS 76
 #define FASSTEST_HOPS 22
-#define FASSTEST_PACKET_LEN 20  // 18 bytes + CRC (the 14CH mode)
-#define FASSTEST_PACKET_LEN_12CH 12  // 10 bytes + CRC, 7 chips per bit
-#define FASSTEST_TYPE_REPLY 0x10
+#define FASSTEST_PACKET_LEN 20       // 18 bytes + CRC (14CH)
+#define FASSTEST_PACKET_LEN_12CH 12  // 10 bytes + CRC (12CH, 7 chips per bit)
+#define FASSTEST_TYPE_REPLY 0x10     // with bits 0..1 masked: 0x10, 0x13
 uint32_t fasstest_freq_khz(uint8_t c);
 // The hop row from a packet's bytes 0..1: false for an unknown hop code
 bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row);

@@ -162,7 +162,9 @@ static void _fasstest_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print, uin
   bool locked = false, hop_pending = false;
   uint32_t t_next = 0, misses = 0, rx_us = BIT_US(cfg, _rx_bits(cfg));
   uint32_t packets = 0, clean = 0, replies = 0, missed = 0, locks = 0, restarts = 0;
-  uint16_t plen = cfg->chips == FASST_BARKER_7 ? FASSTEST_PACKET_LEN_12CH : FASSTEST_PACKET_LEN;
+  bool ch12 = cfg->chips == FASST_BARKER_7;
+  uint16_t plen = ch12 ? FASSTEST_PACKET_LEN_12CH : FASSTEST_PACKET_LEN;
+  uint32_t frame_us = ch12 ? FASSTEST_FRAME_US_12CH : FASSTEST_FRAME_US;
   uint32_t t_end = micros() + cfg->secs * 1000000;
   while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
     if (radio_receive(&_pkt)) {
@@ -170,14 +172,14 @@ static void _fasstest_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print, uin
       int32_t shift = _despread(cfg);
       bool good = shift >= 0 && cfg->bytes >= plen && _fasstest_clean(cfg, plen);
       clean += good;
-      if (good && (_bytes[0] & 0x1F) == FASSTEST_TYPE_REPLY) {
+      if (good && (_bytes[0] & 0x1C) == FASSTEST_TYPE_REPLY) {  // 0x10, 0x13 (12CH)
         replies++;
       } else if (good && cfg->follow && fasstest_hop_code(_bytes, &set, &row) &&
                  fasstest_next_channel(set, row, c, &next)) {
         locks += !locked;
         locked = true;
         misses = 0;
-        t_next = _pkt.timestamp_us + BIT_US(cfg, shift) + FASSTEST_FRAME_US;
+        t_next = _pkt.timestamp_us + BIT_US(cfg, shift) + frame_us;
         hop_pending = true;
       }
       _print_rx(print, cfg, c, shift);
@@ -198,7 +200,7 @@ static void _fasstest_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print, uin
         radio_rx_start(len);
       } else {
         fasstest_next_channel(set, row, c, &next);
-        t_next += FASSTEST_FRAME_US;
+        t_next += frame_us;
         hop_pending = true;
       }
     } else if (!radio_rx_active()) {
