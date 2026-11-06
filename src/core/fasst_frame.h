@@ -71,21 +71,28 @@ uint32_t fasst_sync_word(const uint8_t* chips);
 #define fasst_chips(chips) ((chips) + 4)
 #define FASST_CHIPS_TX_LEN (FASST_CHIPS_LEN - 4)
 
-// Reception: the RF core's RX sync word is the first 32 chips of sync bits
-// 3..5 (0 1 1). Bits 1..3 (0 0 0) also matched at the very start of the
-// TM-10's packets, the demodulator then settled wrong for the whole packet.
-// After the sync word: FASST_RX_SKIP_CHIPS chips (the rest of bit 5), the
-// FASST_RX_SYNC_LEFT sync bits 6..15, then the packet
-uint32_t fasst_rx_sync_word();
-#define FASST_RX_SKIP_CHIPS 1
-#define FASST_RX_SYNC_LEFT 10
-uint16_t fasst_rx_sync_left();  // sync bits 6..15, bit 0 first
-// RX length in bytes for n bits after the sync word (sync bits 6..15
+// Reception, n chips per bit (FASST_BARKER_11, or FASST_BARKER_7 for
+// FASSTest 12CH: Barker-7 1110010, the R7206SB's 7-chip mode): the RF core's
+// RX sync word is the first 32 chips from sync bit 3 (11 chips: bits 3..5 =
+// 0 1 1; 7: bits 3..7). Bits 1..3 (0 0 0) also matched at the very start of
+// the TM-10's packets, the demodulator then settled wrong for the whole
+// packet. After the sync word: FASST_RX_SKIP_CHIPS(n) chips (the rest of
+// its last bit), the FASST_RX_SYNC_LEFT(n) sync bits left (11 chips: 6..15),
+// then the packet
+#define FASST_BARKER_11 11
+#define FASST_BARKER_7 7
+#define FASST_RX_SYNC_BITS(n) ((32 + (n) - 1) / (n))
+#define FASST_RX_SKIP_CHIPS(n) (FASST_RX_SYNC_BITS(n) * (n) - 32)
+#define FASST_RX_SYNC_LEFT(n) (13 - FASST_RX_SYNC_BITS(n))
+uint32_t fasst_rx_sync_word(uint8_t n);
+uint16_t fasst_rx_sync_left(uint8_t n);  // the sync bits left, bit 0 first
+// RX length in bytes for b bits after the sync word (the sync bits left
 // included)
-#define FASST_RX_LEN(n) ((FASST_RX_SKIP_CHIPS + 11 * (n) + 7) / 8)
+#define FASST_RX_LEN(n, b) ((FASST_RX_SKIP_CHIPS(n) + (n) * (b) + 7) / 8)
 
-// FASSTest (doc/futaba.md "Hop sequence", "T14SG on the air"): same PHY,
-// sync and Barker chips, one packet per 15 ms hop on a 1.024 MHz grid,
+// FASSTest (doc/futaba.md "Hop sequence", "T14SG on the air"): same PHY
+// and sync, Barker-11 chips (14CH) or Barker-7 (12CH, FASST_BARKER_7; its
+// hop timing not seen yet), one packet per 15 ms hop (14CH) on a 1.024 MHz grid,
 // channel c = 0..75. Bytes 0..1 go out in the clear: packet type (byte 0
 // bits 0..4, 0x10 = the receiver's reply) and a 7-bit hop code (one of 46
 // codewords: set A rows 0..22 on channels 2, 5 ... 68, set B rows 0..22 on
@@ -94,6 +101,7 @@ uint16_t fasst_rx_sync_left();  // sync bits 6..15, bit 0 first
 #define FASSTEST_CHANNELS 76
 #define FASSTEST_HOPS 22
 #define FASSTEST_PACKET_LEN 20  // 18 bytes + CRC (the 14CH mode)
+#define FASSTEST_PACKET_LEN_12CH 12  // 10 bytes + CRC, 7 chips per bit
 #define FASSTEST_TYPE_REPLY 0x10
 uint32_t fasstest_freq_khz(uint8_t c);
 // The hop row from a packet's bytes 0..1: false for an unknown hop code
@@ -101,7 +109,9 @@ bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row);
 // The channel after c in the row; false if c isn't in it
 bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next);
 
-// n bits from chips (MSB first), 11 chips each from chip `first`: bit i to
-// out[i / 8] bit i % 8 (LSB first, as on air), corr[i] = |correlation| with
-// the Barker code, 0..11 (11: all chips right, 1: noise)
-void fasst_despread(const uint8_t* chips, uint32_t first, uint32_t n, uint8_t* out, uint8_t* corr);
+// b bits from chips (MSB first), n chips each (FASST_BARKER_11 / _7) from
+// chip `first`: bit i to out[i / 8] bit i % 8 (LSB first, as on air),
+// corr[i] = |correlation| with the Barker code, 0..n (n: all chips right,
+// n - 2: one chip off, 1: noise)
+void fasst_despread(const uint8_t* chips, uint8_t n, uint32_t first, uint32_t b, uint8_t* out,
+                    uint8_t* corr);

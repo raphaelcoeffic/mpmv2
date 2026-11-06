@@ -7,6 +7,7 @@
 #define SYNC 0x2BB1  // bit 0 first: B1 2B, LSB first
 #define BITS (PREAMBLE_BITS + 16 + 8 * FASST_PACKET_LEN)
 #define BARKER 0x712  // 11100010010 = bit 0, first chip in bit 10
+#define BARKER_7 0x72  // 1110010, FASSTest 12CH
 
 // ID, plain (the TM-10's: on air 12 a8 d3 0d)
 static uint8_t _id[4] = {FASST_ID_DEFAULT >> 24, FASST_ID_DEFAULT >> 16 & 0xFF,
@@ -192,26 +193,32 @@ uint32_t fasst_sync_word(const uint8_t* chips)
   return (uint32_t)chips[0] << 24 | (uint32_t)chips[1] << 16 | (uint32_t)chips[2] << 8 | chips[3];
 }
 
-uint32_t fasst_rx_sync_word()
+// Barker code of n chips (bit 0), first chip in bit n - 1
+static uint32_t _barker(uint8_t n) { return n == FASST_BARKER_7 ? BARKER_7 : BARKER; }
+
+uint32_t fasst_rx_sync_word(uint8_t n)
 {
-  // 33 chips of sync bits 3..5, the last one dropped
+  // The chips of sync bits 3.., the ones past 32 dropped
+  uint32_t code = _barker(n), mask = (1 << n) - 1;
   uint64_t w = 0;
-  for (int i = 3; i < 6; i++) w = w << 11 | (SYNC >> i & 1 ? ~BARKER & 0x7FF : BARKER);
-  return (uint32_t)(w >> 1);
+  for (int i = 3; i < 3 + FASST_RX_SYNC_BITS(n); i++) w = w << n | (SYNC >> i & 1 ? ~code & mask : code);
+  return (uint32_t)(w >> FASST_RX_SKIP_CHIPS(n));
 }
 
-uint16_t fasst_rx_sync_left() { return SYNC >> (16 - FASST_RX_SYNC_LEFT); }
+uint16_t fasst_rx_sync_left(uint8_t n) { return SYNC >> (16 - FASST_RX_SYNC_LEFT(n)); }
 
-void fasst_despread(const uint8_t* chips, uint32_t first, uint32_t n, uint8_t* out, uint8_t* corr)
+void fasst_despread(const uint8_t* chips, uint8_t n, uint32_t first, uint32_t b, uint8_t* out,
+                    uint8_t* corr)
 {
-  memset(out, 0, (n + 7) / 8);
-  for (uint32_t i = 0, c = first; i < n; i++, c += 11) {
-    // 11 chips from chip c: within the 3 bytes from c / 8
+  uint32_t code = _barker(n), mask = (1 << n) - 1;
+  memset(out, 0, (b + 7) / 8);
+  for (uint32_t i = 0, c = first; i < b; i++, c += n) {
+    // n chips from chip c: within the 3 bytes from c / 8
     const uint8_t* p = chips + c / 8;
     uint32_t w = (uint32_t)p[0] << 16 | (uint32_t)p[1] << 8 | p[2];
-    uint32_t x = (w >> (13 - c % 8) & 0x7FF) ^ BARKER;
+    uint32_t x = (w >> (24 - n - c % 8) & mask) ^ code;
     int d = __builtin_popcount(x);  // chips off the Barker code (bit 0)
-    if (d > 5) out[i / 8] |= 1 << (i % 8);
-    corr[i] = d > 5 ? 2 * d - 11 : 11 - 2 * d;
+    if (2 * d > n) out[i / 8] |= 1 << (i % 8);
+    corr[i] = 2 * d > n ? 2 * d - n : n - 2 * d;
   }
 }

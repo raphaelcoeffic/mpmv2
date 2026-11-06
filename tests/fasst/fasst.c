@@ -111,20 +111,51 @@ int main()
   // sync and the packet, despread with one chip flipped per bit
   uint32_t c0 = (64 + 3) * 11, sw = 0;
   for (int i = 0; i < 32; i++) sw = sw << 1 | (chips[(c0 + i) / 8] >> (7 - (c0 + i) % 8) & 1);
-  CHECK(fasst_rx_sync_word() == sw);
-  uint8_t rx[FASST_CHIPS_LEN + 2] = {0}, out[32], corr[FASST_RX_SYNC_LEFT + 176];
+  CHECK(fasst_rx_sync_word(FASST_BARKER_11) == sw);
+  CHECK(FASST_RX_SKIP_CHIPS(11) == 1 && FASST_RX_SYNC_LEFT(11) == 10);
+  uint8_t rx[FASST_CHIPS_LEN + 2] = {0}, out[32], corr[FASST_RX_SYNC_LEFT(11) + 176];
   uint32_t n_rx = FASST_CHIPS_LEN * 8 - c0 - 32;
   for (uint32_t i = 0; i < n_rx; i++) {
     uint32_t c = c0 + 32 + i;
-    uint8_t v = (chips[c / 8] >> (7 - c % 8) & 1) ^ ((i + 11 - FASST_RX_SKIP_CHIPS) % 11 == 5);
+    uint8_t v = (chips[c / 8] >> (7 - c % 8) & 1) ^ ((i + 11 - FASST_RX_SKIP_CHIPS(11)) % 11 == 5);
     if (v) rx[i / 8] |= 0x80 >> (i % 8);
   }
-  fasst_despread(rx, FASST_RX_SKIP_CHIPS, FASST_RX_SYNC_LEFT + 176, out, corr);
+  fasst_despread(rx, FASST_BARKER_11, FASST_RX_SKIP_CHIPS(11), FASST_RX_SYNC_LEFT(11) + 176, out, corr);
   ok = 1;
-  for (int i = 0; i < FASST_RX_SYNC_LEFT + 176; i++) {
-    int b = i < FASST_RX_SYNC_LEFT ? fasst_rx_sync_left() >> i & 1
-                                   : p[(i - FASST_RX_SYNC_LEFT) / 8] >> ((i - FASST_RX_SYNC_LEFT) % 8) & 1;
+  for (int i = 0; i < FASST_RX_SYNC_LEFT(11) + 176; i++) {
+    int b = i < FASST_RX_SYNC_LEFT(11) ? fasst_rx_sync_left(11) >> i & 1
+                                       : p[(i - FASST_RX_SYNC_LEFT(11)) / 8] >> ((i - FASST_RX_SYNC_LEFT(11)) % 8) & 1;
     ok &= (out[i / 8] >> (i % 8) & 1) == b && corr[i] == 9;
+  }
+  CHECK(ok);
+
+  // 7 chips (FASSTest 12CH): sync 0x2BB1 and a 12-byte packet spread with
+  // Barker-7 1110010 (0 = the code, 1 = inverted); the RX sync word = the
+  // 32 chips from sync bit 3, then the rest, one chip flipped per bit
+  static const uint8_t p12[12] = {0x40, 0xCB, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x55, 0xAA};
+  uint8_t c7[(16 + 96) * 7 / 8 + 3] = {0};
+  uint32_t nc = 0;
+  for (int i = 0; i < 16 + 96; i++) {
+    int d = i < 16 ? 0x2BB1 >> i & 1 : p12[(i - 16) / 8] >> ((i - 16) % 8) & 1;
+    uint32_t code = d ? ~0x72u : 0x72u;
+    for (int c = 6; c >= 0; c--, nc++)
+      if (code >> c & 1) c7[nc / 8] |= 0x80 >> (nc % 8);
+  }
+  sw = 0;
+  for (int i = 0; i < 32; i++) sw = sw << 1 | (c7[(21 + i) / 8] >> (7 - (21 + i) % 8) & 1);
+  CHECK(fasst_rx_sync_word(FASST_BARKER_7) == sw);
+  CHECK(FASST_RX_SKIP_CHIPS(7) == 3 && FASST_RX_SYNC_LEFT(7) == 8);
+  uint8_t rx7[sizeof(c7)] = {0}, out7[16], corr7[8 + 96];
+  for (uint32_t i = 0; i < nc - 21 - 32; i++) {
+    uint32_t c = 21 + 32 + i;
+    uint8_t v = (c7[c / 8] >> (7 - c % 8) & 1) ^ ((i + 7 - FASST_RX_SKIP_CHIPS(7)) % 7 == 2);
+    if (v) rx7[i / 8] |= 0x80 >> (i % 8);
+  }
+  fasst_despread(rx7, FASST_BARKER_7, FASST_RX_SKIP_CHIPS(7), 8 + 96, out7, corr7);
+  ok = 1;
+  for (int i = 0; i < 8 + 96; i++) {
+    int b = i < 8 ? fasst_rx_sync_left(7) >> i & 1 : p12[(i - 8) / 8] >> ((i - 8) % 8) & 1;
+    ok &= (out7[i / 8] >> (i % 8) & 1) == b && corr7[i] == 5;
   }
   CHECK(ok);
 

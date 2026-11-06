@@ -40,8 +40,9 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print);
 // the RX takes the whole preamble too
 #define FASST_RX_EARLY_BITS 96
 // FASST_RX_LEN() within RADIO_MAX_PKT_LEN, 2 bytes spare for the despreader
-#define FASST_RX_BITS_MAX ((8 * (RADIO_MAX_PKT_LEN - 2) - FASST_RX_SKIP_CHIPS) / 11)
-#define FASST_RX_BYTES_MAX ((FASST_RX_BITS_MAX - FASST_RX_SYNC_LEFT - FASST_RX_EARLY_BITS) / 8)
+// (the 11-chip limits, the 7-chip mode taking the same)
+#define FASST_RX_BITS_MAX ((8 * (RADIO_MAX_PKT_LEN - 2) - FASST_RX_SKIP_CHIPS(11)) / 11)
+#define FASST_RX_BYTES_MAX ((FASST_RX_BITS_MAX - FASST_RX_SYNC_LEFT(11) - FASST_RX_EARLY_BITS) / 8)
 typedef struct {
   uint32_t secs;           // 0: until stopped
   uint8_t k;               // hop index 0..35
@@ -50,6 +51,7 @@ typedef struct {
   uint8_t sync_threshold;  // 0 = default
   bool follow;             // follow the hops (10ch, FASSTest)
   bool fasstest;           // FASSTest: k = its channel 0..75 (FASSTEST_CHANNELS)
+  uint8_t chips;           // chips per bit: FASST_BARKER_11, or _7 (FASSTest 12CH)
   bool (*stop)();          // true: end the run now (the host asked), or NULL
 } fasst_rx_cfg_t;
 
