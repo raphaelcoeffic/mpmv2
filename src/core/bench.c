@@ -1571,7 +1571,7 @@ static void _cmd_fasst(char* args)
   cfg.id = _number_or(&args, FASST_ID_DEFAULT);
   if (cfg.secs == 0 || cfg.secs > 600 || cfg.deviation > 511750 || cfg.chip_rate < 1000000 ||
       cfg.chip_rate > 2000000 || (cfg.fs_every && cfg.fs_every < 6) || cfg.step == 0 ||
-      cfg.step > 36) {
+      (cfg.step > 36 && (cfg.step <= FASST_FRANCE_STEP || cfg.step > FASST_FRANCE_STEP + FASST_FRANCE_HOPS))) {
     _print("@err usage: fasst [secs] [invert] [chip_rate] [dev_hz] [fs_every] [sweep] [step] [id]\r\n");
     return;
   }

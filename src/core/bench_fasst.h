@@ -15,7 +15,7 @@ typedef struct {
   bool invert;         // chip polarity: Barker = the lower frequency
   uint32_t fs_every;   // frames between F/S cycles (mode bit 5), 0 = none
   uint16_t sweep;      // ch1 sweep, frames per step of 16, 0 = fixed
-  uint8_t step;        // hop step (1..36)
+  uint8_t step;        // hop step (1..36, France 41..62: from hop 1)
   uint32_t id;         // plain ID, bytes 0..3 (fasst_set_id())
 } fasst_cfg_t;
 

@@ -28,7 +28,7 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
     fs[i] = 1600 - 100 * i;
   }
   uint8_t pkt[FASST_PACKET_LEN];
-  uint8_t k = FASST_HOP_FIRST;
+  uint8_t k = cfg->step > FASST_FRANCE_STEP ? 1 : FASST_HOP_FIRST;
   uint32_t frames = cfg->secs * 1000000 / FASST_FRAME_US;
   uint32_t late = 0, errors = 0, fs_cycles = 0;
   int sweep_dir = 16;
