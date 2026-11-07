@@ -63,55 +63,6 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
         errors, fs_cycles, radio_last_status());
 }
 
-void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
-{
-  radio_phy_t phy;
-  fasst_phy(&phy, cfg->tx_power);
-  if (radio_init(&phy) != RADIO_OK) {
-    print("@err fasstest radio init status=0x%04x\r\n", radio_last_status());
-    return;
-  }
-  uint8_t set = cfg->row >= 23, row = cfg->row % 23, code = fasstest_code(set, row);
-  uint16_t ch[FASSTEST_TX_CHANNELS];
-  for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) ch[i] = 352 + 84 * i;
-  uint8_t pkt[FASSTEST_PACKET_LEN];
-  uint32_t frames = cfg->secs * 1000000 / FASSTEST_FRAME_US;
-  uint32_t link_frames = cfg->link_secs * 1000000 / FASSTEST_FRAME_US;
-  uint32_t late = 0, errors = 0, links = 0;
-  int sweep_dir = 16;
-  uint32_t t = micros() + 2000;
-  // Link: one packet per hop, the scan list's channels in turn
-  for (uint32_t n = 0; n < link_frames; n++, t += FASSTEST_FRAME_US) {
-    uint8_t lc = FASSTEST_LINK_CHANNEL(n % FASSTEST_LINK_CHANNELS);
-    if (radio_set_frequency_start(fasstest_freq_khz(lc)) != RADIO_OK) errors++;
-    fasstest_link_packet(pkt, cfg->id, code, lc, FASSTEST_BFS_DEFAULT);
-    fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
-    radio_set_sync_word(fasst_sync_word(_chips), 0);
-    if (!micros_before(t - 200)) late++;
-    if (radio_tx_start_at(fasst_chips(_chips), FASSTEST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
-    if (radio_tx_wait() != RADIO_OK) errors++;
-    links++;
-  }
-  for (uint32_t n = 0; n < frames; n++) {
-    uint8_t c = fasstest_channel(set, row, n % FASSTEST_HOPS);
-    if (radio_set_frequency_start(fasstest_freq_khz(c)) != RADIO_OK) errors++;
-    if (cfg->sweep && n % cfg->sweep == 0) {
-      if (ch[0] + sweep_dir > 1696 || ch[0] + sweep_dir < 352) sweep_dir = -sweep_dir;
-      ch[0] += sweep_dir;
-    }
-    fasstest_packet(pkt, cfg->id, code, c, ch, n & 1);
-    fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
-    radio_set_sync_word(fasst_sync_word(_chips), 0);
-    if (!micros_before(t - 200)) late++;
-    if (radio_tx_start_at(fasst_chips(_chips), FASSTEST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
-    t += FASSTEST_FRAME_US;
-  }
-  if (radio_tx_wait() != RADIO_OK) errors++;
-  radio_off();
-  print("@ok fasstest links=%lu frames=%lu late=%lu errors=%lu status=0x%04x\r\n", links, frames,
-        late, errors, radio_last_status());
-}
-
 // FASST RX: parked on hop k or following the hops, every packet despread
 // (fasst_frame.h)
 static radio_packet_t _pkt;
@@ -191,6 +142,86 @@ static void _print_rx(fasst_print_t print, const fasst_rx_cfg_t* cfg, uint8_t k,
   print(" q=");
   _print_hex_line(print, _q, cfg->bytes, 1);
   print("\r\n");
+}
+
+void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
+{
+  radio_phy_t phy;
+  fasst_phy(&phy, cfg->tx_power);
+  if (radio_init(&phy) != RADIO_OK) {
+    print("@err fasstest radio init status=0x%04x\r\n", radio_last_status());
+    return;
+  }
+  uint8_t set = cfg->row >= 23, row = cfg->row % 23, code = fasstest_code(set, row);
+  uint16_t ch[FASSTEST_TX_CHANNELS];
+  for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) ch[i] = 352 + 84 * i;
+  uint8_t pkt[FASSTEST_PACKET_LEN];
+  uint32_t frames = cfg->secs * 1000000 / FASSTEST_FRAME_US;
+  uint32_t link_frames = cfg->link_secs * 1000000 / FASSTEST_FRAME_US;
+  uint32_t late = 0, errors = 0, links = 0;
+  int sweep_dir = 16;
+  uint32_t t = micros() + 2000;
+  // Link, as the T14SG: every FASSTEST_LINK_EVERY hops, the scan list's
+  // channels FASSTEST_LINK_GAP hops apart, the hop after each listened to
+  // for the receiver's reply (type 0x18 with our ID, ~14.9 ms after); a
+  // reply ends the link, the data 2 hops after the link packet
+  fasst_rx_cfg_t rx = {.bytes = FASSTEST_PACKET_LEN, .chips = FASST_BARKER_11};
+  uint16_t rx_len = FASST_RX_LEN(rx.chips, _rx_bits(&rx));
+  uint32_t replies = 0, heard = 0;
+  for (uint32_t n = 0; n < link_frames && !replies; n++, t += FASSTEST_FRAME_US) {
+    uint32_t i = n % FASSTEST_LINK_EVERY;
+    if (i % FASSTEST_LINK_GAP || i / FASSTEST_LINK_GAP >= FASSTEST_LINK_CHANNELS) continue;
+    uint8_t lc = FASSTEST_LINK_CHANNEL(i / FASSTEST_LINK_GAP);
+    while (micros_before(t - 2000)) {  // radio_tx_wait() gives up after 20 ms
+    }
+    if (radio_set_frequency_start(fasstest_freq_khz(lc)) != RADIO_OK) errors++;
+    fasstest_link_packet(pkt, cfg->id, code, lc, FASSTEST_BFS_DEFAULT);
+    fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
+    radio_set_sync_word(fasst_sync_word(_chips), fasst_rx_sync_word(rx.chips));
+    if (!micros_before(t - 200)) late++;
+    if (radio_tx_start_at(fasst_chips(_chips), FASSTEST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
+    if (radio_tx_wait() != RADIO_OK) errors++;
+    links++;
+    radio_rx_start(rx_len);
+    // The reply's sync about 15 ms after t, radio_receive() getting it
+    // rx_us later: 3 ms spare
+    while (micros_before(t + FASSTEST_LINK_REPLY_US + BIT_US(&rx, _rx_bits(&rx)) + 3000)) {
+      if (radio_receive(&_pkt)) {
+        int32_t shift = _despread(&rx);
+        heard++;
+        _print_rx(print, &rx, lc, shift);
+        if (shift >= 0 && (_bytes[0] & 0x1C) == 0x18 &&
+            !memcmp(_bytes + 2, cfg->id, FASSTEST_ID_LEN)) {
+          replies++;
+          print("@link rx=%02x%02x%02x%02x\r\n", _bytes[10], _bytes[11], _bytes[12], _bytes[13]);
+          break;
+        }
+      } else if (!radio_rx_active()) {
+        radio_rx_start(rx_len);
+      }
+    }
+    radio_rx_stop();
+  }
+  if (replies) t += FASSTEST_FRAME_US;
+  for (uint32_t n = 0; n < frames; n++) {
+    uint8_t c = fasstest_channel(set, row, n % FASSTEST_HOPS);
+    if (radio_set_frequency_start(fasstest_freq_khz(c)) != RADIO_OK) errors++;
+    if (cfg->sweep && n % cfg->sweep == 0) {
+      if (ch[0] + sweep_dir > 1696 || ch[0] + sweep_dir < 352) sweep_dir = -sweep_dir;
+      ch[0] += sweep_dir;
+    }
+    fasstest_packet(pkt, cfg->id, code, c, ch, n & 1);
+    fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
+    radio_set_sync_word(fasst_sync_word(_chips), 0);
+    if (!micros_before(t - 200)) late++;
+    if (radio_tx_start_at(fasst_chips(_chips), FASSTEST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
+    t += FASSTEST_FRAME_US;
+  }
+  if (radio_tx_wait() != RADIO_OK) errors++;
+  radio_off();
+  print("@ok fasstest links=%lu heard=%lu replies=%lu frames=%lu late=%lu errors=%lu "
+        "status=0x%04x\r\n",
+        links, heard, replies, frames, late, errors, radio_last_status());
 }
 
 // A FASSTest packet good enough to follow: every bit of its first len

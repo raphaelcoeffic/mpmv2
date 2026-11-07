@@ -1595,7 +1595,9 @@ static void _cmd_fasstest(char* args)
   for (int i = 0; i < 4; i++) cfg.id[i] = id >> (24 - 8 * i);
   cfg.id[4] = id45 >> 8;
   cfg.id[5] = id45;
-  if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45 || cfg.link_secs > 600) {
+  // The receiver keeps ID0..3 as 9 decimal digits (fasst_frame.h)
+  if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45 || cfg.link_secs > 600 || id == 0 ||
+      id > 999999999) {
     _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5] [link_secs]\r\n");
     return;
   }

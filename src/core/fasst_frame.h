@@ -133,11 +133,18 @@ void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, con
 // of the row the data will use, the TX ID, the battery F/S voltage (0.1
 // V), the channel (b9: the receiver checks it), 14CH, b15 = 2. The T14SG's
 // LINK (a few seconds, nothing else sent) puts one on each channel of the
-// receiver's link scan list 2, 8 ... 44 (FASSTEST_LINK_CHANNELS) every 30
-// hops, 4 hops apart; a receiver powered up within it takes the ID and
-// answers (type 0x18, ~14.9 ms later, with its serial)
+// receiver's link scan list 2, 8 ... 44 (FASSTEST_LINK_CHANNELS) every
+// FASSTEST_LINK_EVERY hops, FASSTEST_LINK_GAP hops apart, until the reply.
+// A receiver within its link window (2..5 s after power-up, R7206SB
+// firmware) takes the ID, saves it at once and answers on the same channel
+// (type 0x18 FASSTEST_LINK_REPLY_US after: f8 00, the packet's bytes 2..9,
+// its serial, b14, b15). It saves ID0..3 as 9 decimal digits: an ID0..3
+// above 999999999 comes back truncated after a power cycle
 #define FASSTEST_LINK_CHANNELS 8
 #define FASSTEST_LINK_CHANNEL(i) (2 + 6 * (i))
+#define FASSTEST_LINK_EVERY 30
+#define FASSTEST_LINK_GAP 4
+#define FASSTEST_LINK_REPLY_US 14900
 #define FASSTEST_BFS_DEFAULT 38  // 3.8 V
 void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs);
 // Its chips: fasst_spread_len() of the 20 bytes

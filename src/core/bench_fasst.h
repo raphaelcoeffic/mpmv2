@@ -24,9 +24,10 @@ typedef void (*fasst_print_t)(const char* fmt, ...);
 // FASSTest 14CH TX experiment (fasstest_packet()): one packet per 15 ms
 // hop on a row's 22 channels, with a chosen TX ID (a receiver linked to it
 // follows). Channels 352 + 84 i (S.BUS values), ch1 swept; ch1..8 and
-// ch9..16 every other packet. With link_secs: only link packets for that
-// long first (fasstest_link_packet(), one per hop on the link channels in
-// turn), then the data
+// ch9..16 every other packet. With link_secs: link packets first, up to
+// that long (fasstest_link_packet(), on the T14SG's schedule), each
+// followed by a listen for the receiver's reply; the reply (or the end)
+// starts the data
 typedef struct {
   uint32_t secs;
   uint32_t link_secs;
