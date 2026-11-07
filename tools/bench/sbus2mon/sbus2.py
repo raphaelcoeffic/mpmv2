@@ -6,6 +6,10 @@
   sbus2.py dec LOG [-v|-s]       frames and slots: a summary; -v every frame
                                  and slot; -s "time ch1..16 flags XX" on change
                                  (salrx.py -v's format, for dec14.py)
+  sbus2.py servo SECS [OUT]      servo pulses on GP2 and GP3 (the Pico stays
+                                 so until reset: picotool reboot): per second
+                                 and pin, pulses, width min/median/max (us),
+                                 the longest gap (ms); @p lines to OUT
 
 S.BUS frame: 0x0F, 16 x 11-bit channels LSB first, flags (bit 0 ch17, bit 1
 ch18, bit 2 frame lost, bit 3 failsafe), end byte (S.BUS2: 0x04 / 0x14 /
@@ -67,6 +71,37 @@ def log(out, secs, sensors=()):
     print("%s: %d groups" % (out, n))
 
 
+def servo(secs, out=None):
+    import serial
+    s = serial.Serial(find_port(), 115200, timeout=0.2)
+    s.write(b"servo\n")
+    f = open(out, "w", buffering=1) if out else None
+    end = time.monotonic() + secs
+    sec, w, last, gap = None, {}, {}, {}
+    def show():
+        print("%4d " % sec + "  ".join(
+            "GP%d %3d %4d/%4d/%4d gap %3d" % (p, len(v), min(v), sorted(v)[len(v) // 2], max(v),
+                                              gap.get(p, 0) // 1000)
+            for p, v in sorted(w.items()) if v), flush=True)
+    buf = ""
+    while time.monotonic() < end:
+        buf += s.read(65536).decode(errors="replace")
+        *lines, buf = buf.split("\n")
+        for l in lines:
+            if f: f.write(l + "\n")
+            p = l.split()
+            if p[:1] != ["@p"]: continue
+            pin, t, width = int(p[1]), int(p[2]), int(p[3])
+            if pin in last: gap[pin] = max(gap.get(pin, 0), (t - last[pin]) & 0xFFFFFFFF)
+            last[pin] = t
+            if sec is None: sec = t // 1000000
+            if t // 1000000 != sec:
+                show()
+                sec, w, gap = t // 1000000, {}, {}
+            w.setdefault(pin, []).append(width)
+    if f: f.close()
+
+
 def groups(path):
     for l in open(path):
         p = l.split()
@@ -113,5 +148,6 @@ def dec(path, mode):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["log"]: log(a[1], float(a[2]), a[3:])
+    elif a[:1] == ["servo"]: servo(float(a[1]), a[2] if len(a) > 2 else None)
     elif a[:1] == ["dec"]: dec(a[1], a[2] if len(a) > 2 else "")
     else: sys.exit(__doc__)

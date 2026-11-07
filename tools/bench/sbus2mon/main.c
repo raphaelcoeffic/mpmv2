@@ -23,6 +23,9 @@
  *   slot <n> off      stops it
  *   clear             all off
  *   slots             lists the set slots (@slot <n> <hhhh>)
+ *   servo             servo pulses instead, until reset: SBUS2_PIN and
+ *                     SERVO_PIN2 (plain inputs, pull-down), each pulse
+ *                     as @p <pin> <t_us> <width_us> (t_us: its rise)
  *
  * Core 1 runs the line, core 0 the USB serial.
  */
@@ -49,6 +52,7 @@
 #define SLOTS_PER_FRAME 8
 #define SLOT0_US 5030  // slot 0 from the frame's start: the receiver's own (3 ms frame + 2 ms)
 #define SLOT_US 660
+#define SERVO_PIN2 3
 
 typedef struct {
   uint32_t t_us;
@@ -56,7 +60,14 @@ typedef struct {
   uint8_t b[GROUP_MAX];
 } group_t;
 
-static queue_t _groups;
+typedef struct {
+  uint32_t t_us;
+  uint16_t width;
+  uint8_t pin;
+} pulse_t;
+
+static queue_t _groups, _pulses;
+static volatile bool _servo;
 static PIO _pio = pio0;
 static uint _sm_rx, _sm_tx;
 // Slot data: bit 16 = set, bits 0..15 = the data bytes (first in bits 8..15)
@@ -110,6 +121,25 @@ static void _tx_byte(uint8_t d)
   pio_sm_put(_pio, _sm_tx, d | (uint32_t)(__builtin_popcount(d) & 1) << 8);
 }
 
+// Servo mode: both pins' edges, polled
+static void _servo_poll(void)
+{
+  static const uint8_t pins[2] = {SBUS2_PIN, SERVO_PIN2};
+  static uint32_t last, rise[2];
+  uint32_t all = gpio_get_all();
+  uint32_t now = time_us_32();
+  for (int i = 0; i < 2; i++) {
+    uint32_t m = 1u << pins[i];
+    if ((all & m) && !(last & m)) {
+      rise[i] = now;
+    } else if (!(all & m) && (last & m)) {
+      pulse_t p = {rise[i], (uint16_t)(now - rise[i]), pins[i]};
+      queue_try_add(&_pulses, &p);
+    }
+  }
+  last = all;
+}
+
 // Core 1: bytes from the PIO, grouped, to the queue (dropped if it's full);
 // after each S.BUS2 frame, the set slots of its group, each at its time
 static void _core1(void)
@@ -118,6 +148,10 @@ static void _core1(void)
   uint32_t t_last = 0, t_frame = 0;
   int group = -1, next = SLOTS_PER_FRAME;  // the group's next slot to look at
   for (;;) {
+    if (_servo) {
+      _servo_poll();
+      continue;
+    }
     uint32_t now = time_us_32();
     if (g.n && now - t_last > BYTE_US + GAP_US) {
       queue_try_add(&_groups, &g);
@@ -186,8 +220,20 @@ static void _command(char* line)
     for (int i = 0; i < SLOTS; i++)
       if (_slot[i] >> 16 & 1) printf("@slot %d %04lx\n", i, (unsigned long)(_slot[i] & 0xFFFF));
     puts("@ok slots");
+  } else if (!strcmp(arg, "servo")) {
+    _servo = true;
+    pio_sm_set_enabled(_pio, _sm_rx, false);
+    pio_sm_set_enabled(_pio, _sm_tx, false);
+    const uint pins[2] = {SBUS2_PIN, SERVO_PIN2};
+    for (int i = 0; i < 2; i++) {
+      gpio_init(pins[i]);
+      gpio_set_inover(pins[i], GPIO_OVERRIDE_NORMAL);
+      gpio_set_outover(pins[i], GPIO_OVERRIDE_NORMAL);
+      gpio_pull_down(pins[i]);
+    }
+    printf("@ok servo %d %d\n", SBUS2_PIN, SERVO_PIN2);
   } else {
-    puts("@err commands: slot <n> <hhhh>|off, clear, slots");
+    puts("@err commands: slot <n> <hhhh>|off, clear, slots, servo");
   }
 }
 
@@ -195,6 +241,7 @@ int main(void)
 {
   stdio_init_all();
   queue_init(&_groups, sizeof(group_t), 256);
+  queue_init(&_pulses, sizeof(pulse_t), 256);
   _line_init();
   multicore_launch_core1(_core1);
   char cmd[64];
@@ -208,6 +255,9 @@ int main(void)
       if (g.err) p += sprintf(p, " err=%u", g.err);
       puts(line);
     }
+    pulse_t pl;
+    if (queue_try_remove(&_pulses, &pl))
+      printf("@p %u %lu %u\n", pl.pin, (unsigned long)pl.t_us, pl.width);
     int c = getchar_timeout_us(0);
     if (c == '\r' || c == '\n') {
       cmd[len] = 0;
