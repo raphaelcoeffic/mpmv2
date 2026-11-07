@@ -66,7 +66,6 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
 // FASST RX: parked on hop k or following the hops, every packet despread
 // (fasst_frame.h)
 static radio_packet_t _pkt;
-static uint8_t _bits[(FASST_RX_BITS_MAX + 7) / 8 + 1], _corr[FASST_RX_BITS_MAX];
 // The packet's bytes after the sync word and their worst bit correlation
 static uint8_t _bytes[FASST_RX_BYTES_MAX], _q[FASST_RX_BYTES_MAX];
 
@@ -84,31 +83,10 @@ static uint32_t _rx_bits(const fasst_rx_cfg_t* cfg)
   return FASST_RX_SYNC_LEFT(cfg->chips) + FASST_RX_EARLY_BITS + 8 * cfg->bytes;
 }
 
-// 8 bits from bit b, LSB first
-static uint8_t _byte_at(uint32_t b) { return _bits[b / 8] >> (b % 8) | _bits[b / 8 + 1] << (8 - b % 8); }
-
-// _pkt despread into _bytes and _q: the bits from the RF core's sync word to
-// the real one (the sync bits left: next, or up to FASST_RX_EARLY_BITS later
-// when the RF core found its sync word in the preamble), -1 if not found
+// _pkt despread into _bytes and _q (fasst_rx_bytes())
 static int32_t _despread(const fasst_rx_cfg_t* cfg)
 {
-  uint8_t n = cfg->chips;
-  fasst_despread(_pkt.data, n, FASST_RX_SKIP_CHIPS(n), _rx_bits(cfg), _bits, _corr);
-  uint16_t left = fasst_rx_sync_left(n), mask = (1 << FASST_RX_SYNC_LEFT(n)) - 1;
-  uint32_t shift = 0;
-  while (shift <= FASST_RX_EARLY_BITS &&
-         ((_byte_at(shift) | (uint16_t)_byte_at(shift + 8) << 8) & mask) != left)
-    shift++;
-  if (shift > FASST_RX_EARLY_BITS) return -1;
-
-  uint32_t b0 = shift + FASST_RX_SYNC_LEFT(n);
-  for (uint32_t i = 0; i < cfg->bytes; i++) {
-    _bytes[i] = _byte_at(b0 + 8 * i);
-    _q[i] = n;
-    for (int j = 0; j < 8; j++)
-      if (_corr[b0 + 8 * i + j] < _q[i]) _q[i] = _corr[b0 + 8 * i + j];
-  }
-  return shift;
+  return fasst_rx_bytes(_pkt.data, cfg->chips, cfg->bytes, _bytes, _q);
 }
 
 // v[0..n) in hex, 2 digits each, or 1 (values 0..15)
@@ -177,7 +155,7 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
     while (micros_before(t - 2000)) {  // radio_tx_wait() gives up after 20 ms
     }
     if (radio_set_frequency_start(fasstest_freq_khz(lc)) != RADIO_OK) errors++;
-    fasstest_link_packet(pkt, cfg->id, code, lc, FASSTEST_BFS_DEFAULT);
+    fasstest_link_packet(pkt, false, cfg->id, code, lc, FASSTEST_BFS_DEFAULT);
     fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
     radio_set_sync_word(fasst_sync_word(_chips), fasst_rx_sync_word(rx.chips));
     if (!micros_before(t - 200)) late++;
@@ -192,7 +170,7 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
         int32_t shift = _despread(&rx);
         heard++;
         _print_rx(print, &rx, lc, shift);
-        if (shift >= 0 && (_bytes[0] & 0x1C) == 0x18 &&
+        if (shift >= 0 && (_bytes[0] & 0x1C) == FASSTEST_TYPE_LINK_REPLY &&
             !memcmp(_bytes + 2, cfg->id, FASSTEST_ID_LEN)) {
           replies++;
           memcpy(rx_id, _bytes + 10, sizeof(rx_id));
@@ -221,7 +199,7 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
       if (ch[0] + sweep_dir > 1696 || ch[0] + sweep_dir < 352) sweep_dir = -sweep_dir;
       ch[0] += sweep_dir;
     }
-    fasstest_packet(pkt, cfg->id, code, c, ch, n & 1, req);
+    fasstest_packet(pkt, false, cfg->id, code, c, ch, n & 1, req);
     fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
     radio_set_sync_word(fasst_sync_word(_chips), fasst_rx_sync_word(rx.chips));
     if (!micros_before(t - 200)) late++;
@@ -238,7 +216,7 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
           int32_t shift = _despread(&rx);
           uint8_t plain[18];
           got = shift >= 0 && (_bytes[0] & 0x1C) == FASSTEST_TYPE_REPLY &&
-                fasstest_reply_unpack(_bytes, plain, rx_id, cfg->id, rc);
+                fasstest_reply_unpack(_bytes, false, plain, rx_id, cfg->id, rc);
           if (got) {
             tele++;
             print("@tele %lu %u rssi=%d page=%u ", _pkt.timestamp_us, rc, _pkt.rssi,

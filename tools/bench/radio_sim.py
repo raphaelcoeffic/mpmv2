@@ -139,6 +139,25 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
             elif sid == 0xFF:
                 break
         return out
+    elif ty == 0x13 and len(d) >= 4:
+        # Futaba FASSTest (proto_fasst.c): page (12CH 0x80), the reply's RSSI at
+        # the module, then the slots' data bytes (12CH: voltage, link quality %)
+        out = {"tx_rssi": struct.unpack("b", d[1:2])[0]}
+        if d[0] & 0x80:
+            out["lq"] = d[4]
+            if not d[2] & 4:  # else the EXT voltage
+                out["rx_v10"] = d[3]
+            return out
+        page = d[0] & 3
+        if page == 0:
+            out["quality"] = d[2] >> 6
+            if not d[2] & 4:
+                out["rx_v10"] = d[3]
+        for i in range(8):
+            v = d[2 + 2 * i] << 8 | d[3 + 2 * i]
+            if v and 8 * page + i:
+                out[f"slot{8 * page + i}"] = v
+        return out
     return {}
 
 

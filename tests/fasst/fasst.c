@@ -202,26 +202,65 @@ int main()
     for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) v[i] = 352 + 84 * i;
     uint8_t pk[FASSTEST_PACKET_LEN], want[FASSTEST_PACKET_LEN], set, row;
     CHECK(fasstest_channel(0, 21, 0) == 68 && fasstest_channel(0, 21, 1) == 11);
-    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false, 0);
+    fasstest_packet(pk, false, id, fasstest_code(0, 21), 68, v, false, 0);
     hex("40cb0c9c1b7a205c46238e2cceac0344088af7c1", want);
     CHECK(!memcmp(pk, want, sizeof(pk)));
     CHECK(fasstest_hop_code(pk, &set, &row) && set == 0 && row == 21);
     // The T14SG's link packet (ft14_link.txt)
-    fasstest_link_packet(pk, id, fasstest_code(0, 21), FASSTEST_LINK_CHANNEL(0), FASSTEST_BFS_DEFAULT);
+    fasstest_link_packet(pk, false, id, fasstest_code(0, 21), FASSTEST_LINK_CHANNEL(0),
+                         FASSTEST_BFS_DEFAULT);
     hex("483b088aaffb0000260200000000000200002185", want);
     CHECK(!memcmp(pk, want, sizeof(pk)));
     // A page 0 request: plain b1 bit 5, b16 = 1
     uint8_t plain[18];
-    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false, 1);
-    CHECK(fasstest_reply_unpack(pk, plain, id, id, 68) && plain[1] == 0xEB && plain[16] == 0x01);
+    fasstest_packet(pk, false, id, fasstest_code(0, 21), 68, v, false, 1);
+    CHECK(fasstest_reply_unpack(pk, false, plain, id, id, 68) && plain[1] == 0xEB &&
+          plain[16] == 0x01);
     // An R7008SB reply (serial 08 a1 82 40) on channel 47, page 0: slot 0 =
     // 5.1 V, quality 3; slots 1..4 = the sbus2mon sensors (ft14_sens.txt)
     const uint8_t rx[4] = {0x08, 0xA1, 0x82, 0x40};
     hex("3006c892ffc0e803af42a1fa4000002f08a1292b", pk);
-    CHECK(fasstest_reply_unpack(pk, plain, rx, id, 47));
+    CHECK(fasstest_reply_unpack(pk, false, plain, rx, id, 47));
     hex("3006c0337d80e803804a0078000000000000", want);
     CHECK(!memcmp(plain, want, 18));
-    CHECK(!fasstest_reply_unpack(pk, plain, rx, id, 46));
+    CHECK(!fasstest_reply_unpack(pk, false, plain, rx, id, 46));
+    // Its serial without a link: bytes 9..12 plain 0 (slots 3..5 hold
+    // sensors: not this one); a page 1 reply (slot 8 only, ft14_sens2.txt)
+    uint8_t got[4];
+    CHECK(!fasstest_reply_serial(pk, false, id, 47, got));
+    hex("3016489d824000001408a1824000001408a1b77b", pk);
+    CHECK(fasstest_reply_serial(pk, false, id, 20, got) && !memcmp(got, rx, 4));
+
+    // F/S packet: ch3 F/S at 1365 (slot 2, mode field 0x02 | 1 << 2), ch5
+    // B.F/S (slot 4: 0x20 | 2 << 2), as the T14SG's (ft14_fs.txt)
+    fasstest_fs_packet(pk, false, id, fasstest_code(0, 21), 68, v, 2, FASSTEST_FS_FS, 1365);
+    CHECK(fasstest_reply_unpack(pk, false, plain, id, id, 68));
+    CHECK((plain[1] & 0xC0) == 0x80 && (plain[2] & 0x0F) == 0x01);
+    CHECK(((plain[5] >> 4) | (plain[6] & 0x7F) << 4) == 1365 && !(plain[6] & 0x80));
+    fasstest_fs_packet(pk, false, id, fasstest_code(0, 21), 68, v, 4, FASSTEST_FS_BFS, 1024);
+    CHECK(fasstest_reply_unpack(pk, false, plain, id, id, 68));
+    CHECK((plain[1] & 0xC0) == 0x00 && (plain[2] & 0x0F) == 0x0A);
+
+    // 12CH (ft12_sens.txt): row 11 (code 49), ch1..5 on channel 38, ch6..10
+    // on 50; the link packet's b14 bit 1
+    const uint16_t v12[FASSTEST_TX_CHANNELS_12CH] = {1032, 1018, 1678, 1024, 352,
+                                                     1032, 1678, 1024, 1696, 1024};
+    fasstest_packet(pk, true, id, 49, 38, v12, false, 0);
+    hex("23c68cca55186800221e21f5", want);
+    CHECK(!memcmp(pk, want, FASSTEST_PACKET_LEN_12CH));
+    fasstest_packet(pk, true, id, 49, 50, v12, true, 0);
+    hex("23c68c4a21f5c0a03cc8faf7", want);
+    CHECK(!memcmp(pk, want, FASSTEST_PACKET_LEN_12CH));
+    fasstest_link_packet(pk, true, id, 49, 2, 45);
+    CHECK(pk[14] == 0x02 && pk[8] == 45);
+    // A 12CH reply (channel 65: 5.0 V, 99 %): its serial from bytes 9 and
+    // 5 and the CRC, confirmed on another reply (channel 2: EXT 0 V, 100 %)
+    hex("3306c893e14000004108bf6a", pk);
+    CHECK(fasstest_reply_serial(pk, true, id, 65, got) && !memcmp(got, rx, 4));
+    CHECK(fasstest_reply_unpack(pk, true, plain, got, id, 65) && plain[3] == 0x32 &&
+          plain[4] == 99);
+    hex("3306cca1e640000002084181", pk);
+    CHECK(fasstest_reply_unpack(pk, true, plain, got, id, 2) && plain[4] == 100);
   }
   return test_done();
 }

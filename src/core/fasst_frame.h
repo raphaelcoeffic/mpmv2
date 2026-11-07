@@ -67,9 +67,11 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
 bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step);
 
 // The packet's chips (FASST_CHIPS_LEN bytes, MSB first): preamble, sync,
-// packet; fasst_spread_len() for len packet bytes ((80 + 8 len) x 11 chips)
+// packet; fasst_spread_len() for len packet bytes ((80 + 8 len) x 11
+// chips), fasst_spread_n() with n chips per bit (FASST_BARKER_11 / _7)
 void fasst_spread(uint8_t* chips, const uint8_t* p);
 void fasst_spread_len(uint8_t* chips, const uint8_t* p, uint32_t len);
+void fasst_spread_n(uint8_t* chips, uint8_t n, const uint8_t* p, uint32_t len);
 
 // The RF core's sync word: the first 32 chips. The packet: the rest
 uint32_t fasst_sync_word(const uint8_t* chips);
@@ -119,35 +121,58 @@ bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next);
 uint8_t fasstest_channel(uint8_t set, uint8_t row, uint8_t i);
 uint8_t fasstest_code(uint8_t set, uint8_t row);
 
-// FASSTest 14CH TX packet (FASSTEST_PACKET_LEN bytes as on air) on channel
-// c, as the T14SG sends it: type 0, hop code `code`, mode 0x13 (DG1 / DG2
-// off), the 8 slots ch1..8 or, with high, ch9..16 (ch: 16 values, 11 bits:
-// the S.BUS value). Plain bytes 2..17 whitened with
-// 00 00 ID0..5 c ID0..5 c ID0 ID1 (id: the TX ID, 6 bytes; the receiver
-// takes it at the link), CRC-16/KERMIT of the plain 18 bytes after them.
-// req 1..FASSTEST_PAGES: a telemetry request for page req - 1 (b1 bit 5,
-// b16 = 1 | page << 1, as the T14SG); the receiver answers in the next
-// hop's slot (its channel, sync FASSTEST_REPLY_US after this packet's), the
-// TX leaving that hop out. 0: no request
+// FASSTest TX packet (FASSTEST_PACKET_LEN bytes as on air, 14CH;
+// FASSTEST_PACKET_LEN_12CH with ch12) on channel c, as the T14SG sends it:
+// type 0 (12CH: 3), hop code `code`, mode 0x13 (DG1 / DG2 off), the 8 slots
+// ch1..8 or, with high, ch9..16 (12CH: 5 slots, ch1..5 / ch6..10; ch: the
+// 16 / 10 values, 11 bits: the S.BUS value). Plain bytes 2.. whitened with
+// 00 00 ID0..5 c ID0..5 c ID0 ID1 (12CH: its first 10 bytes; id: the TX
+// ID, 6 bytes, the receiver takes it at the link), CRC-16/KERMIT of the
+// plain bytes after them. req 1..FASSTEST_PAGES: a telemetry request (b1
+// bit 5) for page req - 1 (14CH: b16 = 1 | page << 1, as the T14SG); the
+// receiver answers in the next hop's slot (its channel, sync
+// FASSTEST_REPLY_US / _12CH after this packet's), the TX leaving that hop
+// out. 0: no request
 #define FASSTEST_ID_LEN 6
 #define FASSTEST_TX_CHANNELS 16
+#define FASSTEST_TX_CHANNELS_12CH 10
 #define FASSTEST_PAGES 4
 #define FASSTEST_REPLY_US 14565
-void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
-                     bool high, uint8_t req);
-// A telemetry reply (type 0x10, FASSTEST_PACKET_LEN bytes as on air) heard
-// on channel c: plain = the 18 bytes unwhitened with rx (the receiver's
-// serial, 4 bytes, from its link reply) in place of ID0..3; true if the
-// CRC is right. Plain b1 bits 4..5 = the page, bytes 2 + 2i, 3 + 2i =
-// S.BUS2 slot 8 page + i (its 2 data bytes; slot 0 = the receiver's
-// voltage, b2 bits 6..7 the link quality 0..3)
-bool fasstest_reply_unpack(const uint8_t* p, uint8_t* plain, const uint8_t* rx, const uint8_t* id,
-                           uint8_t c);
-// FASSTest link packet (type 8, not whitened) for channel c: the hop code
-// of the row the data will use, the TX ID, the battery F/S voltage (0.1
-// V), the channel (b9: the receiver checks it), 14CH, b15 = 2. The T14SG's
-// LINK (a few seconds, nothing else sent) puts one on each channel of the
-// receiver's link scan list 2, 8 ... 44 (FASSTEST_LINK_CHANNELS) every
+#define FASSTEST_REPLY_US_12CH 6115
+void fasstest_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                     const uint16_t* ch, bool high, uint8_t req);
+// F/S packet for channel n (0..15, 12CH 0..9): its slot and half, the other
+// slots of that half from ch; the slot carries value (mode FASSTEST_FS_HOLD:
+// the live value, output; F/S, B.F/S: the position, stored, not output).
+// Mode field: slot n % 8 (12CH n % 5) as 0x00 / 0x01 / 0x02 / 0x12 for
+// slot % 4, + 0x20 for slots 4.., + mode << 2 (T14SG: one per channel,
+// all every ~10 s)
+#define FASSTEST_FS_HOLD 0
+#define FASSTEST_FS_FS 1
+#define FASSTEST_FS_BFS 2
+void fasstest_fs_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                        const uint16_t* ch, uint8_t n, uint8_t mode, uint16_t value);
+// A telemetry reply (type 0x10, 12CH 0x13; FASSTEST_PACKET_LEN / _12CH
+// bytes as on air) heard on channel c: plain = its bytes unwhitened with rx
+// (the receiver's serial, 4 bytes) in place of ID0..3; true if the CRC is
+// right. 14CH: plain b1 bits 4..5 = the page, bytes 2 + 2i, 3 + 2i = S.BUS2
+// slot 8 page + i (its 2 data bytes; slot 0 = the receiver's voltage, b2
+// bits 6..7 the link quality 0..3). 12CH: bytes 2..3 the receiver's
+// voltage (as slot 0), byte 4 the link quality %, the rest 0
+bool fasstest_reply_unpack(const uint8_t* p, bool ch12, uint8_t* plain, const uint8_t* rx,
+                           const uint8_t* id, uint8_t c);
+// The receiver's serial from a reply (as fasstest_reply_unpack()) without
+// a link: 14CH, bytes 9..12 or 2..5 are the serial when those plain bytes
+// are 0 (empty slots), checked by the CRC; 12CH, bytes 9 and 5 (plain 0),
+// the other two solved from the CRC: confirm it on another reply. False if
+// no candidate
+bool fasstest_reply_serial(const uint8_t* p, bool ch12, const uint8_t* id, uint8_t c, uint8_t* rx);
+// FASSTest link packet (type 8, not whitened, 11 chips and 20 bytes in
+// both modes) for channel c: the hop code of the row the data will use,
+// the TX ID, the battery F/S voltage (0.1 V), the channel (b9: the
+// receiver checks it), b14 bit 1 = 12CH, b15 = 2. The T14SG's LINK (a few
+// seconds, nothing else sent) puts one on each channel of the receiver's
+// link scan list 2, 8 ... 44 (FASSTEST_LINK_CHANNELS) every
 // FASSTEST_LINK_EVERY hops, FASSTEST_LINK_GAP hops apart, until the reply.
 // A receiver within its link window (2..5 s after power-up, R7206SB
 // firmware) takes the ID, saves it at once and answers on the same channel
@@ -159,11 +184,15 @@ bool fasstest_reply_unpack(const uint8_t* p, uint8_t* plain, const uint8_t* rx, 
 #define FASSTEST_LINK_EVERY 30
 #define FASSTEST_LINK_GAP 4
 #define FASSTEST_LINK_REPLY_US 14900
+#define FASSTEST_TYPE_LINK_REPLY 0x18
 #define FASSTEST_BFS_DEFAULT 38  // 3.8 V
-void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs);
-// Its chips: fasst_spread_len() of the 20 bytes
+void fasstest_link_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                          uint8_t bfs);
+// Their chips: fasst_spread_n() of the 20 (12CH: 12) bytes
 #define FASSTEST_CHIPS_LEN 330
 #define FASSTEST_CHIPS_TX_LEN (FASSTEST_CHIPS_LEN - 4)
+#define FASSTEST_CHIPS_LEN_12CH 154
+#define FASSTEST_CHIPS_TX_LEN_12CH (FASSTEST_CHIPS_LEN_12CH - 4)
 
 // b bits from chips (MSB first), n chips each (FASST_BARKER_11 / _7) from
 // chip `first`: bit i to out[i / 8] bit i % 8 (LSB first, as on air),
@@ -171,3 +200,20 @@ void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c
 // n - 2: one chip off, 1: noise)
 void fasst_despread(const uint8_t* chips, uint8_t n, uint32_t first, uint32_t b, uint8_t* out,
                     uint8_t* corr);
+
+// A received packet (radio_rx_start(FASST_RX_PKT_LEN(n, bytes)) with
+// fasst_rx_sync_word(n)): the first `bytes` packet bytes to out, per byte
+// its worst bit correlation to q (or NULL); the bits from the RF core's
+// sync word to the real one (the sync bits left: next, or up to
+// FASST_RX_EARLY_BITS later), -1 if not found. The RF core also finds its
+// sync word at the very start of a packet (the sender's synthesizer
+// settling; the sync bits 6..15 came 68 bits later): the RX takes the
+// whole preamble too
+#define FASST_RX_EARLY_BITS 96
+#define FASST_RX_BITS(n, bytes) (FASST_RX_SYNC_LEFT(n) + FASST_RX_EARLY_BITS + 8 * (bytes))
+#define FASST_RX_PKT_LEN(n, bytes) FASST_RX_LEN(n, FASST_RX_BITS(n, bytes))
+// FASST_RX_LEN() within RADIO_MAX_PKT_LEN, 2 bytes spare for the despreader
+// (the 11-chip limits, the 7-chip mode taking the same)
+#define FASST_RX_BITS_MAX ((8 * (RADIO_MAX_PKT_LEN - 2) - FASST_RX_SKIP_CHIPS(11)) / 11)
+#define FASST_RX_BYTES_MAX ((FASST_RX_BITS_MAX - FASST_RX_SYNC_LEFT(11) - FASST_RX_EARLY_BITS) / 8)
+int32_t fasst_rx_bytes(const uint8_t* data, uint8_t n, uint16_t bytes, uint8_t* out, uint8_t* q);

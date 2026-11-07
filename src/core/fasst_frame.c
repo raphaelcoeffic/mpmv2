@@ -169,52 +169,152 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
   for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
 }
 
-// Bytes 2..17 whitened with 00 00 ID0..5 c ID0..5 c ID0 ID1, id0 = ID0..3
-static void _fasstest_whiten(uint8_t* p, const uint8_t* id0, const uint8_t* id, uint8_t c)
+// Plain bytes of a FASSTest packet before its CRC
+static uint8_t _fasstest_len(bool ch12)
+{
+  return ch12 ? FASSTEST_PACKET_LEN_12CH - 2 : FASSTEST_PACKET_LEN - 2;
+}
+
+// Bytes 2..len - 1 whitened with 00 00 ID0..5 c ID0..5 c ID0 ID1, id0 = ID0..3
+static void _fasstest_whiten(uint8_t* p, uint8_t len, const uint8_t* id0, const uint8_t* id,
+                             uint8_t c)
 {
   const uint8_t mask[18] = {0,      0,      id0[0], id0[1], id0[2], id0[3], id[4],  id[5],  c,
                             id0[0], id0[1], id0[2], id0[3], id[4],  id[5],  c,      id0[0], id0[1]};
-  for (int i = 2; i < 18; i++) p[i] ^= mask[i];
+  for (int i = 2; i < len; i++) p[i] ^= mask[i];
 }
 
-void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
-                     bool high, uint8_t req)
+static void _fasstest_crc(uint8_t* p, uint8_t len)
 {
-  // Slot i: 11 bits + flag (ch i + 1 or i + 9), the slots in 3-byte pairs
-  // from byte 2 bit 4: even slots low nibble first, odd ones low byte first
-  uint32_t f = high;
-  const uint16_t* v = ch + (high ? 8 : 0);
-  memset(p, 0, FASSTEST_PACKET_LEN);
-  p[0] = (code & 7) << 5;
-  p[1] = 0xC0 | code >> 3;  // mode 0x13 bits 0..1
-  p[2] = 0x04;              // mode 0x13 bits 2..5
-  for (int i = 0; i < 8; i += 2) {
+  uint16_t crc = _crc_kermit(p, len);
+  p[len] = crc & 0xFF;
+  p[len + 1] = crc >> 8;
+}
+
+// Data packet: the slots' values v (8, 12CH 5) with flag f, mode field m
+// (6 bits: b1 bits 6..7, b2 bits 0..3)
+static void _fasstest_data(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                           const uint16_t* v, bool f, uint8_t m, uint8_t req)
+{
+  // Slot i: 11 bits + flag (ch i + 1 or i + 9; 12CH i + 6), the slots in
+  // 3-byte pairs from byte 2 bit 4: even slots low nibble first, odd ones
+  // low byte first
+  uint8_t len = _fasstest_len(ch12), slots = ch12 ? 5 : 8;
+  memset(p, 0, len + 2);
+  p[0] = (ch12 ? 3 : 0) | (code & 7) << 5;
+  p[1] = (m & 3) << 6 | code >> 3;
+  p[2] = m >> 2 & 0x0F;
+  for (int i = 0; i < slots; i += 2) {
     uint8_t* q = p + 2 + 3 * (i / 2);
-    uint16_t a = v[i] & 0x7FF, b = v[i + 1] & 0x7FF;
+    uint16_t a = v[i] & 0x7FF;
     q[0] |= (a & 0x0F) << 4;
     q[1] = a >> 4 | f << 7;
-    q[2] = b;
-    q[3] = b >> 8 | f << 3;
+    if (i + 1 < slots) {
+      uint16_t b = v[i + 1] & 0x7FF;
+      q[2] = b;
+      q[3] = b >> 8 | f << 3;
+    }
   }
   if (req) {
     p[1] |= 0x20;
-    p[16] = 1 | (req - 1) << 1;
+    if (!ch12) p[16] = 1 | (req - 1) << 1;
   }
-  uint16_t crc = _crc_kermit(p, 18);
-  p[18] = crc & 0xFF;
-  p[19] = crc >> 8;
-  _fasstest_whiten(p, id, id, c);
+  _fasstest_crc(p, len);
+  _fasstest_whiten(p, len, id, id, c);
 }
 
-bool fasstest_reply_unpack(const uint8_t* p, uint8_t* plain, const uint8_t* rx, const uint8_t* id,
-                           uint8_t c)
+void fasstest_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                     const uint16_t* ch, bool high, uint8_t req)
 {
-  memcpy(plain, p, 18);
-  _fasstest_whiten(plain, rx, id, c);
-  return _crc_kermit(plain, 18) == (p[18] | p[19] << 8);
+  _fasstest_data(p, ch12, id, code, c, ch + (high ? (ch12 ? 5 : 8) : 0), high, 0x13, req);
 }
 
-void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs)
+void fasstest_fs_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                        const uint16_t* ch, uint8_t n, uint8_t mode, uint16_t value)
+{
+  static const uint8_t slot_code[4] = {0x00, 0x01, 0x02, 0x12};
+  uint8_t slots = ch12 ? 5 : 8, half = n / slots, s = n % slots;
+  uint16_t v[8];
+  memcpy(v, ch + half * slots, slots * sizeof(v[0]));
+  v[s] = value;
+  uint8_t m = slot_code[s % 4] | (s >= 4) << 5 | (mode & 3) << 2;
+  _fasstest_data(p, ch12, id, code, c, v, half, m, 0);
+}
+
+bool fasstest_reply_unpack(const uint8_t* p, bool ch12, uint8_t* plain, const uint8_t* rx,
+                           const uint8_t* id, uint8_t c)
+{
+  uint8_t len = _fasstest_len(ch12);
+  memcpy(plain, p, len);
+  _fasstest_whiten(plain, len, rx, id, c);
+  return _crc_kermit(plain, len) == (p[len] | p[len + 1] << 8);
+}
+
+// x (16 bits) with sum of bit i x col[i] = t over GF(2), false if none
+static bool _solve16(const uint16_t* col, uint16_t t, uint16_t* x)
+{
+  // Pivots: a combination of columns (mask) and its value, by highest bit
+  uint16_t pv[16], pm[16], pb[16];
+  int n = 0;
+  for (int i = 0; i < 16; i++) {
+    uint16_t v = col[i], m = 1 << i;
+    for (int j = 0; j < n; j++)
+      if (v & pb[j]) {
+        v ^= pv[j];
+        m ^= pm[j];
+      }
+    if (!v) continue;
+    pb[n] = 0x8000 >> __builtin_clz((uint32_t)v << 16);
+    pv[n] = v;
+    pm[n++] = m;
+  }
+  *x = 0;
+  for (int j = 0; j < n; j++)
+    if (t & pb[j]) {
+      t ^= pv[j];
+      *x ^= pm[j];
+    }
+  return t == 0;
+}
+
+bool fasstest_reply_serial(const uint8_t* p, bool ch12, const uint8_t* id, uint8_t c, uint8_t* rx)
+{
+  uint8_t plain[FASSTEST_PACKET_LEN];
+  if (!ch12) {
+    // The serial's second copy (bytes 9..12), or its first (2..5)
+    static const uint8_t at[2] = {9, 2};
+    for (int i = 0; i < 2; i++) {
+      memcpy(rx, p + at[i], 4);
+      if (fasstest_reply_unpack(p, false, plain, rx, id, c)) return true;
+    }
+    return false;
+  }
+  // Bytes 5..9 plain 0: ID3, ID4, ID5, c, ID0 on air
+  if (p[6] != id[4] || p[7] != id[5] || p[8] != c) return false;
+  rx[0] = p[9];
+  rx[3] = p[5];
+  // The CRC is linear (no init, no final XOR): the plain bytes 3..4 (rx[1],
+  // rx[2] on air) from the CRC of the rest
+  uint8_t len = _fasstest_len(true), z[FASSTEST_PACKET_LEN_12CH] = {0};
+  uint16_t col[16];
+  for (int i = 0; i < 16; i++) {
+    z[3 + i / 8] = 1 << (i % 8);
+    col[i] = _crc_kermit(z, len);
+    z[3 + i / 8] = 0;
+  }
+  rx[1] = rx[2] = 0;
+  memcpy(plain, p, len);
+  _fasstest_whiten(plain, len, rx, id, c);
+  plain[3] = plain[4] = 0;
+  uint16_t x;
+  if (!_solve16(col, _crc_kermit(plain, len) ^ (p[len] | p[len + 1] << 8), &x)) return false;
+  rx[1] = p[3] ^ (x & 0xFF);
+  rx[2] = p[4] ^ (x >> 8);
+  return true;
+}
+
+void fasstest_link_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
+                          uint8_t bfs)
 {
   memset(p, 0, FASSTEST_PACKET_LEN);
   p[0] = 0x08 | (code & 7) << 5;
@@ -222,10 +322,9 @@ void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c
   memcpy(p + 2, id, FASSTEST_ID_LEN);
   p[8] = bfs;
   p[9] = c;
+  p[14] = ch12 ? 0x02 : 0;
   p[15] = 0x02;  // the R7206SB: low-voltage time
-  uint16_t crc = _crc_kermit(p, 18);
-  p[18] = crc & 0xFF;
-  p[19] = crc >> 8;
+  _fasstest_crc(p, FASSTEST_PACKET_LEN - 2);
 }
 
 bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
@@ -245,9 +344,17 @@ void fasst_spread(uint8_t* chips, const uint8_t* p) { fasst_spread_len(chips, p,
 
 void fasst_spread_len(uint8_t* chips, const uint8_t* p, uint32_t len)
 {
-  uint32_t bits = PREAMBLE_BITS + 16 + 8 * len;
-  memset(chips, 0, (bits * 11 + 7) / 8);
-  uint32_t n = 0;
+  fasst_spread_n(chips, FASST_BARKER_11, p, len);
+}
+
+// Barker code of n chips (bit 0), first chip in bit n - 1
+static uint32_t _barker(uint8_t n) { return n == FASST_BARKER_7 ? BARKER_7 : BARKER; }
+
+void fasst_spread_n(uint8_t* chips, uint8_t n, const uint8_t* p, uint32_t len)
+{
+  uint32_t bits = PREAMBLE_BITS + 16 + 8 * len, barker = _barker(n), mask = (1 << n) - 1;
+  memset(chips, 0, (bits * n + 7) / 8);
+  uint32_t k = 0;
   for (uint32_t i = 0; i < bits; i++) {
     uint32_t d;
     if (i < PREAMBLE_BITS) d = ~i & 1;  // 1010...10, a 0 before the sync
@@ -256,9 +363,9 @@ void fasst_spread_len(uint8_t* chips, const uint8_t* p, uint32_t len)
       uint32_t j = i - PREAMBLE_BITS - 16;
       d = p[j / 8] >> (j % 8) & 1;
     }
-    uint32_t code = d ? ~BARKER : BARKER;
-    for (int c = 10; c >= 0; c--, n++)
-      if (code >> c & 1) chips[n / 8] |= 0x80 >> (n % 8);
+    uint32_t code = (d ? ~barker : barker) & mask;
+    for (int c = n - 1; c >= 0; c--, k++)
+      if (code >> c & 1) chips[k / 8] |= 0x80 >> (k % 8);
   }
 }
 
@@ -266,9 +373,6 @@ uint32_t fasst_sync_word(const uint8_t* chips)
 {
   return (uint32_t)chips[0] << 24 | (uint32_t)chips[1] << 16 | (uint32_t)chips[2] << 8 | chips[3];
 }
-
-// Barker code of n chips (bit 0), first chip in bit n - 1
-static uint32_t _barker(uint8_t n) { return n == FASST_BARKER_7 ? BARKER_7 : BARKER; }
 
 uint32_t fasst_rx_sync_word(uint8_t n)
 {
@@ -295,4 +399,33 @@ void fasst_despread(const uint8_t* chips, uint8_t n, uint32_t first, uint32_t b,
     if (2 * d > n) out[i / 8] |= 1 << (i % 8);
     corr[i] = 2 * d > n ? 2 * d - n : n - 2 * d;
   }
+}
+
+static uint8_t _rx_bits[(FASST_RX_BITS_MAX + 7) / 8 + 1], _rx_corr[FASST_RX_BITS_MAX];
+
+// 8 bits from bit b, LSB first
+static uint8_t _rx_byte(uint32_t b)
+{
+  return _rx_bits[b / 8] >> (b % 8) | _rx_bits[b / 8 + 1] << (8 - b % 8);
+}
+
+int32_t fasst_rx_bytes(const uint8_t* data, uint8_t n, uint16_t bytes, uint8_t* out, uint8_t* q)
+{
+  fasst_despread(data, n, FASST_RX_SKIP_CHIPS(n), FASST_RX_BITS(n, bytes), _rx_bits, _rx_corr);
+  uint16_t left = fasst_rx_sync_left(n), mask = (1 << FASST_RX_SYNC_LEFT(n)) - 1;
+  uint32_t shift = 0;
+  while (shift <= FASST_RX_EARLY_BITS &&
+         ((_rx_byte(shift) | (uint16_t)_rx_byte(shift + 8) << 8) & mask) != left)
+    shift++;
+  if (shift > FASST_RX_EARLY_BITS) return -1;
+
+  uint32_t b0 = shift + FASST_RX_SYNC_LEFT(n);
+  for (uint32_t i = 0; i < bytes; i++) {
+    out[i] = _rx_byte(b0 + 8 * i);
+    if (!q) continue;
+    q[i] = n;
+    for (int j = 0; j < 8; j++)
+      if (_rx_corr[b0 + 8 * i + j] < q[i]) q[i] = _rx_corr[b0 + 8 * i + j];
+  }
+  return shift;
 }

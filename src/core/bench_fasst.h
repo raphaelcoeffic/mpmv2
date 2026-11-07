@@ -57,15 +57,6 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print);
 // parked on k. FASSTest (CRC unchecked, the whitening needs the TX ID): a
 // TX packet with clean chips and a known hop code locks, and the RX stays
 // on its channel until just before the next hop, for the receiver's reply
-//
-// The RF core also finds its sync word at the very start of a packet (the
-// sender's synthesizer settling; the sync bits 6..15 came 68 bits later):
-// the RX takes the whole preamble too
-#define FASST_RX_EARLY_BITS 96
-// FASST_RX_LEN() within RADIO_MAX_PKT_LEN, 2 bytes spare for the despreader
-// (the 11-chip limits, the 7-chip mode taking the same)
-#define FASST_RX_BITS_MAX ((8 * (RADIO_MAX_PKT_LEN - 2) - FASST_RX_SKIP_CHIPS(11)) / 11)
-#define FASST_RX_BYTES_MAX ((FASST_RX_BITS_MAX - FASST_RX_SYNC_LEFT(11) - FASST_RX_EARLY_BITS) / 8)
 typedef struct {
   uint32_t secs;           // 0: until stopped
   uint8_t k;               // hop index 0..35

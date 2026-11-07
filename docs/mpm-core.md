@@ -14,7 +14,7 @@ is not a drop-in build of the MPM sources: protocols are ported to it.
 | `mpm_port.c` | The board port: UART0 at 100000 baud 8E2 (LaunchPad: XDS110 back channel, MPM v2: USB console) |
 | `protocols.c/h` | The protocol table |
 | `proto_test.c` | Test protocol 127 |
-| `proto_fasst.c` | Futaba FASST 10ch, protocol 110 ([below](#futaba-fasst)), framing in `core/fasst_frame.c` |
+| `proto_fasst.c` | Futaba FASST 10ch and FASSTest 18CH / 12CH, protocol 110 ([below](#futaba-fasst)), framing in `core/fasst_frame.c` |
 | `upstream/` | Protocol files of the MPM, and what they need from it ([below](#mpm-protocol-files)) |
 
 ## Behaviour
@@ -656,11 +656,14 @@ in the radio frames, and `micros()` at the callback. Sub protocols: 1 Mbps,
 
 ## Futaba FASST
 
-Protocol 110, "FASST", sub protocol 10ch: mpm-v2's own, not a MULTI-Module
-protocol (110 is not assigned upstream; the last there is MoFly, 109). The
-protocol was traced from a TM-10 module driving an R6008HS
-(`doc/futaba.md`, not in the repository). `core/fasst_frame.c` builds the
-packets, the hop sequence and the chips; `proto_fasst.c` sends them.
+Protocol 110, "FASST": mpm-v2's own, not a MULTI-Module protocol (110 is
+not assigned upstream; the last there is MoFly, 109). Sub protocols 10ch
+(FASST 10ch), MULT and 7ch (not yet: rejected), FT18 and FT12 (FASSTest
+18CH and 12CH, [below](#futaba-fasstest)). FASST was traced from a TM-10
+module driving an R6008HS, FASSTest from a T14SG and an R7008SB and the
+R7206SB's firmware (`doc/futaba.md`, not in the repository).
+`core/fasst_frame.c` builds the packets, the hop sequences and the chips;
+`proto_fasst.c` sends them.
 
 - **On air:** one 22-byte packet per 7 ms on 36 channels (2405.4 to
   2477.1 MHz, 2.048 MHz apart), each bit as 11 Barker chips, the chips as
@@ -695,6 +698,61 @@ LaunchPad (`cc27-mpm`) the same: linked on the first press with the F/S
 cycle on, outputs and failsafe as above. Margins of the PHY
 (chip rate 1.46 to 1.545 Mchip/s without loss, deviation 200 to 512 kHz
 alike): with the bench's `fasst` command (`core/bench_fasst.c`).
+
+## Futaba FASSTest
+
+Sub protocols FT18 and FT12 of protocol 110: FASSTest 18CH (the receivers'
+name; the T14SG's "14CH", 16 channels + DG1/DG2) and 12CH as a
+T14SG sends them, for R7008SB-class receivers.
+
+- **On air:** the FASST PHY and sync; 76 channels on a 1.024 MHz grid
+  (2403.3 to 2480.1 MHz), 22 per hop row (set A: 2, 5 ... 68; set B, the
+  T14SG's Area France, unused). 18CH: a 20-byte packet (18 + CRC) per 15 ms,
+  11 chips per bit; 12CH: 12 bytes (10 + CRC) per 6.3 ms, Barker-7 chips.
+  Bytes 0 to 1 (type, hop code) in the clear, the rest whitened with the TX
+  ID and the channel, CRC-16/KERMIT of the plain bytes.
+- **Channels:** the radio's CH1 to CH16 (12CH: CH1 to CH10), 8 (5) per
+  packet, the halves in turn; values as FASST (1024 = 1520 µs). DG1 and
+  DG2 off.
+- **ID:** 100000000 + (module id + rx_num) mod 900000000, then 2 zero
+  bytes. The receiver saves the first 4 bytes as 9 decimal digits, so a
+  larger number would come back truncated after its power cycle. The hop
+  row (0 to 22 of set A) from the ID.
+- **Bind:** link packets (type 8, not whitened, 11 chips in both modes)
+  as the T14SG's LINK: the link channels 2, 8 ... 44 in turn, each every
+  30 hops of 15 ms, 4 hops apart, each followed by a listen on its channel.
+  A receiver powered up during it saves the ID at once and answers 14.9 ms
+  later with its serial; the answer ends the bind, the data start 2 hops
+  after. The link packet carries the mode (12CH) and the battery F/S
+  voltage (3.8 V).
+- **Failsafe:** once the radio has sent failsafe values, an F/S packet
+  every 8 hops, one channel each in turn: the position (F/S), or the live
+  value for hold and no pulses (HOLD).
+- **Telemetry** (not when the radio disables it): a request every 10 hops
+  (12CH: 48), as the T14SG at its 0.3 s rate; the receiver answers in the
+  next hop's slot, which the module leaves out and listens to. 18CH asks
+  for one page of 8 S.BUS2 slots each time: page 0 (the receiver's
+  voltage, slot 0) and the pages that came back with something, every
+  4th request one of the others (a sensor added). The module does not know
+  the sensor types (the Futaba radio's Sensor menu sets them), so each
+  reply goes to the radio as it came: telemetry frame 0x13, the page
+  (12CH: 0x80), the reply's RSSI at the module, the 16 slot bytes (12CH: 8:
+  voltage, link quality %); slot 0's first byte: link quality 0 to 3 (bits
+  6 to 7), bit 2 set for the EXT voltage form. The replies are whitened
+  with the receiver's serial: from the bind's answer, or else found in the
+  replies (empty slots, the CRC), so no bind is needed after a module
+  restart.
+
+LaunchPad (CC2652) with `radio_sim.py`, the R7008SB about 1 m away and the
+Pico's S.BUS2 emulator (`tools/bench/sbus2mon`): FT18 bind ended by the
+receiver's answer; 25 s of a CH1 to CH4 sweep with S.BUS flags 00 (224 to
+1824); telemetry about 6 replies per second with the receiver's 5.0 V,
+quality 3 and the five emulated sensors (SBS-01T, -RM, -V, CURR-1678,
+TEMP125 on pages 0 and 1), the serial found without a bind; failsafe
+CH1 = +100 %, CH3 = -100 %: 0.7 s after the frames stop the receiver
+outputs 1824 and 224, the others hold. FT12: bind, 65 s of 12CH S.BUS
+frames with flags 00, telemetry 3 per second, link quality 96 to 100 %.
+EdgeTX does not decode frame 0x13 yet.
 
 ## Tests
 

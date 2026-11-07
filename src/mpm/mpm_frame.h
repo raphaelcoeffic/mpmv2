@@ -56,6 +56,13 @@ uint8_t mpm_frame_encode(const mpm_frame_t* f, uint8_t* buf);
 #define MPM_TELEM_HDR_LEN 4
 #define MPM_TELEM_STATUS 0x01
 #define MPM_TELEM_PROTO_LIST 0x11
+// Futaba FASSTest receiver replies (proto_fasst.c): mpm-v2's own, not
+// assigned upstream (the last there: RLink, 18). Byte 0: the page (0..3; 12CH:
+// 0x80), byte 1: the reply's RSSI at the module (dBm, signed), then the
+// reply's data: 18CH 16 bytes, S.BUS2 slots 8 page .. 8 page + 7, 2 bytes
+// each as the sensor sent them (slot 0: the receiver's voltage, see
+// fasst_frame.h); 12CH 8 bytes (voltage, link quality %)
+#define MPM_TELEM_FUTABA 0x13
 // MPM v2 only, on the USB link: file_server.h replies (not an MPM type)
 #define MPM_TELEM_FILE 0x40
 // MPM v2 only, on the USB link: debug log text (log.h)
