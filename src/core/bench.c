@@ -1619,6 +1619,89 @@ static void _cmd_fasstest(char* args)
 // A newline from the host ends a blocking run (the byte taken)
 static bool _host_stop() { return uart_rx_fifo_available(UART0) && uart_get_char(UART0) == '\n'; }
 
+// Futaba S-FHSS TX, blocking (preset sfhss, then back to it): per 6.8 ms
+// hop on channel n (CHANNR 6 n + 16) two 13-byte packets 1.6 ms apart,
+// the next n = n + code + 2 mod 31 skipping 30. mode 0 as the T14SG
+// (ch1..4 command 00, ch5..8 09), 1 as the MPM's Futaba_cc2500.ino (the
+// halves' order alternating per hop, bit 1 set). Values in us (1520
+// centre, grow down): ch1 swept 1100..1940, ch2 1100, ch3 1940, others
+// 1520. With fs_ms: every fs_ms one hop of F/S packets (command bit 2)
+// carrying the raw 12-bit words w1..w8 (default the T14SG's)
+static void _sfhss_packet(uint8_t* p, uint16_t id, uint16_t b34, uint8_t n, uint8_t code,
+                          const uint16_t* ch, uint8_t cmd)
+{
+  p[0] = 0x81;
+  p[1] = id >> 8;
+  p[2] = id;
+  p[3] = b34 >> 8;
+  p[4] = b34;
+  p[5] = n << 3 | (ch[0] >> 9 & 7);
+  p[6] = ch[0] >> 1;
+  p[7] = ch[0] << 7 | (ch[1] >> 5 & 0x7F);
+  p[8] = ch[1] << 3 | (ch[2] >> 9 & 7);
+  p[9] = ch[2] >> 1;
+  p[10] = ch[2] << 7 | (ch[3] >> 5 & 0x7F);
+  p[11] = ch[3] << 3 | (code >> 2 & 7);
+  p[12] = code << 6 | cmd;
+}
+
+static void _cmd_sfhss(char* args)
+{
+  static const uint16_t fs_t14sg[8] = {0x950, 0x8DF, 0x800, 0xB5A, 0x800, 0x8CE, 0x800, 0x803};
+  uint32_t secs = _number_or(&args, 30), mode = _number_or(&args, 0);
+  uint32_t id = _number_or(&args, 0xFBAF), code = _number_or(&args, 13);
+  uint32_t b34 = _number_or(&args, 0x8A08), fs_ms = _number_or(&args, 0);
+  uint16_t fs[8];
+  for (int i = 0; i < 8; i++) fs[i] = _number_or(&args, fs_t14sg[i]) & 0xFFF;
+  if (secs == 0 || secs > 600 || mode > 1 || id > 0xFFFF || code > 31 || b34 > 0xFFFF ||
+      (fs_ms && fs_ms < 100)) {
+    _print("@err usage: sfhss [secs] [mode] [id] [code] [b34] [fs_ms] [w1..w8]\r\n");
+    return;
+  }
+  if (!_load_preset("sfhss")) return;
+  _printf("@ok sfhss secs=%lu mode=%lu id=%04lx code=%lu b34=%04lx fs_ms=%lu fs=", secs, mode, id,
+          code, b34, fs_ms);
+  for (int i = 0; i < 8; i++) _printf("%03x%s", fs[i], i < 7 ? " " : "\r\n");
+
+  uint16_t ch[8] = {1520, 1100, 1940, 1520, 1520, 1520, 1520, 1520};
+  int sweep = 4;
+  // One buffer per packet: the RF core reads it when the packet starts
+  uint8_t pkt[13], air[2][RADIO_MAX_PKT_LEN];
+  uint8_t n = 0;
+  uint32_t hops = secs * 1000000 / 6800, late = 0, errors = 0, fs_hops = 0, counter = 0;
+  uint32_t t = micros() + 2000, fs_next = t;
+  uint32_t h = 0;
+  for (; h < hops && !_host_stop(); h++) {
+    if (radio_set_frequency_start(_ch_khz(6 * n + 16) + _trim_khz) != RADIO_OK) errors++;
+    if (ch[0] + sweep > 1940 || ch[0] + sweep < 1100) sweep = -sweep;
+    ch[0] += sweep;
+    bool fs_hop = fs_ms && (int32_t)(t - fs_next) >= 0;
+    if (fs_hop) {
+      fs_next = t + fs_ms * 1000;
+      fs_hops++;
+    }
+    for (int k = 0; k < 2; k++) {
+      // The half: T14SG ch1..4 then ch5..8; MPM counter & 1 (+1 per DATA2)
+      counter += mode == 1 && k == 1;
+      uint8_t half = mode == 1 ? counter & 1 : k;
+      uint8_t cmd = k | half << 3 | (fs_hop ? 0x04 : mode == 1 ? 0x02 : 0);
+      _sfhss_packet(pkt, id, b34, n, code, (fs_hop ? fs : ch) + 4 * half, cmd);
+      uint16_t len = frame_tx_data(&_frame, pkt, sizeof(pkt), air[k]);
+      if (!micros_before(t - 200)) late++;
+      if (!len || radio_tx_start_at(air[k], len, t + 1600 * k) != RADIO_OK) errors++;
+    }
+    t += 6800;
+    n += code + 2;
+    if (n > 29) {
+      if (n < 31) n += code + 2;
+      n -= 31;
+    }
+  }
+  if (radio_tx_wait() != RADIO_OK) errors++;
+  _printf("@ok sfhss hops=%lu late=%lu errors=%lu fs_hops=%lu\r\n", h, late, errors, fs_hops);
+  if (!_apply_phy()) _report_radio_error("radio init");
+}
+
 // FASST RX (bench_fasst.c), blocking
 static void _cmd_fasstrx(char* args)
 {
@@ -1942,6 +2025,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "timing")) _cmd_timing(args);
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
   else if (!strcmp(cmd, "fasst")) _cmd_fasst(args);
+  else if (!strcmp(cmd, "sfhss")) _cmd_sfhss(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else _printf("@err unknown command %s\r\n", cmd);
