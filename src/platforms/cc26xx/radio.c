@@ -84,6 +84,7 @@ static uint16_t _var_pkt_len;  // the current packet's length (CMD_PROP_SET_LEN)
 // last byte is in, the command has often ended (no instant RSSI)
 static int8_t _var_rssi;
 static bool _var_stalled;
+static bool _var_once;  // radio_rx_start_var_once(): ends after a packet
 static uint16_t _var_len[RX_ENTRIES];
 static volatile bool _var_ready[RX_ENTRIES];
 #define VAR_IRQS (IRQ_RX_N_DATA_WRITTEN | IRQ_LAST_COMMAND_DONE)
@@ -228,14 +229,19 @@ static void _var_done(bool restart)
 {
   uint16_t status = RF_STATUS(_rx_op);
   rfc_dataEntryPartial_t* e = (rfc_dataEntryPartial_t*)_rx_entries[_var_cur];
-  if (status == PROP_DONE_OK && _var_len_set && !_var_drop && !_var_taken &&
-      e->nextIndex >= RX_APPENDED) {
+  bool got = status == PROP_DONE_OK && _var_len_set && !_var_drop;
+  if (got && !_var_taken && e->nextIndex >= RX_APPENDED) {
     _var_len[_var_cur] = e->nextIndex - RX_APPENDED;
     _rx_foff_set[_var_cur] = true;
     _var_ready[_var_cur] = true;
     _var_cur = (_var_cur + 1) % RX_ENTRIES;
   }
   if (!restart) return;
+  // One packet (taken early or kept): the RX ends there
+  if (_var_once && got) {
+    _rx_running = false;
+    return;
+  }
 
   // Packet errors: next packet. Others (parameters, overflow): stop
   if ((status & 0xFF00) != (PROP_DONE_OK & 0xFF00) && status != PROP_ERROR_RXFULL) {
@@ -637,8 +643,8 @@ radio_status_t radio_rx_start(uint16_t len)
   return _wait_rx_active();
 }
 
-radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
-                                  void* ctx)
+static radio_status_t _rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
+                                    void* ctx, bool once)
 {
   if (!_powered) return RADIO_ERR_PARAM;
   if (hdr_len == 0 || hdr_len > 32 || max_len < hdr_len || max_len > RADIO_MAX_PKT_LEN ||
@@ -656,6 +662,7 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
   _var_max_len = max_len;
   _var_len_fn = len_fn;
   _var_ctx = ctx;
+  _var_once = once;
 
   IntDisable(INT_RFC_CPE_0);
   _var = true;
@@ -667,8 +674,20 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
   IntEnable(INT_RFC_CPE_0);
   // A first packet may end it already: the interrupt starts the next one
   radio_status_t st = _wait_rx_active();
-  if (!_rx_running) return RADIO_ERR_CMD;
+  if (!_rx_running && !(once && st == RADIO_OK)) return RADIO_ERR_CMD;
   return st == RADIO_ERR_TIMEOUT ? st : RADIO_OK;
+}
+
+radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
+                                  void* ctx)
+{
+  return _rx_start_var(hdr_len, max_len, len_fn, ctx, false);
+}
+
+radio_status_t radio_rx_start_var_once(uint8_t hdr_len, uint16_t max_len,
+                                       radio_len_fn_t len_fn, void* ctx)
+{
+  return _rx_start_var(hdr_len, max_len, len_fn, ctx, true);
 }
 
 radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,

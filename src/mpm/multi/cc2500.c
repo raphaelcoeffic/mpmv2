@@ -73,6 +73,12 @@ static uint16_t _power;
 static uint8_t _rx_max;  // RX: largest payload (length byte included)
 static volatile bool _rx_busy;       // a packet's length came, not the packet yet
 static volatile uint32_t _rx_end_us;  // its expected end
+// RX of one packet at a time (radio_rx_start_var_once()): staying in RX
+// (MCSM1 RXOFF_MODE), the next RX starts at the protocol's next status read
+// after a packet (_rx_rearm), not at once: an SIDLE before it (FrSky X: the
+// TX after the telemetry) has no RX to stop, which takes 100 us on the CC2650
+static bool _rx_got;    // a packet into the RX FIFO since the RX started
+static bool _rx_rearm;
 static radio_packet_t _pkt;
 static uint8_t _air[FRAME_AIR_MAX];
 
@@ -208,7 +214,7 @@ static bool _prepare()
 static void _tx()
 {
   if (_state == S_RX) radio_rx_stop();
-  _rx_busy = false;
+  _rx_busy = _rx_rearm = false;
   _state = S_IDLE;
   if (!_prepare()) return;
   uint8_t len = _tx_len;
@@ -250,7 +256,8 @@ static void _rx()
   if (_rx_max > FRAME_PAYLOAD_MAX) _rx_max = FRAME_PAYLOAD_MAX;
   uint8_t hdr_len = frame_rx_hdr_len(&_frame);
   uint16_t max_len = frame_rx_len(&_frame, _rx_max);
-  radio_status_t st = hdr_len ? radio_rx_start_var(hdr_len, max_len, _rx_var_len, 0)
+  _rx_got = _rx_rearm = false;
+  radio_status_t st = hdr_len ? radio_rx_start_var_once(hdr_len, max_len, _rx_var_len, 0)
                               : radio_rx_start(max_len);
   if (st == RADIO_OK) _state = S_RX;
 }
@@ -266,6 +273,7 @@ static bool _address_ok(uint8_t a)
 static void _rx_poll()
 {
   if (_state == S_TX && radio_tx_done()) _state = S_IDLE;  // TXOFF_MODE IDLE
+  bool ended = _state == S_RX && !radio_rx_active();
   // Whole packets, else the one whose last byte just came (variable length)
   while (_state == S_RX && (radio_receive(&_pkt) || radio_receive_early(&_pkt))) {
     _rx_busy = false;
@@ -281,6 +289,7 @@ static void _rx_poll()
     if (_rx_len + n + (status ? 2 : 0) > FIFO_SIZE) continue;    // overflow
     memcpy(_rx_fifo + _rx_len, payload, n);
     _rx_len += n;
+    _rx_got = true;
     _lqi = crc_ok ? 0x80 : 0;
     if (status) {
       int16_t rssi = (_pkt.rssi + RSSI_OFFSET) * 2;
@@ -292,6 +301,13 @@ static void _rx_poll()
       radio_rx_stop();
       _state = S_IDLE;
     }
+  }
+  // The one-packet RX ended (before the packets were read: its last one is
+  // in): again at the next status read after a packet, at once after a
+  // packet dropped here (address, CRC)
+  if (ended && _state == S_RX) {
+    if (_rx_got) _rx_rearm = true;
+    else _rx();
   }
 }
 
@@ -332,6 +348,7 @@ void CC2500_WriteRegisterMulti(uint8_t address, const uint8_t data[], uint8_t le
 
 static uint8_t _status(uint8_t address)
 {
+  if (_rx_rearm && _state == S_RX) _rx();
   _rx_poll();
   switch (address) {
     case CC2500_30_PARTNUM: return 0x80;
@@ -406,7 +423,7 @@ void CC2500_Strobe(uint8_t state)
     case CC2500_SPWD:
     case CC2500_SXOFF:
       if (_state == S_RX) radio_rx_stop();
-      _rx_busy = false;
+      _rx_busy = _rx_rearm = false;
       _state = S_IDLE;
       break;
     case CC2500_SFRX:

@@ -338,6 +338,12 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
   return RADIO_OK;
 }
 
+radio_status_t radio_rx_start_var_once(uint8_t hdr_len, uint16_t max_len,
+                                       radio_len_fn_t len_fn, void* ctx)
+{
+  return radio_rx_start_var(hdr_len, max_len, len_fn, ctx);
+}
+
 // The early packet taken: RX again, for the next one
 static void _var_restart()
 {

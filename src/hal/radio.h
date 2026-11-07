@@ -106,6 +106,13 @@ typedef uint16_t (*radio_len_fn_t)(const uint8_t* data, uint16_t n, void* ctx);
 radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_fn_t len_fn,
                                   void* ctx);
 
+// As radio_rx_start_var(), but the RX ends after a packet (radio_rx_active()
+// false then): nothing left to stop before the next command, which on the
+// CC2650 saves an abort of about 100 us. CC27xx: continuous, as
+// radio_rx_start_var()
+radio_status_t radio_rx_start_var_once(uint8_t hdr_len, uint16_t max_len,
+                                       radio_len_fn_t len_fn, void* ctx);
+
 // Send one packet, then receive one packet of rx_len bytes with the rx_sync
 // sync word (e.g. an acknowledgment). RX starts right after TX (chained RF core
 // commands) and lasts window_us. Returns RADIO_NO_PACKET if nothing was received.
