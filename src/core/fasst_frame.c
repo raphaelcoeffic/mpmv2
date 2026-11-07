@@ -5,7 +5,6 @@
 
 #define PREAMBLE_BITS 64
 #define SYNC 0x2BB1  // bit 0 first: B1 2B, LSB first
-#define BITS (PREAMBLE_BITS + 16 + 8 * FASST_PACKET_LEN)
 #define BARKER 0x712  // 11100010010 = bit 0, first chip in bit 10
 #define BARKER_7 0x72  // 1110010, FASSTest 12CH
 
@@ -91,15 +90,20 @@ bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row)
 
 // Hop i of a row: set A 2 + 3 ((5^i + row) mod 23), set B 2 + 2 ((5^i - 1
 // + row) mod 23)
+uint8_t fasstest_channel(uint8_t set, uint8_t row, uint8_t i)
+{
+  uint32_t p = 1;
+  while (i--) p = p * 5 % 23;
+  return set ? 2 + 2 * ((p + 22 + row) % 23) : 2 + 3 * ((p + row) % 23);
+}
+
+uint8_t fasstest_code(uint8_t set, uint8_t row) { return _hop_codes[set][row]; }
+
 bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next)
 {
-  uint8_t ch[FASSTEST_HOPS];
-  uint32_t p = 1;
-  for (int i = 0; i < FASSTEST_HOPS; i++, p = p * 5 % 23)
-    ch[i] = set ? 2 + 2 * ((p + 22 + row) % 23) : 2 + 3 * ((p + row) % 23);
   for (int i = 0; i < FASSTEST_HOPS; i++)
-    if (ch[i] == c) {
-      *next = ch[(i + 1) % FASSTEST_HOPS];
+    if (fasstest_channel(set, row, i) == c) {
+      *next = fasstest_channel(set, row, (i + 1) % FASSTEST_HOPS);
       return true;
     }
   return false;
@@ -165,6 +169,33 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
   for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
 }
 
+void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
+                     bool high)
+{
+  // Slot i: 11 bits + flag (ch i + 1 or i + 9), the slots in 3-byte pairs
+  // from byte 2 bit 4: even slots low nibble first, odd ones low byte first
+  uint32_t f = high;
+  const uint16_t* v = ch + (high ? 8 : 0);
+  memset(p, 0, FASSTEST_PACKET_LEN);
+  p[0] = (code & 7) << 5;
+  p[1] = 0xC0 | code >> 3;  // mode 0x13 bits 0..1
+  p[2] = 0x04;              // mode 0x13 bits 2..5
+  for (int i = 0; i < 8; i += 2) {
+    uint8_t* q = p + 2 + 3 * (i / 2);
+    uint16_t a = v[i] & 0x7FF, b = v[i + 1] & 0x7FF;
+    q[0] |= (a & 0x0F) << 4;
+    q[1] = a >> 4 | f << 7;
+    q[2] = b;
+    q[3] = b >> 8 | f << 3;
+  }
+  uint16_t crc = _crc_kermit(p, 18);
+  p[18] = crc & 0xFF;
+  p[19] = crc >> 8;
+  const uint8_t mask[18] = {0,     0,     id[0], id[1], id[2], id[3], id[4], id[5], c,
+                            id[0], id[1], id[2], id[3], id[4], id[5], c,     id[0], id[1]};
+  for (int i = 2; i < 18; i++) p[i] ^= mask[i];
+}
+
 bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
 {
   for (int i = 0; i < FASST_PACKET_LEN; i++) plain[i] = p[i] ^ _white[i];
@@ -178,11 +209,14 @@ bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
   return pos >= 1 && *k < FASST_HOPS && *step >= 1 && *step < 37;
 }
 
-void fasst_spread(uint8_t* chips, const uint8_t* p)
+void fasst_spread(uint8_t* chips, const uint8_t* p) { fasst_spread_len(chips, p, FASST_PACKET_LEN); }
+
+void fasst_spread_len(uint8_t* chips, const uint8_t* p, uint32_t len)
 {
-  memset(chips, 0, FASST_CHIPS_LEN);
+  uint32_t bits = PREAMBLE_BITS + 16 + 8 * len;
+  memset(chips, 0, (bits * 11 + 7) / 8);
   uint32_t n = 0;
-  for (uint32_t i = 0; i < BITS; i++) {
+  for (uint32_t i = 0; i < bits; i++) {
     uint32_t d;
     if (i < PREAMBLE_BITS) d = ~i & 1;  // 1010...10, a 0 before the sync
     else if (i < PREAMBLE_BITS + 16) d = SYNC >> (i - PREAMBLE_BITS) & 1;

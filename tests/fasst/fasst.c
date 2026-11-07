@@ -193,5 +193,19 @@ int main()
   CHECK(ok);
   CHECK(!fasstest_next_channel(0, 21, 65, &next));  // the row's unused channel
   CHECK(fasstest_freq_khz(2) == fasst_freq_khz(0));
+
+  // FASSTest 14CH TX packet: the T14SG's ID, row 21 hop 0 (channel 68), ch
+  // 352 + 84 i (checked with doc/futaba/t14sg/dec14.py: CRC ok, ch1..8)
+  {
+    const uint8_t id[FASSTEST_ID_LEN] = {0x08, 0x8A, 0xAF, 0xFB, 0x00, 0x00};
+    uint16_t v[FASSTEST_TX_CHANNELS];
+    for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) v[i] = 352 + 84 * i;
+    uint8_t pk[FASSTEST_PACKET_LEN], want[FASSTEST_PACKET_LEN], set, row;
+    CHECK(fasstest_channel(0, 21, 0) == 68 && fasstest_channel(0, 21, 1) == 11);
+    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false);
+    hex("40cb0c9c1b7a205c46238e2cceac0344088af7c1", want);
+    CHECK(!memcmp(pk, want, sizeof(pk)));
+    CHECK(fasstest_hop_code(pk, &set, &row) && set == 0 && row == 21);
+  }
   return test_done();
 }

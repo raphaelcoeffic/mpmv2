@@ -67,8 +67,9 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
 bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step);
 
 // The packet's chips (FASST_CHIPS_LEN bytes, MSB first): preamble, sync,
-// packet
+// packet; fasst_spread_len() for len packet bytes ((80 + 8 len) x 11 chips)
 void fasst_spread(uint8_t* chips, const uint8_t* p);
+void fasst_spread_len(uint8_t* chips, const uint8_t* p, uint32_t len);
 
 // The RF core's sync word: the first 32 chips. The packet: the rest
 uint32_t fasst_sync_word(const uint8_t* chips);
@@ -114,6 +115,23 @@ uint32_t fasstest_freq_khz(uint8_t c);
 bool fasstest_hop_code(const uint8_t* p, uint8_t* set, uint8_t* row);
 // The channel after c in the row; false if c isn't in it
 bool fasstest_next_channel(uint8_t set, uint8_t row, uint8_t c, uint8_t* next);
+// Hop i (0..21) of a row, and the row's hop code
+uint8_t fasstest_channel(uint8_t set, uint8_t row, uint8_t i);
+uint8_t fasstest_code(uint8_t set, uint8_t row);
+
+// FASSTest 14CH TX packet (FASSTEST_PACKET_LEN bytes as on air) on channel
+// c, as the T14SG sends it: type 0, hop code `code`, mode 0x13 (DG1 / DG2
+// off), the 8 slots ch1..8 or, with high, ch9..16 (ch: 16 values, 11 bits:
+// the S.BUS value), no telemetry request. Plain bytes 2..17 whitened with
+// 00 00 ID0..5 c ID0..5 c ID0 ID1 (id: the TX ID, 6 bytes; the receiver
+// takes it at the link), CRC-16/KERMIT of the plain 18 bytes after them
+#define FASSTEST_ID_LEN 6
+#define FASSTEST_TX_CHANNELS 16
+void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
+                     bool high);
+// Its chips: fasst_spread_len() of the 20 bytes
+#define FASSTEST_CHIPS_LEN 330
+#define FASSTEST_CHIPS_TX_LEN (FASSTEST_CHIPS_LEN - 4)
 
 // b bits from chips (MSB first), n chips each (FASST_BARKER_11 / _7) from
 // chip `first`: bit i to out[i / 8] bit i % 8 (LSB first, as on air),

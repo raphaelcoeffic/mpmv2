@@ -1583,6 +1583,28 @@ static void _cmd_fasst(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// FASSTest 14CH TX experiment (bench_fasst.c), blocking
+static void _cmd_fasstest(char* args)
+{
+  fasstest_cfg_t cfg = {.tx_power = _tx_power};
+  cfg.secs = _number_or(&args, 10);
+  cfg.row = _number_or(&args, 0);
+  cfg.sweep = _number_or(&args, 2);
+  uint32_t id = _number_or(&args, 0x088AAFFB), id45 = _number_or(&args, 0);  // the T14SG's
+  for (int i = 0; i < 4; i++) cfg.id[i] = id >> (24 - 8 * i);
+  cfg.id[4] = id45 >> 8;
+  cfg.id[5] = id45;
+  if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45) {
+    _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5]\r\n");
+    return;
+  }
+  _job_stop();
+  _printf("@ok fasstest secs=%lu row=%u code=%u sweep=%u id=%08lx%04lx\r\n", cfg.secs, cfg.row,
+          fasstest_code(cfg.row >= 23, cfg.row % 23), cfg.sweep, id, id45 & 0xFFFF);
+  fasstest_run(&cfg, _printf);
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // A newline from the host ends a blocking run (the byte taken)
 static bool _host_stop() { return uart_rx_fifo_available(UART0) && uart_get_char(UART0) == '\n'; }
 
@@ -1910,6 +1932,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
   else if (!strcmp(cmd, "fasst")) _cmd_fasst(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
+  else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else _printf("@err unknown command %s\r\n", cmd);
 }
 

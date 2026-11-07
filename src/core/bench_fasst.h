@@ -21,8 +21,21 @@ typedef struct {
 
 typedef void (*fasst_print_t)(const char* fmt, ...);
 
+// FASSTest 14CH TX experiment (fasstest_packet()): one packet per 15 ms
+// hop on a row's 22 channels, with a chosen TX ID (a receiver linked to it
+// follows). Channels 352 + 84 i (S.BUS values), ch1 swept; ch1..8 and
+// ch9..16 every other packet
+typedef struct {
+  uint32_t secs;
+  uint16_t tx_power;  // RF core TX power word
+  uint8_t row;        // 0..22 set A (General), 23..45 set B (France)
+  uint16_t sweep;     // ch1 sweep, frames per step of 16, 0 = fixed
+  uint8_t id[FASSTEST_ID_LEN];
+} fasstest_cfg_t;
+
 // Blocks for cfg->secs; the radio needs radio_init() again after it
 void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print);
+void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print);
 
 // FASST RX (sniffer) on hop k: each packet despread, printed as
 // @fasst <time_us> <k> rssi=<dBm> [foff=<kHz>] shift=<n> <hex> q=<hex>: the
