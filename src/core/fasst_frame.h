@@ -44,9 +44,9 @@ void fasst_phy(radio_phy_t* phy, uint16_t tx_power);
 
 // Hop index k (0..35): the first, the next (k + step mod 37, skipping 36;
 // the packets carry the step), and its frequency. The TM-10 chooses its
-// step (27 in one session, 28 in another); ours: 27. Area France (T14SG):
-// step field FASST_FRANCE_STEP + s (s = 1..22), hops k = 1..22 only, the
-// next k + s mod 23, skipping 0
+// step (27 in one session, 28 in another); the bench's: 27 (the MPM picks
+// one). Area France (T14SG): step field FASST_FRANCE_STEP + s (s = 1..22),
+// hops k = 1..22 only, the next k + s mod 23, skipping 0
 #define FASST_HOP_FIRST 0
 #define FASST_HOP_STEP 27
 #define FASST_FRANCE_STEP 40

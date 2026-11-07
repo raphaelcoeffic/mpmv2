@@ -674,7 +674,11 @@ R7206SB's firmware (`doc/futaba.md`, not in the repository).
 - **Packet:** ID, hop position and step, four groups of two 11-bit
   channels, two type bytes, CRC-16/KERMIT; the whole packet whitened by a
   fixed 16-bit LFSR stream. The receiver hops with the step the packets
-  carry (27, 5 and 13 tried); the protocol keeps the TM-10's 27.
+  carry (27, 5 and 13 tried, and any step after a restart, no new
+  link). The step is picked at each start: 0.5 s parked on hop 35
+  (2477 MHz, above Wi-Fi channel 11), where each FASST transmitter passes
+  once per 252 ms, then a random step (1 to 36) none of them uses, as the
+  T14SG avoids the steps in use at power-up. No stored counter.
 - **ID:** 0x12, then the low 24 bits of the module id + rx_num (one
   receiver binding per model). A FASST transmitter has no bind: the
   receiver links to the transmitter nearby while its Link button is held
@@ -713,7 +717,11 @@ sweep (1020 to 2022 µs, a pulse every 14 ms, no gaps), out5 2020 µs with
 CH5 +100 % and CH13 -100 % (the group 3 flag right); failsafe CH5 -100 %:
 1 s after the frames stop out5 1020 µs, out1 holds; failsafe CH1 -100 %,
 CH5 0 %: out1 1020 µs, out5 holds 1520 µs. The T14SG's packets are
-rebuilt bit for bit (`tests/fasst`).
+rebuilt bit for bit (`tests/fasst`). Step pick, with the T14SG in FASST
+MULT on step 28 and the dongle parked on hop 35: steps 2, 22, 1, 10 and
+13 in five starts (32, 10, 26 without it); a test build taking "the
+lowest step heard + 1" came up on 29 three times out of three (33, none
+heard, without the T14SG).
 
 ## Futaba FASSTest
 

@@ -7,6 +7,9 @@
 //   has no bind of its own: the receiver links to the transmitter nearby
 //   while its Link button is held (R6008HS: > 2 s, receiver on). Bind ends
 //   at once.
+// - Step: picked at each start, a random one (1..36) no FASST transmitter
+//   heard on hop FASST_LISTEN_HOP in FASST_LISTEN_US uses (as the T14SG
+//   at power-up); the receiver follows the step the packets carry.
 // - Failsafe: the F/S cycle (6 frames, one per channel pair) once per
 //   second, from the radio's failsafe values (hold and no pulse: NOR, the
 //   channel holds). One cycle sets the receiver's failsafe, which a power
@@ -62,6 +65,11 @@
 #define FASST_TX_DELAY_US 1000
 // F/S cycle period, frames (~1 s)
 #define FASST_FS_EVERY 143
+// The step pick: listening there first (every transmitter passes each hop
+// once per 252 ms); hop 35 = 2477 MHz, above Wi-Fi channel 11
+#define FASST_LISTEN_HOP 35
+#define FASST_LISTEN_US 500000
+#define FASST_LISTEN_POLL_US 1000
 
 #define FASSTEST_FS_EVERY 8
 #define FASSTEST_REQ_EVERY 10       // 150 ms: the T14SG at its 0.3 s rate
@@ -96,12 +104,43 @@ static void _update_power()
   }
 }
 
-// FASST 10ch
-static uint8_t _hop;
+static radio_packet_t _pkt;
+
+// FASST 10ch / MULT
+static uint8_t _hop, _step;
 static uint32_t _frame;
+static bool _listening;
+static uint32_t _listen_start;
+static uint64_t _heard;  // bit s: step s (1..36) heard
+
+// The start: parked on FASST_LISTEN_HOP for FASST_LISTEN_US, the steps of
+// the FASST transmitters there noted; then a random step not heard
+static uint16_t _fasst_listen()
+{
+  while (radio_receive(&_pkt)) {
+    uint8_t b[FASST_PACKET_LEN], plain[FASST_PACKET_LEN], k, step;
+    if (fasst_rx_bytes(_pkt.data, FASST_BARKER_11, FASST_PACKET_LEN, b, NULL) >= 0 &&
+        fasst_unpack(b, plain, &k, &step) && step < 37)
+      _heard |= 1ull << step;
+  }
+  if (micros() - _listen_start < FASST_LISTEN_US) {
+    if (!radio_rx_active()) radio_rx_start(FASST_RX_PKT_LEN(FASST_BARKER_11, FASST_PACKET_LEN));
+    return FASST_LISTEN_POLL_US;
+  }
+  radio_rx_stop();
+  uint8_t free = 0;
+  for (int s = 1; s < 37; s++) free += !(_heard >> s & 1);
+  // All taken: any
+  uint64_t taken = free ? _heard : 0;
+  long r = mpm_random(free ? free : 36);
+  for (_step = 1; taken >> _step & 1 || r--; _step++) {}
+  _listening = false;
+  return FASST_LISTEN_POLL_US;
+}
 
 static uint16_t _fasst_callback()
 {
+  if (_listening) return _fasst_listen();
   _update_power();
   radio_set_frequency_start(fasst_freq_khz(_hop));
 
@@ -120,14 +159,14 @@ static uint16_t _fasst_callback()
   if (mpm.failsafe_valid && n < (mult ? FASST_MULT_FS_TYPES : FASST_FS_TYPES)) type = n + 1;
 
   uint8_t pkt[FASST_PACKET_LEN];
-  if (mult) fasst_mult_packet(pkt, _hop, FASST_HOP_STEP, ch, _frame & 1, type, fs, hold);
-  else fasst_packet(pkt, _hop, FASST_HOP_STEP, ch, _frame & 1, type, fs, hold);
+  if (mult) fasst_mult_packet(pkt, _hop, _step, ch, _frame & 1, type, fs, hold);
+  else fasst_packet(pkt, _hop, _step, ch, _frame & 1, type, fs, hold);
   fasst_spread(_chips, pkt);
   radio_set_sync_word(fasst_sync_word(_chips), 0);
   radio_tx_start_at(fasst_chips(_chips), FASST_CHIPS_TX_LEN,
                     mpm_callback_deadline() + FASST_TX_DELAY_US);
 
-  _hop = fasst_next_hop(_hop, FASST_HOP_STEP);
+  _hop = fasst_next_hop(_hop, _step);
   _frame++;
   return FASST_FRAME_US;
 }
@@ -154,7 +193,6 @@ static struct {
   uint32_t requests;
 } _ft;
 
-static radio_packet_t _pkt;
 static uint8_t _rx_bytes[FASSTEST_PACKET_LEN];
 
 // Offsets from a hop's start (its callback's deadline): the TX packet's
@@ -372,9 +410,13 @@ void FASST_init()
     fasst_set_id(FASST_ID_BYTE0 << 24 | (mpm.id & 0xFFFFFF));
     _hop = FASST_HOP_FIRST;
     _frame = 0;
-    radio_set_frequency(fasst_freq_khz(_hop));
+    _listening = true;
+    _heard = 0;
+    radio_set_frequency(fasst_freq_khz(FASST_LISTEN_HOP));
+    radio_set_sync_word(0, fasst_rx_sync_word(FASST_BARKER_11));
   }
   if (radio_init(&phy) != RADIO_OK) mpm_sub_invalid();
+  _listen_start = micros();
   if (mpm.bind_in_progress && !_ft_mode()) mpm_bind_done();
 }
 
