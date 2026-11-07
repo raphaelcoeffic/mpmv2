@@ -6,7 +6,8 @@
 #           the MULTI-Module's src/mpm/sketch is kept
 #   lib/    TI, Segger RTT, pyserial, littlefs's sources and licence; the
 #           MULTI-Module's lib/stm32f1 is kept
-#   tools/  all but the radio bench (tools/bench) and what is mpm-v2's
+#   tools/  all but the radio bench (tools/bench), the FASST sniffer page
+#           (tools/sniffer_web) and what is mpm-v2's
 #   tests/  the host tests
 # from mpm-v2's HEAD (commit first), files gone here removed there. Then
 # `git status` there shows what changed; the version (project() in
@@ -46,8 +47,8 @@ copy() {
 }
 copy src --exclude /mpm/upstream/ --exclude /mpm/sketch/
 copy lib --exclude /stm32f1/
-copy tools --exclude /bench/ --exclude /pyproject.toml --exclude /uv.lock \
-    --exclude /multi_sync.sh
+copy tools --exclude /bench/ --exclude /sniffer_web/ --exclude /pyproject.toml \
+    --exclude /uv.lock --exclude /multi_sync.sh
 copy tests
 
 version() {
