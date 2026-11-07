@@ -1,6 +1,8 @@
 // FASST 10ch TX experiment (fasst_frame.h): one packet per 7 ms hop, with
 // the given ID, hop step and PHY. Channels 200 + 170 i, ch1 swept; with
-// fs_every, the F/S cycle (positions 1600 - 100 i) every fs_every frames
+// fs_every, the F/S cycle (positions 1600 - 100 i) every fs_every frames.
+// 7CH: one packet per 8 ms hop, channels 1320 (1520 us), ch1 swept 820..
+// 1820, ch3 1720; with fs_every, ch3's F/S (1020) every fs_every packets
 #include <string.h>
 
 #include "bench_fasst.h"
@@ -24,12 +26,15 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
   fasst_set_id(cfg->id);
   uint16_t ch[FASST_CHANNELS], fs[FASST_CHANNELS];
   for (int i = 0; i < FASST_CHANNELS; i++) {
-    ch[i] = 200 + 170 * i;
+    ch[i] = cfg->ch7 ? 1320 : 200 + 170 * i;
     fs[i] = 1600 - 100 * i;
   }
+  if (cfg->ch7) ch[2] = 1720;
+  uint16_t ch_min = cfg->ch7 ? 820 : 200, ch_max = cfg->ch7 ? 1820 : 1800;
+  uint32_t frame_us = cfg->ch7 ? FASST7_FRAME_US : FASST_FRAME_US;
   uint8_t pkt[FASST_PACKET_LEN];
   uint8_t k = cfg->step > FASST_FRANCE_STEP ? 1 : FASST_HOP_FIRST;
-  uint32_t frames = cfg->secs * 1000000 / FASST_FRAME_US;
+  uint32_t frames = cfg->secs * 1000000 / frame_us;
   uint32_t late = 0, errors = 0, fs_cycles = 0;
   int sweep_dir = 16;
   uint32_t t = micros() + 2000;
@@ -37,23 +42,32 @@ void fasst_run(const fasst_cfg_t* cfg, fasst_print_t print)
     if (radio_set_frequency_start(fasst_freq_khz(k)) != RADIO_OK) errors++;
 
     if (cfg->sweep && n % cfg->sweep == 0) {
-      if (ch[0] + sweep_dir > 1800 || ch[0] + sweep_dir < 200) sweep_dir = -sweep_dir;
+      if (ch[0] + sweep_dir > ch_max || ch[0] + sweep_dir < ch_min) sweep_dir = -sweep_dir;
       ch[0] += sweep_dir;
     }
+    uint32_t len = FASST_CHIPS_LEN;
     uint8_t type = 0;
-    if (cfg->fs_every && n % cfg->fs_every < FASST_FS_TYPES) {
+    if (cfg->ch7) {
+      bool fs_packet = cfg->fs_every && n % cfg->fs_every == 0;
+      fs_cycles += fs_packet;
+      fasst7_packet(pkt, k, cfg->step, ch, fs_packet, cfg->fs_every ? 1020 : -1);
+      fasst_spread_len(_chips, pkt, FASST7_PACKET_LEN);
+      len = FASST7_CHIPS_LEN;
+    } else if (cfg->fs_every && n % cfg->fs_every < FASST_FS_TYPES) {
       type = n % cfg->fs_every + 1;
       if (type == 1) fs_cycles++;
     }
-    fasst_packet(pkt, k, cfg->step, ch, n & 1, type, fs, 0);
-    fasst_spread(_chips, pkt);
+    if (!cfg->ch7) {
+      fasst_packet(pkt, k, cfg->step, ch, n & 1, type, fs, 0);
+      fasst_spread(_chips, pkt);
+    }
     if (cfg->invert)
-      for (int i = 0; i < FASST_CHIPS_LEN; i++) _chips[i] ^= 0xFF;
+      for (uint32_t i = 0; i < len; i++) _chips[i] ^= 0xFF;
     radio_set_sync_word(fasst_sync_word(_chips), 0);
 
     if (!micros_before(t - 200)) late++;
-    if (radio_tx_start_at(fasst_chips(_chips), FASST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
-    t += FASST_FRAME_US;
+    if (radio_tx_start_at(fasst_chips(_chips), len - 4, t) != RADIO_OK) errors++;
+    t += frame_us;
     k = fasst_next_hop(k, cfg->step);
   }
   if (radio_tx_wait() != RADIO_OK) errors++;

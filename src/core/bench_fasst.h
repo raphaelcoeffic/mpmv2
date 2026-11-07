@@ -17,6 +17,7 @@ typedef struct {
   uint16_t sweep;      // ch1 sweep, frames per step of 16, 0 = fixed
   uint8_t step;        // hop step (1..36, France 41..62: from hop 1)
   uint32_t id;         // plain ID, bytes 0..3 (fasst_set_id())
+  bool ch7;            // FASST 7CH (fasst7_packet()), 8 ms hops
 } fasst_cfg_t;
 
 typedef void (*fasst_print_t)(const char* fmt, ...);

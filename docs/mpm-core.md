@@ -736,8 +736,12 @@ LaunchPad with `radio_sim.py drive --proto 110 --sub 2 --failsafe
 3=1500`, the dongle (`fasstrx`) parked on hop 0: 68/68 packets with a good
 CRC, 8000 µs per hop, step 32 picked, CH1 to 4 sweep 820 to 1820, CH5 to 7
 1320; the first packet code 3 (no failsafe yet), then code 1, and every
-fifth visit code 2 with CH3 = 1610, as the T14SG's. Not yet tried on a 7ch
-receiver.
+fifth visit code 2 with CH3 = 1610, as the T14SG's. On a 7ch receiver
+(out1 and out3 on the Pico's `servo` mode), driven by the bench's `fasst
+... 7ch` on the dongle (same `fasst7_packet()`, F/S every 10 packets):
+linked on the first press; out1 1023 to 2016 µs (CH1 sweep), out3
+1920 µs, a pulse every 16 ms, no gaps in 2 minutes; 1.1 s after the
+frames stop out3 1220 µs (the failsafe), out1 holds.
 
 ## Futaba FASSTest
 

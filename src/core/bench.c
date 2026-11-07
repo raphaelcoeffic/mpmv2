@@ -1569,16 +1569,18 @@ static void _cmd_fasst(char* args)
   cfg.sweep = _number_or(&args, 2);
   cfg.step = _number_or(&args, FASST_HOP_STEP);
   cfg.id = _number_or(&args, FASST_ID_DEFAULT);
+  cfg.ch7 = _number_or(&args, 0);
   if (cfg.secs == 0 || cfg.secs > 600 || cfg.deviation > 511750 || cfg.chip_rate < 1000000 ||
-      cfg.chip_rate > 2000000 || (cfg.fs_every && cfg.fs_every < 6) || cfg.step == 0 ||
+      cfg.chip_rate > 2000000 || (cfg.fs_every && cfg.fs_every < (cfg.ch7 ? 2 : 6)) || cfg.step == 0 ||
       (cfg.step > 36 && (cfg.step <= FASST_FRANCE_STEP || cfg.step > FASST_FRANCE_STEP + FASST_FRANCE_HOPS))) {
-    _print("@err usage: fasst [secs] [invert] [chip_rate] [dev_hz] [fs_every] [sweep] [step] [id]\r\n");
+    _print("@err usage: fasst [secs] [invert] [chip_rate] [dev_hz] [fs_every] [sweep] [step] [id] [7ch]\r\n");
     return;
   }
   _job_stop();
-  _printf("@ok fasst secs=%lu invert=%u rate=%lu dev=%lu fs_every=%lu sweep=%u step=%u id=%08lx\r\n",
+  _printf("@ok fasst secs=%lu invert=%u rate=%lu dev=%lu fs_every=%lu sweep=%u step=%u id=%08lx "
+          "7ch=%u\r\n",
           cfg.secs, cfg.invert, cfg.chip_rate, cfg.deviation, cfg.fs_every, cfg.sweep, cfg.step,
-          cfg.id);
+          cfg.id, cfg.ch7);
   fasst_run(&cfg, _printf);
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
