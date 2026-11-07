@@ -122,13 +122,27 @@ uint8_t fasstest_code(uint8_t set, uint8_t row);
 // FASSTest 14CH TX packet (FASSTEST_PACKET_LEN bytes as on air) on channel
 // c, as the T14SG sends it: type 0, hop code `code`, mode 0x13 (DG1 / DG2
 // off), the 8 slots ch1..8 or, with high, ch9..16 (ch: 16 values, 11 bits:
-// the S.BUS value), no telemetry request. Plain bytes 2..17 whitened with
+// the S.BUS value). Plain bytes 2..17 whitened with
 // 00 00 ID0..5 c ID0..5 c ID0 ID1 (id: the TX ID, 6 bytes; the receiver
-// takes it at the link), CRC-16/KERMIT of the plain 18 bytes after them
+// takes it at the link), CRC-16/KERMIT of the plain 18 bytes after them.
+// req 1..FASSTEST_PAGES: a telemetry request for page req - 1 (b1 bit 5,
+// b16 = 1 | page << 1, as the T14SG); the receiver answers in the next
+// hop's slot (its channel, sync FASSTEST_REPLY_US after this packet's), the
+// TX leaving that hop out. 0: no request
 #define FASSTEST_ID_LEN 6
 #define FASSTEST_TX_CHANNELS 16
+#define FASSTEST_PAGES 4
+#define FASSTEST_REPLY_US 14565
 void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
-                     bool high);
+                     bool high, uint8_t req);
+// A telemetry reply (type 0x10, FASSTEST_PACKET_LEN bytes as on air) heard
+// on channel c: plain = the 18 bytes unwhitened with rx (the receiver's
+// serial, 4 bytes, from its link reply) in place of ID0..3; true if the
+// CRC is right. Plain b1 bits 4..5 = the page, bytes 2 + 2i, 3 + 2i =
+// S.BUS2 slot 8 page + i (its 2 data bytes; slot 0 = the receiver's
+// voltage, b2 bits 6..7 the link quality 0..3)
+bool fasstest_reply_unpack(const uint8_t* p, uint8_t* plain, const uint8_t* rx, const uint8_t* id,
+                           uint8_t c);
 // FASSTest link packet (type 8, not whitened) for channel c: the hop code
 // of the row the data will use, the TX ID, the battery F/S voltage (0.1
 // V), the channel (b9: the receiver checks it), 14CH, b15 = 2. The T14SG's

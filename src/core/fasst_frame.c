@@ -169,8 +169,16 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
   for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
 }
 
+// Bytes 2..17 whitened with 00 00 ID0..5 c ID0..5 c ID0 ID1, id0 = ID0..3
+static void _fasstest_whiten(uint8_t* p, const uint8_t* id0, const uint8_t* id, uint8_t c)
+{
+  const uint8_t mask[18] = {0,      0,      id0[0], id0[1], id0[2], id0[3], id[4],  id[5],  c,
+                            id0[0], id0[1], id0[2], id0[3], id[4],  id[5],  c,      id0[0], id0[1]};
+  for (int i = 2; i < 18; i++) p[i] ^= mask[i];
+}
+
 void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
-                     bool high)
+                     bool high, uint8_t req)
 {
   // Slot i: 11 bits + flag (ch i + 1 or i + 9), the slots in 3-byte pairs
   // from byte 2 bit 4: even slots low nibble first, odd ones low byte first
@@ -188,12 +196,22 @@ void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, con
     q[2] = b;
     q[3] = b >> 8 | f << 3;
   }
+  if (req) {
+    p[1] |= 0x20;
+    p[16] = 1 | (req - 1) << 1;
+  }
   uint16_t crc = _crc_kermit(p, 18);
   p[18] = crc & 0xFF;
   p[19] = crc >> 8;
-  const uint8_t mask[18] = {0,     0,     id[0], id[1], id[2], id[3], id[4], id[5], c,
-                            id[0], id[1], id[2], id[3], id[4], id[5], c,     id[0], id[1]};
-  for (int i = 2; i < 18; i++) p[i] ^= mask[i];
+  _fasstest_whiten(p, id, id, c);
+}
+
+bool fasstest_reply_unpack(const uint8_t* p, uint8_t* plain, const uint8_t* rx, const uint8_t* id,
+                           uint8_t c)
+{
+  memcpy(plain, p, 18);
+  _fasstest_whiten(plain, rx, id, c);
+  return _crc_kermit(plain, 18) == (p[18] | p[19] << 8);
 }
 
 void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs)

@@ -27,7 +27,11 @@ typedef void (*fasst_print_t)(const char* fmt, ...);
 // ch9..16 every other packet. With link_secs: link packets first, up to
 // that long (fasstest_link_packet(), on the T14SG's schedule), each
 // followed by a listen for the receiver's reply; the reply (or the end)
-// starts the data
+// starts the data. With pages (bit p: page p): a telemetry request every
+// FASSTEST_TELE_HOPS hops, the pages in turn, the reply listened to in the
+// next hop's slot and unwhitened with rx (the receiver's serial; the link
+// reply's if one came)
+#define FASSTEST_TELE_HOPS 10  // the T14SG at the 0.3 s rate
 typedef struct {
   uint32_t secs;
   uint32_t link_secs;
@@ -35,6 +39,8 @@ typedef struct {
   uint8_t row;        // 0..22 set A (General), 23..45 set B (France)
   uint16_t sweep;     // ch1 sweep, frames per step of 16, 0 = fixed
   uint8_t id[FASSTEST_ID_LEN];
+  uint8_t pages;  // bits 0..FASSTEST_PAGES - 1, 0 = no telemetry
+  uint8_t rx[4];
 } fasstest_cfg_t;
 
 // Blocks for cfg->secs; the radio needs radio_init() again after it

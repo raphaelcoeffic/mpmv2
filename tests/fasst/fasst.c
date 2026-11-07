@@ -202,7 +202,7 @@ int main()
     for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) v[i] = 352 + 84 * i;
     uint8_t pk[FASSTEST_PACKET_LEN], want[FASSTEST_PACKET_LEN], set, row;
     CHECK(fasstest_channel(0, 21, 0) == 68 && fasstest_channel(0, 21, 1) == 11);
-    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false);
+    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false, 0);
     hex("40cb0c9c1b7a205c46238e2cceac0344088af7c1", want);
     CHECK(!memcmp(pk, want, sizeof(pk)));
     CHECK(fasstest_hop_code(pk, &set, &row) && set == 0 && row == 21);
@@ -210,6 +210,18 @@ int main()
     fasstest_link_packet(pk, id, fasstest_code(0, 21), FASSTEST_LINK_CHANNEL(0), FASSTEST_BFS_DEFAULT);
     hex("483b088aaffb0000260200000000000200002185", want);
     CHECK(!memcmp(pk, want, sizeof(pk)));
+    // A page 0 request: plain b1 bit 5, b16 = 1
+    uint8_t plain[18];
+    fasstest_packet(pk, id, fasstest_code(0, 21), 68, v, false, 1);
+    CHECK(fasstest_reply_unpack(pk, plain, id, id, 68) && plain[1] == 0xEB && plain[16] == 0x01);
+    // An R7008SB reply (serial 08 a1 82 40) on channel 47, page 0: slot 0 =
+    // 5.1 V, quality 3; slots 1..4 = the sbus2mon sensors (ft14_sens.txt)
+    const uint8_t rx[4] = {0x08, 0xA1, 0x82, 0x40};
+    hex("3006c892ffc0e803af42a1fa4000002f08a1292b", pk);
+    CHECK(fasstest_reply_unpack(pk, plain, rx, id, 47));
+    hex("3006c0337d80e803804a0078000000000000", want);
+    CHECK(!memcmp(plain, want, 18));
+    CHECK(!fasstest_reply_unpack(pk, plain, rx, id, 46));
   }
   return test_done();
 }

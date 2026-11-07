@@ -1592,19 +1592,24 @@ static void _cmd_fasstest(char* args)
   cfg.sweep = _number_or(&args, 2);
   uint32_t id = _number_or(&args, 0x088AAFFB), id45 = _number_or(&args, 0);  // the T14SG's
   cfg.link_secs = _number_or(&args, 0);
+  cfg.pages = _number_or(&args, 0);
+  uint32_t rx = _number_or(&args, 0x08A18240);  // the lent R7008SB's serial
+  for (int i = 0; i < 4; i++) cfg.rx[i] = rx >> (24 - 8 * i);
   for (int i = 0; i < 4; i++) cfg.id[i] = id >> (24 - 8 * i);
   cfg.id[4] = id45 >> 8;
   cfg.id[5] = id45;
   // The receiver keeps ID0..3 as 9 decimal digits (fasst_frame.h)
   if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45 || cfg.link_secs > 600 || id == 0 ||
-      id > 999999999) {
-    _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5] [link_secs]\r\n");
+      id > 999999999 || cfg.pages >> FASSTEST_PAGES) {
+    _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5] [link_secs] [pages] "
+           "[rx]\r\n");
     return;
   }
   _job_stop();
-  _printf("@ok fasstest secs=%lu row=%u code=%u sweep=%u id=%08lx%04lx link=%lu\r\n", cfg.secs,
-          cfg.row, fasstest_code(cfg.row >= 23, cfg.row % 23), cfg.sweep, id, id45 & 0xFFFF,
-          cfg.link_secs);
+  _printf("@ok fasstest secs=%lu row=%u code=%u sweep=%u id=%08lx%04lx link=%lu pages=0x%x "
+          "rx=%08lx\r\n",
+          cfg.secs, cfg.row, fasstest_code(cfg.row >= 23, cfg.row % 23), cfg.sweep, id,
+          id45 & 0xFFFF, cfg.link_secs, cfg.pages, rx);
   fasstest_run(&cfg, _printf);
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
