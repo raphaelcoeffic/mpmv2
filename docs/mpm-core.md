@@ -14,7 +14,7 @@ is not a drop-in build of the MPM sources: protocols are ported to it.
 | `mpm_port.c` | The board port: UART0 at 100000 baud 8E2 (LaunchPad: XDS110 back channel, MPM v2: USB console) |
 | `protocols.c/h` | The protocol table |
 | `proto_test.c` | Test protocol 127 |
-| `proto_fasst.c` | Futaba FASST 10ch and FASSTest 18CH / 12CH, protocol 110 ([below](#futaba-fasst)), framing in `core/fasst_frame.c` |
+| `proto_fasst.c` | Futaba FASST 10ch / MULT and FASSTest 18CH / 12CH, protocol 110 ([below](#futaba-fasst)), framing in `core/fasst_frame.c` |
 | `upstream/` | Protocol files of the MPM, and what they need from it ([below](#mpm-protocol-files)) |
 
 ## Behaviour
@@ -658,7 +658,8 @@ in the radio frames, and `micros()` at the callback. Sub protocols: 1 Mbps,
 
 Protocol 110, "FASST": mpm-v2's own, not a MULTI-Module protocol (110 is
 not assigned upstream; the last there is MoFly, 109). Sub protocols 10ch
-(FASST 10ch), MULT and 7ch (not yet: rejected), FT18 and FT12 (FASSTest
+(FASST 10ch), MULT (FASST MULT, 16 channels), 7ch (not yet: rejected),
+FT18 and FT12 (FASSTest
 18CH and 12CH, [below](#futaba-fasstest)). FASST was traced from a TM-10
 module driving an R6008HS, FASSTest from a T14SG and an R7008SB and the
 R7206SB's firmware (`doc/futaba.md`, not in the repository).
@@ -681,6 +682,13 @@ R7206SB's firmware (`doc/futaba.md`, not in the repository).
   took a made-up ID that way and then ignored the TM-10's.
 - **Channels:** the radio's CH1 to CH10 as FASST ch1 to ch10; ±100% =
   1020 to 2020 µs, as SFHSS (values 224 to 1824, 1024 = 1520 µs).
+- **MULT:** the same packet with 16 channels, as the T14SG's FASST MULT:
+  every group's flags select ch1 to 8 or ch9 to 16, the halves in turn;
+  type bytes `93` / `b3` (plain). DG1 / DG2 (bit 2 of the type bytes)
+  stay 0. The F/S cycle has 8 frames (ch9 + 13, 10 + 14, 11 + 15, 12 + 16,
+  then 1 + 5 to 4 + 8, as the T14SG's), each channel's mode in the type
+  bytes: hold (the live value, as the T14SG with all on hold) or F/S (the
+  TM-10's F/S bit).
 - **Failsafe:** once the radio has sent failsafe values, the F/S cycle
   (6 frames, the positions of two channels each) once per second; hold and
   no pulses: the channel holds. The receiver forgets its failsafe when
@@ -698,6 +706,14 @@ LaunchPad (`cc27-mpm`) the same: linked on the first press with the F/S
 cycle on, outputs and failsafe as above. Margins of the PHY
 (chip rate 1.46 to 1.545 Mchip/s without loss, deviation 200 to 512 kHz
 alike): with the bench's `fasst` command (`core/bench_fasst.c`).
+
+MULT, LaunchPad and the R6008HS (re-linked once to MULT), its out1 and
+out5 on the Pico (`sbus2mon`'s `servo` mode, GP2 / GP3): 60 s of the CH1
+sweep (1020 to 2022 µs, a pulse every 14 ms, no gaps), out5 2020 µs with
+CH5 +100 % and CH13 -100 % (the group 3 flag right); failsafe CH5 -100 %:
+1 s after the frames stop out5 1020 µs, out1 holds; failsafe CH1 -100 %,
+CH5 0 %: out1 1020 µs, out5 holds 1520 µs. The T14SG's packets are
+rebuilt bit for bit (`tests/fasst`).
 
 ## Futaba FASSTest
 

@@ -76,8 +76,40 @@ int main()
   hex("12a8d30dcc80e7e8fd6b123790783b24cd7118991c84", want);
   CHECK(!memcmp(p, want, sizeof(p)));
 
-  // Unpack: the hop index and step back; a flipped bit fails the CRC
   uint8_t plain[FASST_PACKET_LEN], uk, ustep;
+
+  // MULT vs the T14SG (doc/futaba/t14sg/mult_idle_20s.txt, all on hold):
+  // ch1..8, ch9..16, then the F/S cycle, consecutive frames, step 5
+  static const uint16_t mch[FASST_MULT_CHANNELS] = {1029, 1017, 1696, 1024, 352, 1029, 1696, 1024,
+                                                     1696, 1024, 1024, 1024, 112, 112, 1024, 1024};
+  static const ref_t mult[10] = {
+      {0, "67c2378dde1efa522ed7765b9c68c925a9930e952d8a"},
+      {5, "67c2378ddd9e5fc8d1777cdb9c7890e209998e956d07"},
+      {10, "67c2378ddb1e5f582ed7765b8f78c025a9930e8657c7"},
+      {15, "67c2378dd69e5fc8d1777cdb8e7890e209998e870cae"},
+      {20, "67c2378dd41efa522e777c5b8d68c92509990e84a685"},
+      {25, "67c2378dd39e5fc8d1777cdb9d7890e209998e94ccfb"},
+      {30, "67c2378dd11efa522ed7765b8f68c925a9930e86189b"},
+      {35, "67c2378dcc9e5f582e777cdb8e78c02509998e8775a3"},
+      {3, "67c2378ddc9efa522ed7765b8d68c925a9930e84a67a"},
+      {8, "67c2378dda1e5fc8d1777c5b9d7890e209990e947652"},
+  };
+  fasst_set_id(0x67027B60);
+  for (int t = 0; t < 10; t++) {
+    fasst_mult_packet(p, mult[t].k, 5, mch, t & 1, t < 2 ? 0 : t - 1, NULL, 0xFFFF);
+    hex(mult[t].hex, want);
+    CHECK(!memcmp(p, want, sizeof(p)));
+  }
+  // F/S on ch3 and ch7 (type 7): their slots take the F/S values, plain
+  // bit 2 set
+  uint16_t mfs[FASST_MULT_CHANNELS];
+  for (int i = 0; i < FASST_MULT_CHANNELS; i++) mfs[i] = 300 + i;
+  fasst_mult_packet(p, 4, 5, mch, false, 7, mfs, 0xFFFF & ~(1 << 2 | 1 << 6));
+  CHECK(fasst_unpack(p, plain, &uk, &ustep) && uk == 4 && plain[12] == 0x86 && plain[19] == 0xA6);
+  CHECK((plain[9] | (plain[10] & 7) << 8) == 302 && (plain[16] | (plain[17] & 7) << 8) == 306);
+  fasst_set_id(FASST_ID_DEFAULT);
+
+  // Unpack: the hop index and step back; a flipped bit fails the CRC
   for (uint8_t k = 0; k < FASST_HOPS; k++) {
     fasst_packet(p, k, 28, ch, k & 1, 0, NULL, 0);
     CHECK(fasst_unpack(p, plain, &uk, &ustep) && uk == k && ustep == 28);

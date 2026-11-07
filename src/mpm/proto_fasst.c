@@ -12,7 +12,11 @@
 //   channel holds). One cycle sets the receiver's failsafe, which a power
 //   cycle of the receiver forgets. None until the radio sends failsafe.
 //
-// MULT, 7ch: not yet (rejected).
+// MULT: FASST MULT (16 channels, the 10ch packet with every group's
+// flags, as the T14SG), otherwise as 10ch; the F/S cycle has 8 frames
+// (fasst_mult_packet()).
+//
+// 7ch: not yet (rejected).
 //
 // FT18 / FT12: FASSTest 18CH (the T14SG's "14CH": 16 channels + DG1 /
 // DG2, 15 ms hops) / 12CH (10 channels, 6.3 ms hops, Barker-7 chips), as
@@ -101,9 +105,11 @@ static uint16_t _fasst_callback()
   _update_power();
   radio_set_frequency_start(fasst_freq_khz(_hop));
 
-  uint16_t ch[FASST_CHANNELS], fs[FASST_CHANNELS];
+  bool mult = mpm.sub_protocol == SUB_MULT;
+  uint8_t n_ch = mult ? FASST_MULT_CHANNELS : FASST_CHANNELS;
+  uint16_t ch[FASST_MULT_CHANNELS], fs[FASST_MULT_CHANNELS];
   uint16_t hold = 0;
-  for (int i = 0; i < FASST_CHANNELS; i++) {
+  for (int i = 0; i < n_ch; i++) {
     ch[i] = _value(mpm.channels[i]);
     uint16_t f = mpm.failsafe[i];
     if (f == MPM_FAILSAFE_HOLD || f == MPM_FAILSAFE_NO_PULSE) hold |= 1 << i;
@@ -111,10 +117,11 @@ static uint16_t _fasst_callback()
   }
   uint8_t type = 0;
   uint32_t n = _frame % FASST_FS_EVERY;
-  if (mpm.failsafe_valid && n < FASST_FS_TYPES) type = n + 1;
+  if (mpm.failsafe_valid && n < (mult ? FASST_MULT_FS_TYPES : FASST_FS_TYPES)) type = n + 1;
 
   uint8_t pkt[FASST_PACKET_LEN];
-  fasst_packet(pkt, _hop, FASST_HOP_STEP, ch, _frame & 1, type, fs, hold);
+  if (mult) fasst_mult_packet(pkt, _hop, FASST_HOP_STEP, ch, _frame & 1, type, fs, hold);
+  else fasst_packet(pkt, _hop, FASST_HOP_STEP, ch, _frame & 1, type, fs, hold);
   fasst_spread(_chips, pkt);
   radio_set_sync_word(fasst_sync_word(_chips), 0);
   radio_tx_start_at(fasst_chips(_chips), FASST_CHIPS_TX_LEN,
@@ -351,8 +358,7 @@ static bool _ft_mode() { return mpm.sub_protocol == SUB_FT18 || mpm.sub_protocol
 
 void FASST_init()
 {
-  if (mpm.sub_protocol == SUB_MULT || mpm.sub_protocol == SUB_7CH ||
-      mpm.sub_protocol > SUB_FT12) {
+  if (mpm.sub_protocol == SUB_7CH || mpm.sub_protocol > SUB_FT12) {
     mpm_sub_invalid();
     return;
   }

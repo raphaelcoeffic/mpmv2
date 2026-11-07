@@ -61,6 +61,21 @@ uint32_t fasst_freq_khz(uint8_t k);
 void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt, uint8_t type,
                   const uint16_t* fs, uint16_t hold);
 
+// FASST MULT (the T14SG's): the same packet with 16 channels, every
+// group's flags select ch1..8 (0) or ch9..16 (1): alt = ch9..16. Plain type
+// bytes 12 / 19 = 0x80 | m / 0xA0 | m, m = FASST_MULT_NORMAL (bit 2: DG1 /
+// DG2, left 0). F/S cycle, types 1..FASST_MULT_FS_TYPES: type t carries the
+// F/S of two channels, ch9 + 13, 10 + 14, 11 + 15, 12 + 16, then 1 + 5 ...
+// 4 + 8, in their slots (the other slots as alt), m = code (0, 1, 2, 0x12)
+// | mode << 2 per channel: 0 hold (slot = the live value, as the T14SG),
+// 1 F/S (slot = fs[c]; plain bit 2 as the TM-10's F/S types). hold bit c
+// = channel c holds
+#define FASST_MULT_CHANNELS 16
+#define FASST_MULT_FS_TYPES 8
+#define FASST_MULT_NORMAL 0x13
+void fasst_mult_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt,
+                       uint8_t type, const uint16_t* fs, uint16_t hold);
+
 // A received packet (FASST_PACKET_LEN bytes as on air): plain = the packet
 // unwhitened; true if its CRC is right and its hop field valid, with its hop
 // index and step

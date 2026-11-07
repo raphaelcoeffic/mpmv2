@@ -119,6 +119,29 @@ static uint16_t _crc_kermit(const uint8_t* p, uint32_t n)
   return c;
 }
 
+// Plain packet: ID, hop position k + 1 and step, the groups (2 slots of
+// 11 bits + flag each), the type bytes 12 / 19 (plain); CRC over bytes
+// 0..19, then the whole packet whitened
+static void _fasst_pack(uint8_t* p, uint8_t k, uint8_t step, const uint16_t g[4][2],
+                        const uint8_t flags[4][2], uint8_t b12, uint8_t b19)
+{
+  memcpy(p, _id, 4);
+  p[4] = (k + 1) >> 1;
+  p[5] = ((k + 1) & 1) << 7 | (step & 0x7F);
+  static const uint8_t pos[4] = {6, 9, 13, 16};
+  for (int i = 0; i < 4; i++) {
+    uint32_t w = (g[i][0] & 0x7FF) | (uint32_t)flags[i][0] << 11 | (uint32_t)(g[i][1] & 0x7FF) << 12 |
+                 (uint32_t)flags[i][1] << 23;
+    for (int j = 0; j < 3; j++) p[pos[i] + j] = (uint8_t)(w >> (8 * j));
+  }
+  p[12] = b12;
+  p[19] = b19;
+  uint16_t crc = _crc_kermit(p, 20);
+  p[20] = crc & 0xFF;
+  p[21] = crc >> 8;
+  for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
+}
+
 void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt, uint8_t type,
                   const uint16_t* fs, uint16_t hold)
 {
@@ -149,24 +172,38 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
   bool b10 = fs_b ? type == 6 : alt;
   uint16_t g[4][2] = {{v[a9 ? 8 : 0], v[b10 ? 9 : 1]}, {v[2], v[3]}, {v[4], v[5]}, {v[6], v[7]}};
   uint8_t flags[4][2] = {{a9, b10}};
+  _fasst_pack(p, k, step, g, flags, b12 ^ _white[12], b19 ^ _white[19]);
+}
 
-  // Plain packet: ID, hop position k + 1 and step, the groups, the type
-  // bytes; CRC over bytes 0..19, then the whole packet whitened
-  memcpy(p, _id, 4);
-  p[4] = (k + 1) >> 1;
-  p[5] = ((k + 1) & 1) << 7 | (step & 0x7F);
-  static const uint8_t pos[4] = {6, 9, 13, 16};
+// FASST MULT F/S packets: the slot pair of each type's code, (group,
+// slot) = (q >> 1, q & 1) and (q >> 1) + 2
+static const uint8_t _mult_fs_codes[4] = {0x00, 0x01, 0x02, 0x12};
+
+void fasst_mult_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt,
+                       uint8_t type, const uint16_t* fs, uint16_t hold)
+{
+  uint16_t g[4][2];
+  uint8_t flags[4][2];
   for (int i = 0; i < 4; i++) {
-    uint32_t w = (g[i][0] & 0x7FF) | (uint32_t)flags[i][0] << 11 | (uint32_t)(g[i][1] & 0x7FF) << 12 |
-                 (uint32_t)flags[i][1] << 23;
-    for (int j = 0; j < 3; j++) p[pos[i] + j] = (uint8_t)(w >> (8 * j));
+    for (int j = 0; j < 2; j++) {
+      flags[i][j] = alt;
+      g[i][j] = ch[2 * i + j + (alt ? 8 : 0)];
+    }
   }
-  p[12] = b12 ^ _white[12];
-  p[19] = b19 ^ _white[19];
-  uint16_t crc = _crc_kermit(p, 20);
-  p[20] = crc & 0xFF;
-  p[21] = crc >> 8;
-  for (int i = 0; i < FASST_PACKET_LEN; i++) p[i] ^= _white[i];
+  uint8_t m[2] = {FASST_MULT_NORMAL, FASST_MULT_NORMAL};
+  if (type) {
+    uint8_t q = (type - 1) & 3;
+    bool high = type <= 4;
+    for (int i = 0; i < 2; i++) {
+      uint8_t grp = (q >> 1) + 2 * i, slot = q & 1;
+      uint8_t c = 2 * grp + slot + (high ? 8 : 0);
+      bool h = hold >> c & 1;
+      flags[grp][slot] = high;
+      g[grp][slot] = h ? ch[c] : fs[c];
+      m[i] = _mult_fs_codes[q] | (h ? 0 : 1) << 2;
+    }
+  }
+  _fasst_pack(p, k, step, g, flags, 0x80 | m[0], 0xA0 | m[1]);
 }
 
 // Plain bytes of a FASSTest packet before its CRC
