@@ -196,6 +196,20 @@ void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, con
   for (int i = 2; i < 18; i++) p[i] ^= mask[i];
 }
 
+void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs)
+{
+  memset(p, 0, FASSTEST_PACKET_LEN);
+  p[0] = 0x08 | (code & 7) << 5;
+  p[1] = 0x30 | code >> 3;  // bits 4..5 = 3 (meaning unknown), receiver 0
+  memcpy(p + 2, id, FASSTEST_ID_LEN);
+  p[8] = bfs;
+  p[9] = c;
+  p[15] = 0x02;  // the R7206SB: low-voltage time
+  uint16_t crc = _crc_kermit(p, 18);
+  p[18] = crc & 0xFF;
+  p[19] = crc >> 8;
+}
+
 bool fasst_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step)
 {
   for (int i = 0; i < FASST_PACKET_LEN; i++) plain[i] = p[i] ^ _white[i];

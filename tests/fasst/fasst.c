@@ -206,6 +206,10 @@ int main()
     hex("40cb0c9c1b7a205c46238e2cceac0344088af7c1", want);
     CHECK(!memcmp(pk, want, sizeof(pk)));
     CHECK(fasstest_hop_code(pk, &set, &row) && set == 0 && row == 21);
+    // The T14SG's link packet (ft14_link.txt)
+    fasstest_link_packet(pk, id, fasstest_code(0, 21), FASSTEST_LINK_CHANNEL(0), FASSTEST_BFS_DEFAULT);
+    hex("483b088aaffb0000260200000000000200002185", want);
+    CHECK(!memcmp(pk, want, sizeof(pk)));
   }
   return test_done();
 }

@@ -76,9 +76,22 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
   for (int i = 0; i < FASSTEST_TX_CHANNELS; i++) ch[i] = 352 + 84 * i;
   uint8_t pkt[FASSTEST_PACKET_LEN];
   uint32_t frames = cfg->secs * 1000000 / FASSTEST_FRAME_US;
-  uint32_t late = 0, errors = 0;
+  uint32_t link_frames = cfg->link_secs * 1000000 / FASSTEST_FRAME_US;
+  uint32_t late = 0, errors = 0, links = 0;
   int sweep_dir = 16;
   uint32_t t = micros() + 2000;
+  // Link: one packet per hop, the scan list's channels in turn
+  for (uint32_t n = 0; n < link_frames; n++, t += FASSTEST_FRAME_US) {
+    uint8_t lc = FASSTEST_LINK_CHANNEL(n % FASSTEST_LINK_CHANNELS);
+    if (radio_set_frequency_start(fasstest_freq_khz(lc)) != RADIO_OK) errors++;
+    fasstest_link_packet(pkt, cfg->id, code, lc, FASSTEST_BFS_DEFAULT);
+    fasst_spread_len(_chips, pkt, FASSTEST_PACKET_LEN);
+    radio_set_sync_word(fasst_sync_word(_chips), 0);
+    if (!micros_before(t - 200)) late++;
+    if (radio_tx_start_at(fasst_chips(_chips), FASSTEST_CHIPS_TX_LEN, t) != RADIO_OK) errors++;
+    if (radio_tx_wait() != RADIO_OK) errors++;
+    links++;
+  }
   for (uint32_t n = 0; n < frames; n++) {
     uint8_t c = fasstest_channel(set, row, n % FASSTEST_HOPS);
     if (radio_set_frequency_start(fasstest_freq_khz(c)) != RADIO_OK) errors++;
@@ -95,8 +108,8 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
   }
   if (radio_tx_wait() != RADIO_OK) errors++;
   radio_off();
-  print("@ok fasstest frames=%lu late=%lu errors=%lu status=0x%04x\r\n", frames, late, errors,
-        radio_last_status());
+  print("@ok fasstest links=%lu frames=%lu late=%lu errors=%lu status=0x%04x\r\n", links, frames,
+        late, errors, radio_last_status());
 }
 
 // FASST RX: parked on hop k or following the hops, every packet despread

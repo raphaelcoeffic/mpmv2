@@ -129,6 +129,17 @@ uint8_t fasstest_code(uint8_t set, uint8_t row);
 #define FASSTEST_TX_CHANNELS 16
 void fasstest_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, const uint16_t* ch,
                      bool high);
+// FASSTest link packet (type 8, not whitened) for channel c: the hop code
+// of the row the data will use, the TX ID, the battery F/S voltage (0.1
+// V), the channel (b9: the receiver checks it), 14CH, b15 = 2. The T14SG's
+// LINK (a few seconds, nothing else sent) puts one on each channel of the
+// receiver's link scan list 2, 8 ... 44 (FASSTEST_LINK_CHANNELS) every 30
+// hops, 4 hops apart; a receiver powered up within it takes the ID and
+// answers (type 0x18, ~14.9 ms later, with its serial)
+#define FASSTEST_LINK_CHANNELS 8
+#define FASSTEST_LINK_CHANNEL(i) (2 + 6 * (i))
+#define FASSTEST_BFS_DEFAULT 38  // 3.8 V
+void fasstest_link_packet(uint8_t* p, const uint8_t* id, uint8_t code, uint8_t c, uint8_t bfs);
 // Its chips: fasst_spread_len() of the 20 bytes
 #define FASSTEST_CHIPS_LEN 330
 #define FASSTEST_CHIPS_TX_LEN (FASSTEST_CHIPS_LEN - 4)

@@ -24,9 +24,12 @@ typedef void (*fasst_print_t)(const char* fmt, ...);
 // FASSTest 14CH TX experiment (fasstest_packet()): one packet per 15 ms
 // hop on a row's 22 channels, with a chosen TX ID (a receiver linked to it
 // follows). Channels 352 + 84 i (S.BUS values), ch1 swept; ch1..8 and
-// ch9..16 every other packet
+// ch9..16 every other packet. With link_secs: only link packets for that
+// long first (fasstest_link_packet(), one per hop on the link channels in
+// turn), then the data
 typedef struct {
   uint32_t secs;
+  uint32_t link_secs;
   uint16_t tx_power;  // RF core TX power word
   uint8_t row;        // 0..22 set A (General), 23..45 set B (France)
   uint16_t sweep;     // ch1 sweep, frames per step of 16, 0 = fixed

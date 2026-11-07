@@ -1591,16 +1591,18 @@ static void _cmd_fasstest(char* args)
   cfg.row = _number_or(&args, 0);
   cfg.sweep = _number_or(&args, 2);
   uint32_t id = _number_or(&args, 0x088AAFFB), id45 = _number_or(&args, 0);  // the T14SG's
+  cfg.link_secs = _number_or(&args, 0);
   for (int i = 0; i < 4; i++) cfg.id[i] = id >> (24 - 8 * i);
   cfg.id[4] = id45 >> 8;
   cfg.id[5] = id45;
-  if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45) {
-    _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5]\r\n");
+  if (cfg.secs == 0 || cfg.secs > 600 || cfg.row > 45 || cfg.link_secs > 600) {
+    _print("@err usage: fasstest [secs] [row] [sweep] [id0..3] [id4..5] [link_secs]\r\n");
     return;
   }
   _job_stop();
-  _printf("@ok fasstest secs=%lu row=%u code=%u sweep=%u id=%08lx%04lx\r\n", cfg.secs, cfg.row,
-          fasstest_code(cfg.row >= 23, cfg.row % 23), cfg.sweep, id, id45 & 0xFFFF);
+  _printf("@ok fasstest secs=%lu row=%u code=%u sweep=%u id=%08lx%04lx link=%lu\r\n", cfg.secs,
+          cfg.row, fasstest_code(cfg.row >= 23, cfg.row % 23), cfg.sweep, id, id45 & 0xFFFF,
+          cfg.link_secs);
   fasstest_run(&cfg, _printf);
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
