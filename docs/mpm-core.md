@@ -152,6 +152,7 @@ as the MPM builds its `.ino` files. The protocol files come with
 | `XK_ccnrf.c` | XK (X450, X420, Cars) and MoFly, on the XN297 emulation |
 | `MJXQ_ccnrf.c` | MJXq: WLH08, X600, X800, E010, Phoenix on the XN297 emulation; H26D, H26WH plain NRF24L01 packets |
 | `frsky.c` | FrSky D, V and X (`FrSkyDVX_Common`, `FrSkyD/V/X_cc2500`), FrSkyRX (`FrSky_Rx_cc2500.c`) |
+| `Futaba_cc2500.c` | Futaba S-FHSS (protocol 21, sub SFHSS), on the CC2500 emulation (CC2400 CRC) |
 | `FlySky_a7105.c` | FlySky (AFHDS): Std, V9x9, V6x6, V912, CX20 |
 | `AFHDS2A_a7105.c` | AFHDS2A |
 | `AFHDS2A_Rx_a7105.c` | FS2A_RX |
@@ -374,6 +375,7 @@ carry the data, the module's buffer-low flag holds them back.
 | WLtoys K989 car (1/28, V2x2 receiver) | V2x2 (5) sub 0, rx_num 0 | as with the 4-in-1: binds when powered up during the bind (no bind button, a new ID: the car's own transmitter binds on the ID 0 hop table, not needed), LED solid; throttle on CH2 (low = forward; the first reverse after forward brakes, the next reverses), steering on CH4 (high = left), centred channels (byte 80) hold still; keeps the bind across a car power cycle (solid 1 s after power up); signal off: wheels stop at once, LED blinks, back as soon as the signal is. No telemetry |
 | WLtoys 284131 car (1/28, XK receiver), on the MPM v2 driven over its USB (`car_drive.py`) | XK (62) sub 2 (Cars), rx_num 0 | binds when asked (car on, its transmitter off; Cars does not autobind), LED solid after the 3 s bind; throttle on CH2 (low = forward; reverse right after forward brakes, the next reverses), steering on CH4 (high = left), CH3 and CH5..16 at minimum (bytes 0, 10, 11, 14 at 00 as its transmitter sends); differences with its transmitter (trims 40 40 40 instead of 3b 40 00, low bits in bytes 12 / 13) do not matter; keeps the bind across a car power cycle; signal off: wheels stop at once, back as soon as the signal is. Its own transmitter (`xk_sniff.py`): bind address and channels as MPM's, GID c20745, data address and channel derived from the GID as `XK_initialize_txid()` does, steering in byte 1 and throttle in byte 2 (01..7f right / forward, 81..ff left / reverse), the THR D/R knob scales the throttle. No telemetry |
 | Eachine E010 quadcopter (Mike Blandford's, 2026-11-02, his build of the same changes) | MJXq (18) sub 4 (E010) | works |
+| Futaba R2008SB (S-FHSS, S.BUS on the Pico's `sbus2mon`), from the ZBDongle-P's MPM port | Futaba (21) sub 0 (SFHSS), `--failsafe 1=1844,2=204,3=1024` | links (its Link button while the module sends; no bind of the module's), CH1-4 on S.BUS 224 to 1824 (1020 to 2020 µs), CH5-8 1024, no more than one frame lost in a row in 104 s. Signal off: failsafe CH1 22 (894 µs), CH2 2020 (2142 µs), CH3 1022, the others hold: upstream's F/S values span 1.25 times its live range (F/S words: `0x800` + a signed 10-bit offset from 1520 in 1.25 µs steps, as a T14SG sends them; bench `sfhss`). No telemetry |
 
 Option: the LaunchPad sends about 34 kHz above the 4-in-1's CC2500 (MPM v2
 frequency estimates of both); option -24 moves it there. The option moves
@@ -743,13 +745,13 @@ fifth visit code 2 with CH3 = 1610, as the T14SG's. On a 7ch receiver
 linked on the first press; out1 1023 to 2016 µs (CH1 sweep), out3
 1920 µs, a pulse every 16 ms, no gaps in 2 minutes; 1.1 s after the
 frames stop out3 1220 µs (the failsafe), out1 holds.
-
-## Futaba FASSTest
 The MPM's 7ch on that R6106HF (the ZBDongle-P's MPM port, `radio_sim.py
 drive --proto 110 --sub 2 --failsafe 3=1500`, linked again: its ID is the
 module's): out1 and out3 1019 to 2021 µs (CH1 and CH3 swept), one 33 ms
 gap in 96 s; 1.1 s after the frames stop out3 1810 µs (the failsafe),
 out1 holds.
+
+## Futaba FASSTest
 
 Sub protocols FT18 and FT12 of protocol 110: FASSTest 18CH (the receivers'
 name; the T14SG's "14CH", 16 channels + DG1/DG2) and 12CH as a

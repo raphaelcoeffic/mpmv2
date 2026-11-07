@@ -34,6 +34,10 @@ uint16_t XK_callback();
 void MJXQ_init();
 uint16_t MJXQ_callback();
 #endif
+#ifdef FUTABA_CC2500_INO
+void SFHSS_init();
+uint16_t SFHSS_callback();
+#endif
 #ifdef DSM_CYRF6936_INO
 void DSM_init();
 uint16_t DSM_callback();

@@ -10,6 +10,7 @@ set(mpm_protocol_sources
     V2X2_nrf24l01.c
     XK_ccnrf.c
     MJXQ_ccnrf.c
+    Futaba_cc2500.c
     frsky.c
     FlySky_a7105.c
     AFHDS2A_a7105.c

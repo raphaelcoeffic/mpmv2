@@ -64,6 +64,7 @@
 #define FRSKYD_CC2500_INO
 #define FRSKYV_CC2500_INO
 #define FRSKYX_CC2500_INO
+#define FUTABA_CC2500_INO
 // FrSky RX, its clone subtype: the TX ID and hop table of FrSky D / X / X2
 // for their "Cloned" subtypes
 #define FRSKY_RX_CC2500_INO
