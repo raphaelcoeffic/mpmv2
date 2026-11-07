@@ -125,6 +125,14 @@ ninja -C build-zbp flash-bench          # tools/rom_flash.py --sonoff build-zbp/
 firmware back. The host tools take the dongle's port as the CC2652's:
 `CC_PORT=/dev/cu.usbserial-<id>` (or `-p`).
 
+The MPM port runs on it too, in place of the bench, as on the CC2652
+LaunchPad: `ninja -C build-zbp flash-firmware` (`zbdongle-p-firmware.bin`,
+also one image at 0x0), the radio's link on the same USB port at 100000
+8E2 (the CP2102N takes it on macOS): `radio_sim.py -p /dev/cu.usbserial-<id>
+...`. The EEPROM is in RAM (`eeprom_ram.c`, lost at reset) and served as
+the file `eeprom` ([mpm-core.md](mpm-core.md)); no PPM input, no module bay
+(baysim needs the bay's pins). `flash-bench` puts the bench back.
+
 **Sniffer page for helpers** (`tools/sniffer_web/index.html`): a static page
 using Web Serial (Chrome, Edge, Firefox 151+, desktop) that loads the bench on the
 dongle through the ROM boot loader (`rom_flash.py --sonoff` in JavaScript,

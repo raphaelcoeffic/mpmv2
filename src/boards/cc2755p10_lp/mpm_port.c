@@ -1,7 +1,7 @@
 // MULTI-Module core on the LP-EM-CC2755P10: the link with the radio on
 // UART0, 100000 baud 8E2, through the XDS110 back channel (a host plays the
 // radio: tools/bench/radio_sim.py), normal polarity. No PPM input, no file
-// system: the EEPROM in RAM (eeprom.c), read and written from the host as
+// system: the EEPROM in RAM (eeprom_ram.c), read and written from the host as
 // the file "eeprom" (file_server_ram.c: "FS" requests on the link, as on the
 // MPM v2's USB), and the debug log sent when a host asks (mpm_fs.py log).
 //

@@ -526,7 +526,8 @@ the settings; a protocol started before keeps what it read, until it starts
 again), the [settings](#settings). `radio_sim.py --eeprom FILE` uploads it
 before its frames start, `--save-eeprom FILE` reads it back at the end.
 
-Boards without a file system (the CC2755P10 LaunchPad's `cc27-mpm`): the
+Boards without a file system (the CC2755P10 LaunchPad's `cc27-mpm`, the
+ZBDongle-P's `firmware`): the
 same requests on the radio's link serve the file `eeprom` alone, the RAM
 copy (`src/core/file_server_ram.c`): `mpm_fs.py -p $CC_PORT get eeprom`,
 `put`, `eeprom`, `rm` (erased), `ls`, and `log` (the debug log); new files
@@ -744,6 +745,11 @@ linked on the first press; out1 1023 to 2016 µs (CH1 sweep), out3
 frames stop out3 1220 µs (the failsafe), out1 holds.
 
 ## Futaba FASSTest
+The MPM's 7ch on that R6106HF (the ZBDongle-P's MPM port, `radio_sim.py
+drive --proto 110 --sub 2 --failsafe 3=1500`, linked again: its ID is the
+module's): out1 and out3 1019 to 2021 µs (CH1 and CH3 swept), one 33 ms
+gap in 96 s; 1.1 s after the frames stop out3 1810 µs (the failsafe),
+out1 holds.
 
 Sub protocols FT18 and FT12 of protocol 110: FASSTest 18CH (the receivers'
 name; the T14SG's "14CH", 16 channels + DG1/DG2) and 12CH as a

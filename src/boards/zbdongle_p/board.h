@@ -1,5 +1,6 @@
 // Sonoff Zigbee 3.0 USB Dongle Plus, ZBDongle-P (CC2652P): pins, TX power,
-// CCFG. The radio bench on it, a FASST sniffer (bench fasstrx)
+// CCFG. The radio bench on it (a FASST sniffer: bench fasstrx), or the MPM
+// port (mpm_port.c)
 
 #pragma once
 
@@ -33,6 +34,13 @@
 // RF core TX power word, the normal PA path: +5 dBm in the CC2652R's table,
 // not measured on the CC2652P (the 20 dBm PA needs its own setup: unused)
 #define RF_TX_POWER_DEFAULT 0x7217
+// The words for each level below it, dB (rf_power_word()): the CC2652R1
+// LaunchPad's (measured there), not measured on the CC2652P
+#define RF_TX_POWER_STEPS                                                    \
+  {0, 0x7217}, {1, 0x4E63}, {2, 0x385D}, {3, 0x3259}, {5, 0x2853},           \
+  {7, 0x1893}, {9, 0x12D6}, {11, 0x10D4}, {13, 0x0ACF}, {16, 0x0ACC},        \
+  {19, 0x06CA}, {20, 0x0443}, {22, 0x0484}, {24, 0x04C6}, {26, 0x04C5},      \
+  {28, 0x04C4}, {31, 0x04C3}, {34, 0x04C2}, {37, 0x04C1}
 
 void board_init();
 // The board's pins at boot (board.c), from board_init()
