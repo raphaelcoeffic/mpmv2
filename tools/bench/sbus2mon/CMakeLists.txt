@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 
-# S.BUS2 monitor (main.c), for a Raspberry Pi Pico:
+# S.BUS2 monitor and sensor emulator (main.c), for a Raspberry Pi Pico:
 #   cmake -B build -G Ninja -DPICO_SDK_PATH=~/Src/pico-sdk
 #   cmake --build build
 include(pico_sdk_import.cmake)
@@ -15,6 +15,7 @@ pico_sdk_init()
 
 add_executable(sbus2mon main.c)
 pico_generate_pio_header(sbus2mon ${CMAKE_CURRENT_LIST_DIR}/sbus_rx.pio)
+pico_generate_pio_header(sbus2mon ${CMAKE_CURRENT_LIST_DIR}/sbus_tx.pio)
 
 set(SBUS2_PIN 2 CACHE STRING "the receiver's S.BUS2 line")
 target_compile_definitions(sbus2mon PRIVATE SBUS2_PIN=${SBUS2_PIN})
