@@ -19,7 +19,10 @@
 // flags, as the T14SG), otherwise as 10ch; the F/S cycle has 8 frames
 // (fasst_mult_packet()).
 //
-// 7ch: not yet (rejected).
+// 7ch: FASST 7CH (fasst7_packet()), one 17-byte packet per 8 ms hop on
+// the 10ch hops and steps, the radio's channels 1..7, as the T14SG. Only
+// ch3 has a failsafe (the radio's CH3 value; hold and no pulse: hold),
+// sent in every FASST7_FS_EVERY-th packet, the others say whether it is set.
 //
 // FT18 / FT12: FASSTest 18CH (the T14SG's "14CH": 16 channels + DG1 /
 // DG2, 15 ms hops) / 12CH (10 channels, 6.3 ms hops, Barker-7 chips), as
@@ -104,9 +107,16 @@ static void _update_power()
   }
 }
 
+// FASST 7CH: us - 200, +-100 % = 1020..2020 us as 10ch
+static uint16_t _value7(uint16_t ch)
+{
+  int32_t v = 820 + ((int32_t)ch - MPM_CHANNEL_MIN) * 1000 / (MPM_CHANNEL_MAX - MPM_CHANNEL_MIN);
+  return v < 0 ? 0 : v > FASST_VALUE_MAX ? FASST_VALUE_MAX : v;
+}
+
 static radio_packet_t _pkt;
 
-// FASST 10ch / MULT
+// FASST 10ch / MULT / 7ch
 static uint8_t _hop, _step;
 static uint32_t _frame;
 static bool _listening;
@@ -120,7 +130,8 @@ static uint16_t _fasst_listen()
   while (radio_receive(&_pkt)) {
     uint8_t b[FASST_PACKET_LEN], plain[FASST_PACKET_LEN], k, step;
     if (fasst_rx_bytes(_pkt.data, FASST_BARKER_11, FASST_PACKET_LEN, b, NULL) >= 0 &&
-        fasst_unpack(b, plain, &k, &step) && step < 37)
+        (fasst_unpack(b, plain, &k, &step) || fasst7_unpack(b, plain, &k, &step, NULL, NULL)) &&
+        step < 37)
       _heard |= 1ull << step;
   }
   if (micros() - _listen_start < FASST_LISTEN_US) {
@@ -138,11 +149,33 @@ static uint16_t _fasst_listen()
   return FASST_LISTEN_POLL_US;
 }
 
+static uint16_t _fasst7_callback()
+{
+  uint16_t ch[FASST7_CHANNELS];
+  for (int i = 0; i < FASST7_CHANNELS; i++) ch[i] = _value7(mpm.channels[i]);
+  uint16_t f = mpm.failsafe[2];
+  int16_t fs3 = !mpm.failsafe_valid || f == MPM_FAILSAFE_HOLD || f == MPM_FAILSAFE_NO_PULSE
+                    ? -1
+                    : _value7(f);
+
+  uint8_t pkt[FASST7_PACKET_LEN];
+  fasst7_packet(pkt, _hop, _step, ch, _frame % FASST7_FS_EVERY == 0, fs3);
+  fasst_spread_len(_chips, pkt, FASST7_PACKET_LEN);
+  radio_set_sync_word(fasst_sync_word(_chips), 0);
+  radio_tx_start_at(fasst_chips(_chips), FASST7_CHIPS_LEN - 4,
+                    mpm_callback_deadline() + FASST_TX_DELAY_US);
+
+  _hop = fasst_next_hop(_hop, _step);
+  _frame++;
+  return FASST7_FRAME_US;
+}
+
 static uint16_t _fasst_callback()
 {
   if (_listening) return _fasst_listen();
   _update_power();
   radio_set_frequency_start(fasst_freq_khz(_hop));
+  if (mpm.sub_protocol == SUB_7CH) return _fasst7_callback();
 
   bool mult = mpm.sub_protocol == SUB_MULT;
   uint8_t n_ch = mult ? FASST_MULT_CHANNELS : FASST_CHANNELS;
@@ -396,7 +429,7 @@ static bool _ft_mode() { return mpm.sub_protocol == SUB_FT18 || mpm.sub_protocol
 
 void FASST_init()
 {
-  if (mpm.sub_protocol == SUB_7CH || mpm.sub_protocol > SUB_FT12) {
+  if (mpm.sub_protocol > SUB_FT12) {
     mpm_sub_invalid();
     return;
   }

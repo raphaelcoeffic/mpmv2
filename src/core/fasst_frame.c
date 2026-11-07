@@ -206,6 +206,56 @@ void fasst_mult_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, 
   _fasst_pack(p, k, step, g, flags, 0x80 | m[0], 0xA0 | m[1]);
 }
 
+// FASST 7CH whitening: the 10ch stream from offset 46893
+static const uint8_t _white7[FASST7_PACKET_LEN] = {0x00, 0x80, 0x88, 0x49, 0x6B, 0xED,
+                                                   0xAA, 0x84, 0x1E, 0x5A, 0xA0, 0xED,
+                                                   0xF5, 0x0F, 0x10, 0xB9, 0xF1};
+
+void fasst7_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool fs_packet,
+                   int16_t fs3)
+{
+  memset(p, 0, FASST7_PACKET_LEN);
+  memcpy(p, _id, 3);
+  p[3] = (_id[3] & 0xE0) | (k + 1) >> 1;
+  p[4] = ((k + 1) & 1) << 7;
+  // Bits from byte 4 bit 5 on, MSB first
+  uint8_t code = fs_packet ? (fs3 < 0 ? 3 : 2) : (fs3 < 0 ? 0 : 1);
+  uint32_t pos = 4 * 8 + 2;  // bit index from byte 0 bit 7
+  for (int i = 0; i <= FASST7_CHANNELS; i++) {
+    uint16_t v = i == FASST7_CHANNELS ? (step & 0x3F) << 3 | code
+                 : fs_packet && i == 2 && fs3 >= 0 ? fs3 : ch[i];
+    uint8_t n = i == FASST7_CHANNELS ? 9 : 11;
+    for (int b = n - 1; b >= 0; b--, pos++)
+      if (v >> b & 1) p[pos / 8] |= 0x80 >> (pos % 8);
+  }
+  uint16_t crc = _crc_kermit(p, 15);
+  p[15] = crc & 0xFF;
+  p[16] = crc >> 8;
+  for (int i = 0; i < FASST7_PACKET_LEN; i++) p[i] ^= _white7[i];
+}
+
+bool fasst7_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step, uint16_t* ch,
+                   uint8_t* code)
+{
+  for (int i = 0; i < FASST7_PACKET_LEN; i++) plain[i] = p[i] ^ _white7[i];
+  if (_crc_kermit(plain, 15) != (plain[15] | plain[16] << 8)) return false;
+  uint8_t hop = (plain[3] & 0x1F) << 1 | plain[4] >> 7;
+  uint32_t pos = 4 * 8 + 2;
+  uint16_t v[FASST7_CHANNELS + 1];
+  for (int i = 0; i <= FASST7_CHANNELS; i++) {
+    uint8_t n = i == FASST7_CHANNELS ? 9 : 11;
+    v[i] = 0;
+    for (int b = 0; b < n; b++, pos++) v[i] = v[i] << 1 | (plain[pos / 8] >> (7 - pos % 8) & 1);
+  }
+  if (ch) memcpy(ch, v, FASST7_CHANNELS * sizeof(*v));
+  *k = hop - 1;
+  *step = v[FASST7_CHANNELS] >> 3;
+  if (code) *code = v[FASST7_CHANNELS] & 3;
+  if (*step > FASST_FRANCE_STEP)
+    return *step <= FASST_FRANCE_STEP + FASST_FRANCE_HOPS && *k >= 1 && *k <= FASST_FRANCE_HOPS;
+  return hop >= 1 && *k < FASST_HOPS && *step >= 1 && *step < 37;
+}
+
 // Plain bytes of a FASSTest packet before its CRC
 static uint8_t _fasstest_len(bool ch12)
 {

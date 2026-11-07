@@ -107,6 +107,38 @@ int main()
   fasst_mult_packet(p, 4, 5, mch, false, 7, mfs, 0xFFFF & ~(1 << 2 | 1 << 6));
   CHECK(fasst_unpack(p, plain, &uk, &ustep) && uk == 4 && plain[12] == 0x86 && plain[19] == 0xA6);
   CHECK((plain[9] | (plain[10] & 7) << 8) == 302 && (plain[16] | (plain[17] & 7) << 8) == 306);
+
+  // 7CH vs the T14SG (doc/futaba/t14sg/7ch_*.txt): idle, its F/S packet
+  // (hold), throttle F/S at +66 % (F/S packet, normal), a sweep frame, hop
+  // 35, France (step 61)
+  static const struct {
+    uint8_t k, step;
+    bool fs_packet;
+    int16_t fs3;
+    uint16_t ch[FASST7_CHANNELS];
+    const char* hex;
+  } ref7[] = {
+      {0, 5, false, -1, {1323, 1315, 1740, 1320, 900, 1323, 1740}, "6782f329c2b0895d8afb62bf489738d608"},
+      {0, 5, true, -1, {1323, 1315, 1740, 1320, 900, 1323, 1740}, "6782f329c2b0895d8afb62bf48973b4d3a"},
+      {0, 29, true, 1600, {1324, 1316, 1740, 1320, 900, 1324, 1740}, "6782f329c2888e4c0afb62bf3897fae6cf"},
+      {0, 29, false, 1600, {1324, 1316, 1740, 1320, 900, 1324, 1740}, "6782f329c2888e5d8afb62bf3897f9a7a1"},
+      {0, 5, true, -1, {1322, 1316, 1543, 1320, 900, 1322, 1543}, "6782f329c2b88e44eafb62bf59013bbc7b"},
+      {35, 5, false, -1, {1323, 1315, 1740, 1320, 900, 1323, 1740}, "6782f33b42b0895d8afb62bf489738ae8d"},
+      {1, 61, false, -1, {1324, 1315, 1740, 1320, 900, 1324, 1740}, "6782f3284288895d8afb62bf3896f85a57"},
+  };
+  uint8_t p7[FASST7_PACKET_LEN], want7[FASST7_PACKET_LEN], plain7[FASST7_PACKET_LEN], code;
+  uint16_t ch7[FASST7_CHANNELS];
+  for (unsigned t = 0; t < sizeof(ref7) / sizeof(ref7[0]); t++) {
+    fasst7_packet(p7, ref7[t].k, ref7[t].step, ref7[t].ch, ref7[t].fs_packet, ref7[t].fs3);
+    hex(ref7[t].hex, want7);
+    CHECK(!memcmp(p7, want7, sizeof(p7)));
+    CHECK(fasst7_unpack(want7, plain7, &uk, &ustep, ch7, &code) && uk == ref7[t].k &&
+          ustep == ref7[t].step);
+    CHECK(code == (ref7[t].fs_packet ? 2 : 0) + ((ref7[t].fs3 < 0) == ref7[t].fs_packet));
+    CHECK(ch7[2] == (ref7[t].fs_packet && ref7[t].fs3 >= 0 ? ref7[t].fs3 : ref7[t].ch[2]));
+  }
+  want7[6] ^= 1;
+  CHECK(!fasst7_unpack(want7, plain7, &uk, &ustep, NULL, NULL));
   fasst_set_id(FASST_ID_DEFAULT);
 
   // Unpack: the hop index and step back; a flipped bit fails the CRC

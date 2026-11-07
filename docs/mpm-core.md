@@ -658,7 +658,7 @@ in the radio frames, and `micros()` at the callback. Sub protocols: 1 Mbps,
 
 Protocol 110, "FASST": mpm-v2's own, not a MULTI-Module protocol (110 is
 not assigned upstream; the last there is MoFly, 109). Sub protocols 10ch
-(FASST 10ch), MULT (FASST MULT, 16 channels), 7ch (not yet: rejected),
+(FASST 10ch), MULT (FASST MULT, 16 channels), 7ch (FASST 7CH),
 FT18 and FT12 (FASSTest
 18CH and 12CH, [below](#futaba-fasstest)). FASST was traced from a TM-10
 module driving an R6008HS, FASSTest from a T14SG and an R7008SB and the
@@ -693,6 +693,13 @@ R7206SB's firmware (`doc/futaba.md`, not in the repository).
   then 1 + 5 to 4 + 8, as the T14SG's), each channel's mode in the type
   bytes: hold (the live value, as the T14SG with all on hold) or F/S (the
   TM-10's F/S bit).
+- **7ch:** FASST 7CH as the T14SG's: a 17-byte packet per 8 ms on the
+  10ch hops and steps (whitening, CRC-16/KERMIT), the hop position in ID
+  byte 3's low 5 bits and byte 4 bit 7, then 7 11-bit channels (µs - 200:
+  ±100% = 1020 to 2020 µs) and a 9-bit tail (step, code). Only CH3 has a
+  failsafe: every tenth packet carries it in the CH3 slot (code 2; 3 when
+  CH3 holds or no failsafe yet), the others say whether one is set (1) or
+  not (0).
 - **Failsafe:** once the radio has sent failsafe values, the F/S cycle
   (6 frames, the positions of two channels each) once per second; hold and
   no pulses: the channel holds. The receiver forgets its failsafe when
@@ -722,6 +729,15 @@ MULT on step 28 and the dongle parked on hop 35: steps 2, 22, 1, 10 and
 13 in five starts (32, 10, 26 without it); a test build taking "the
 lowest step heard + 1" came up on 29 three times out of three (33, none
 heard, without the T14SG).
+
+7ch: the T14SG's packets (idle, its F/S packets, throttle F/S at +66 %,
+a sweep, hop 35, Area France) are rebuilt bit for bit (`tests/fasst`).
+LaunchPad with `radio_sim.py drive --proto 110 --sub 2 --failsafe
+3=1500`, the dongle (`fasstrx`) parked on hop 0: 68/68 packets with a good
+CRC, 8000 µs per hop, step 32 picked, CH1 to 4 sweep 820 to 1820, CH5 to 7
+1320; the first packet code 3 (no failsafe yet), then code 1, and every
+fifth visit code 2 with CH3 = 1610, as the T14SG's. Not yet tried on a 7ch
+receiver.
 
 ## Futaba FASSTest
 

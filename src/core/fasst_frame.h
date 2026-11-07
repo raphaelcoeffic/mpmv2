@@ -76,6 +76,26 @@ void fasst_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool 
 void fasst_mult_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool alt,
                        uint8_t type, const uint16_t* fs, uint16_t hold);
 
+// FASST 7CH (the T14SG's): one 17-byte packet per FASST7_FRAME_US, the
+// same hops and step rule. Plain: ID0..2, ID3 (low 5 bits 0) | (k + 1) >>
+// 1, byte 4 bit 7 = (k + 1) & 1, then MSB first from byte 4 bit 5: 7 x 11
+// bits ch1..7 (value = pulse - 200 us), the tail: step (6 bits), 0, code
+// (2 bits); CRC-16/KERMIT over 0..14 at 15..16 (low byte first), all
+// whitened with the 10ch stream at offset 46893. Code: normal packet 0
+// (throttle on hold) or 1 (throttle F/S set); every FASST7_FS_EVERY-th one
+// is an F/S packet, 3 (hold, all live) or 2 (ch3's slot = fs3, its F/S
+// position). Only ch3 has F/S in 7CH. fs3 < 0: hold
+#define FASST7_PACKET_LEN 17
+#define FASST7_CHANNELS 7
+#define FASST7_FRAME_US 8000
+#define FASST7_FS_EVERY 10
+#define FASST7_CHIPS_LEN ((80 + 8 * FASST7_PACKET_LEN) * 11 / 8)
+void fasst7_packet(uint8_t* p, uint8_t k, uint8_t step, const uint16_t* ch, bool fs_packet,
+                   int16_t fs3);
+// A received 7CH packet: as fasst_unpack(), plus the 7 values and the code
+bool fasst7_unpack(const uint8_t* p, uint8_t* plain, uint8_t* k, uint8_t* step, uint16_t* ch,
+                   uint8_t* code);
+
 // A received packet (FASST_PACKET_LEN bytes as on air): plain = the packet
 // unwhitened; true if its CRC is right and its hop field valid, with its hop
 // index and step
