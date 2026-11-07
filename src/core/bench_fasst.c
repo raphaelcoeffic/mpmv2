@@ -233,8 +233,8 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print)
                 fasstest_reply_unpack(_bytes, false, plain, rx_id, cfg->id, rc);
           if (got) {
             tele++;
-            print("@tele %lu %u rssi=%d page=%u ", _pkt.timestamp_us, rc, _pkt.rssi,
-                  plain[1] >> 4 & 3);
+            print("@tele %lu %u rssi=%d dt=%lu page=%u ", _pkt.timestamp_us, rc, _pkt.rssi,
+                  _pkt.timestamp_us + BIT_US(&rx, shift) - t, plain[1] >> 4 & 3);
             _print_hex_line(print, plain + 2, 16, 2);
             print("\r\n");
           } else {
@@ -401,4 +401,158 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
   radio_off();
   print("@end fasstrx packets=%lu crc_ok=%lu missed=%lu locks=%lu restarts=%lu buf_full=%u\r\n",
         packets, good, missed, locks, restarts, st.buf_full);
+}
+
+// Emulator: a packet's TX start this many bits before its RX timestamp +
+// shift (the preamble and sync word, RF core latencies: the reply 15276 us
+// after the request's TX start on the dongle's fasstest at 70, 14565 +
+// 2 x 612 - 513)
+#define FT_EM_TS_BITS 83
+
+static void _em_tx(const uint8_t* p, uint8_t chips, uint8_t len, uint8_t c, uint32_t t,
+                   uint32_t* late, uint32_t* errors)
+{
+  radio_rx_stop();
+  if (radio_set_frequency(fasstest_freq_khz(c)) != RADIO_OK) (*errors)++;
+  fasst_spread_n(_chips, chips, p, len);
+  radio_set_sync_word(fasst_sync_word(_chips), fasst_rx_sync_word(chips));
+  if (!micros_before(t - 200)) (*late)++;
+  if (radio_tx_start_at(fasst_chips(_chips), (80 + 8 * len) * chips / 8 - 4, t) != RADIO_OK)
+    (*errors)++;
+  if (radio_tx_wait() != RADIO_OK) (*errors)++;
+}
+
+// Page p's data (bench_fasst.h), n replies sent before
+static void _em_data(uint8_t* d, bool ch12, uint8_t page, uint32_t n)
+{
+  static const uint8_t page0[16] = {0xC0, 0x33, 0x7D, 0x80, 0xE8, 0x03, 0x80, 0x4A, 0x00, 0x78};
+  memset(d, 0, 16);
+  if (ch12) {
+    d[0] = 0xC0;
+    d[1] = 0x32;
+    d[2] = n % 101;
+  } else if (page == 0) {
+    memcpy(d, page0, sizeof(page0));
+    d[14] = n >> 8;
+    d[15] = n;
+  } else if (page == 1) {
+    d[0] = 0x40;
+    d[1] = 0x3C;
+  }
+}
+
+void fasstest_em_run(const fasstest_em_cfg_t* cfg, fasst_print_t print)
+{
+  uint8_t id[FASSTEST_ID_LEN];
+  memcpy(id, cfg->id, sizeof(id));
+  bool linked = false, ch12 = cfg->ch12;
+  for (int i = 0; i < FASSTEST_ID_LEN; i++) linked |= id[i] != 0;
+  uint8_t park = linked ? cfg->park : FASSTEST_LINK_CHANNEL(0);
+  fasst_rx_cfg_t rx = {.chips = linked && ch12 ? FASST_BARKER_7 : FASST_BARKER_11};
+  rx.bytes = linked && ch12 ? FASSTEST_PACKET_LEN_12CH : FASSTEST_PACKET_LEN;
+  radio_phy_t phy;
+  fasst_phy(&phy, cfg->tx_power);
+  radio_set_sync_word(0, fasst_rx_sync_word(rx.chips));
+  uint16_t len = FASST_RX_LEN(rx.chips, _rx_bits(&rx));
+  if (radio_init(&phy) != RADIO_OK || radio_set_frequency(fasstest_freq_khz(park)) != RADIO_OK ||
+      radio_rx_start(len) != RADIO_OK) {
+    print("@err ftrx radio status=0x%04x\r\n", radio_last_status());
+    radio_off();
+    return;
+  }
+
+  // Locked: on channel c, the next TX packet's sync (timestamp + shift) at
+  // t_next on channel next, the radio moving there FASST_RX_LEAD_US before
+  uint8_t c = park, next = 0, set = 0, row = 0;
+  bool locked = false, hop_pending = false;
+  uint32_t t_next = 0, misses = 0, rx_us = BIT_US(&rx, _rx_bits(&rx));
+  uint32_t frame_us = ch12 ? FASSTEST_FRAME_US_12CH : FASSTEST_FRAME_US;
+  uint32_t packets = 0, good = 0, links = 0, requests = 0, missed = 0, locks = 0, late = 0;
+  uint32_t errors = 0;
+  uint8_t pkt[FASSTEST_PACKET_LEN], data[16], plain[FASSTEST_PACKET_LEN];
+  uint32_t t_end = micros() + cfg->secs * 1000000;
+  while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
+    if (radio_receive(&_pkt)) {
+      packets++;
+      int32_t shift = _despread(&rx);
+      if (shift < 0) continue;
+      uint32_t t_sync = _pkt.timestamp_us + BIT_US(&rx, shift);
+      uint32_t t_tx = t_sync - BIT_US(&rx, FT_EM_TS_BITS);
+      if (!linked) {
+        if (!fasstest_link_check(_bytes, c)) continue;
+        // The link reply on its channel, then the data mode
+        links++;
+        fasstest_link_reply(pkt, _bytes, cfg->rx);
+        _em_tx(pkt, FASST_BARKER_11, FASSTEST_PACKET_LEN, c, t_tx + FASSTEST_LINK_REPLY_US, &late,
+               &errors);
+        memcpy(id, _bytes + 2, FASSTEST_ID_LEN);
+        ch12 = _bytes[14] & 0x02;
+        fasstest_hop_code(_bytes, &set, &row);
+        park = fasstest_channel(set, row, 0);
+        print("@link id=%02x%02x%02x%02x%02x%02x code=%u ch12=%u bfs=%u\r\n", id[0], id[1],
+              id[2], id[3], id[4], id[5], fasstest_code(set, row), ch12, _bytes[8]);
+        linked = true;
+        rx.chips = ch12 ? FASST_BARKER_7 : FASST_BARKER_11;
+        rx.bytes = ch12 ? FASSTEST_PACKET_LEN_12CH : FASSTEST_PACKET_LEN;
+        frame_us = ch12 ? FASSTEST_FRAME_US_12CH : FASSTEST_FRAME_US;
+        rx_us = BIT_US(&rx, _rx_bits(&rx));
+        len = FASST_RX_LEN(rx.chips, _rx_bits(&rx));
+        radio_set_sync_word(0, fasst_rx_sync_word(rx.chips));
+        c = park;
+        radio_set_frequency(fasstest_freq_khz(c));
+        radio_rx_start(len);
+        continue;
+      }
+      // A TX packet with our ID: the hops followed, a request answered
+      if ((_bytes[0] & 0x1C) != 0 || !fasstest_reply_unpack(_bytes, ch12, plain, id, id, c) ||
+          !fasstest_hop_code(_bytes, &set, &row) || !fasstest_next_channel(set, row, c, &next))
+        continue;
+      good++;
+      locks += !locked;
+      locked = true;
+      misses = 0;
+      t_next = t_sync + frame_us;
+      if (plain[1] & 0x20) {
+        uint8_t page = ch12 ? 0 : plain[16] >> 1 & 3;
+        _em_data(data, ch12, page, requests);
+        fasstest_reply_packet(pkt, ch12, fasstest_code(set, row), page, data, cfg->rx, id, next);
+        _em_tx(pkt, rx.chips, rx.bytes, next, t_tx + (ch12 ? FASSTEST_REPLY_US_12CH : FASSTEST_REPLY_US),
+               &late, &errors);
+        print("@req %lu %u page=%u reply=%u\r\n", t_sync, c, page, next);
+        requests++;
+        // The TX leaves the reply's hop out
+        fasstest_next_channel(set, row, next, &next);
+        t_next += frame_us;
+      }
+      hop_pending = true;
+      if (!radio_rx_active()) radio_rx_start(len);
+    } else if (hop_pending && !micros_before(t_next - FASST_RX_LEAD_US)) {
+      radio_rx_stop();
+      c = next;
+      radio_set_frequency(fasstest_freq_khz(c));
+      radio_rx_start(len);
+      hop_pending = false;
+    } else if (locked && !hop_pending && !micros_before(t_next + rx_us + FASST_RX_LATE_US)) {
+      // No TX packet on this hop: the next one; FASSTEST_HOPS in a row: parked again
+      missed++;
+      if (++misses >= FASSTEST_HOPS) {
+        print("@lost %lu\r\n", micros());
+        locked = false;
+        radio_rx_stop();
+        c = park;
+        radio_set_frequency(fasstest_freq_khz(c));
+        radio_rx_start(len);
+      } else {
+        fasstest_next_channel(set, row, c, &next);
+        t_next += frame_us;
+        hop_pending = true;
+      }
+    } else if (!radio_rx_active()) {
+      radio_rx_start(len);
+    }
+  }
+  radio_off();
+  print("@end ftrx packets=%lu good=%lu links=%lu replies=%lu missed=%lu locks=%lu late=%lu "
+        "errors=%lu\r\n",
+        packets, good, links, requests, missed, locks, late, errors);
 }

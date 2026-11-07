@@ -288,12 +288,32 @@ int main()
     hex("3006c0337d80e803804a0078000000000000", want);
     CHECK(!memcmp(plain, want, 18));
     CHECK(!fasstest_reply_unpack(pk, false, plain, rx, id, 46));
+    // The same reply rebuilt (the receiver emulator's): b0..1 = the TX's hop
+    // code (row 11), type 0x10, the page
+    uint8_t re[FASSTEST_PACKET_LEN];
+    fasstest_reply_packet(re, false, 49, 0, want + 2, rx, id, 47);
+    CHECK(!memcmp(re, pk, sizeof(re)));
     // Its serial without a link: bytes 9..12 plain 0 (slots 3..5 hold
     // sensors: not this one); a page 1 reply (slot 8 only, ft14_sens2.txt)
     uint8_t got[4];
     CHECK(!fasstest_reply_serial(pk, false, id, 47, got));
     hex("3016489d824000001408a1824000001408a1b77b", pk);
     CHECK(fasstest_reply_serial(pk, false, id, 20, got) && !memcmp(got, rx, 4));
+    CHECK(fasstest_reply_unpack(pk, false, plain, rx, id, 20));
+    fasstest_reply_packet(re, false, 49, 1, plain + 2, rx, id, 20);
+    CHECK(!memcmp(re, pk, sizeof(re)));
+    // The R7008SB's link replies (ft14_link3.txt, 12CH ft14_link2.txt)
+    fasstest_link_packet(pk, false, id, fasstest_code(0, 21), 2, 40);
+    CHECK(fasstest_link_check(pk, 2) && !fasstest_link_check(pk, 8));
+    fasstest_link_reply(re, pk, rx);
+    hex("f800088aaffb0000280208a18240000200003ea9", want);
+    CHECK(!memcmp(re, want, sizeof(re)));
+    fasstest_link_packet(pk, true, id, 49, 2, 45);
+    fasstest_link_reply(re, pk, rx);
+    hex("f800088aaffb00002d0208a1824002020000f30c", want);
+    CHECK(!memcmp(re, want, sizeof(re)));
+    pk[3] ^= 1;
+    CHECK(!fasstest_link_check(pk, 2));
 
     // F/S packet: ch3 F/S at 1365 (slot 2, mode field 0x02 | 1 << 2), ch5
     // B.F/S (slot 4: 0x20 | 2 << 2), as the T14SG's (ft14_fs.txt)
@@ -325,6 +345,8 @@ int main()
           plain[4] == 99);
     hex("3306cca1e640000002084181", pk);
     CHECK(fasstest_reply_unpack(pk, true, plain, got, id, 2) && plain[4] == 100);
+    fasstest_reply_packet(re, true, 49, 0, plain + 2, got, id, 2);
+    CHECK(!memcmp(re, pk, FASSTEST_PACKET_LEN_12CH));
   }
   return test_done();
 }

@@ -337,6 +337,17 @@ bool fasstest_reply_unpack(const uint8_t* p, bool ch12, uint8_t* plain, const ui
   return _crc_kermit(plain, len) == (p[len] | p[len + 1] << 8);
 }
 
+void fasstest_reply_packet(uint8_t* p, bool ch12, uint8_t code, uint8_t page, const uint8_t* data,
+                           const uint8_t* rx, const uint8_t* id, uint8_t c)
+{
+  uint8_t len = _fasstest_len(ch12);
+  p[0] = FASSTEST_TYPE_REPLY | (ch12 ? 3 : 0) | (code & 7) << 5;
+  p[1] = (ch12 ? 0 : (page & 3) << 4) | code >> 3;
+  memcpy(p + 2, data, len - 2);
+  _fasstest_crc(p, len);
+  _fasstest_whiten(p, len, rx, id, c);
+}
+
 // x (16 bits) with sum of bit i x col[i] = t over GF(2), false if none
 static bool _solve16(const uint16_t* col, uint16_t t, uint16_t* x)
 {
@@ -411,6 +422,24 @@ void fasstest_link_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code
   p[9] = c;
   p[14] = ch12 ? 0x02 : 0;
   p[15] = 0x02;  // the R7206SB: low-voltage time
+  _fasstest_crc(p, FASSTEST_PACKET_LEN - 2);
+}
+
+bool fasstest_link_check(const uint8_t* p, uint8_t c)
+{
+  uint8_t len = FASSTEST_PACKET_LEN - 2;
+  return (p[0] & 0x1C) == 0x08 && p[9] == c &&
+         _crc_kermit(p, len) == (p[len] | p[len + 1] << 8);
+}
+
+void fasstest_link_reply(uint8_t* p, const uint8_t* link, const uint8_t* rx)
+{
+  memset(p, 0, FASSTEST_PACKET_LEN);
+  p[0] = 0xF8;  // as the R7008SB's
+  memcpy(p + 2, link + 2, FASSTEST_ID_LEN + 2);  // ID, battery F/S, channel
+  memcpy(p + 10, rx, 4);
+  p[14] = link[14];
+  p[15] = link[15];
   _fasstest_crc(p, FASSTEST_PACKET_LEN - 2);
 }
 

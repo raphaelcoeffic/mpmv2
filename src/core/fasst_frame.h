@@ -196,6 +196,11 @@ void fasstest_fs_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, 
 // voltage (as slot 0), byte 4 the link quality %, the rest 0
 bool fasstest_reply_unpack(const uint8_t* p, bool ch12, uint8_t* plain, const uint8_t* rx,
                            const uint8_t* id, uint8_t c);
+// A reply as the receiver sends it (fasstest_reply_unpack() reads it):
+// the TX's hop code code, page (14CH, 0..FASSTEST_PAGES - 1), data = plain
+// bytes 2.. (16, 12CH 8), rx its serial, on channel c
+void fasstest_reply_packet(uint8_t* p, bool ch12, uint8_t code, uint8_t page, const uint8_t* data,
+                           const uint8_t* rx, const uint8_t* id, uint8_t c);
 // The receiver's serial from a reply (as fasstest_reply_unpack()) without
 // a link: 14CH, bytes 9..12 or 2..5 are the serial when those plain bytes
 // are 0 (empty slots), checked by the CRC; 12CH, bytes 9 and 5 (plain 0),
@@ -223,6 +228,13 @@ bool fasstest_reply_serial(const uint8_t* p, bool ch12, const uint8_t* id, uint8
 #define FASSTEST_BFS_DEFAULT 38  // 3.8 V
 void fasstest_link_packet(uint8_t* p, bool ch12, const uint8_t* id, uint8_t code, uint8_t c,
                           uint8_t bfs);
+// A link packet heard on channel c: true if its type, CRC and channel are
+// right (the TX ID in bytes 2..7, the hop code as a TX packet's, 12CH b14
+// bit 1)
+bool fasstest_link_check(const uint8_t* p, uint8_t c);
+// The receiver's answer to link packet link (FASSTEST_PACKET_LEN bytes,
+// not whitened), rx its serial
+void fasstest_link_reply(uint8_t* p, const uint8_t* link, const uint8_t* rx);
 // Their chips: fasst_spread_n() of the 20 (12CH: 12) bytes
 #define FASSTEST_CHIPS_LEN 330
 #define FASSTEST_CHIPS_TX_LEN (FASSTEST_CHIPS_LEN - 4)

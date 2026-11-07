@@ -73,3 +73,29 @@ typedef struct {
 // Blocks for cfg->secs or until cfg->stop(); the radio needs radio_init()
 // again after it
 void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print);
+
+// FASSTest receiver emulator: a receiver's answers (the R7008SB's, as
+// captured) to a TX: an MPM's FASSTest, a T14SG. Without an ID (all 0):
+// parked on link channel FASSTEST_LINK_CHANNEL(0) for a link packet,
+// answered on its channel FASSTEST_LINK_REPLY_US after
+// (fasstest_link_reply()), the ID and the mode (b14) taken from it. Then
+// parked on the row's first channel (with an ID: on channel park), until a
+// TX packet with the ID's CRC, then following the hops; each telemetry
+// request answered in the next hop's slot (fasstest_reply_packet(),
+// FASSTEST_REPLY_US / _12CH after). Page 0: the R7008SB's captured voltage
+// and sensors, slot 7 a reply counter; page 1: slot 8 as captured; pages 2
+// and 3 empty. 12CH: 5.0 V, the counter mod 101 as the link quality %.
+// @link / @req / @lost lines as it goes
+typedef struct {
+  uint32_t secs;                // 0: until stopped
+  uint16_t tx_power;            // RF core TX power word
+  uint8_t id[FASSTEST_ID_LEN];  // all 0: from a link packet
+  bool ch12;                    // with an ID: 12CH
+  uint8_t park;                 // with an ID: the channel parked on
+  uint8_t rx[4];                // the receiver's serial
+  bool (*stop)();               // true: end the run now, or NULL
+} fasstest_em_cfg_t;
+
+// Blocks for cfg->secs or until cfg->stop(); the radio needs radio_init()
+// again after it
+void fasstest_em_run(const fasstest_em_cfg_t* cfg, fasst_print_t print);

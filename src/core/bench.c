@@ -1730,6 +1730,30 @@ static void _cmd_fasstrx(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// FASSTest receiver emulator (bench_fasst.c), blocking
+static void _cmd_ftrx(char* args)
+{
+  fasstest_em_cfg_t cfg = {.tx_power = _tx_power, .stop = _host_stop};
+  cfg.secs = _number_or(&args, 0);
+  uint32_t rx = _number_or(&args, 0x08A18240);  // the lent R7008SB's serial
+  uint32_t id = _number_or(&args, 0), id45 = _number_or(&args, 0);
+  cfg.ch12 = _number_or(&args, 0);
+  cfg.park = _number_or(&args, FASSTEST_LINK_CHANNEL(0));
+  for (int i = 0; i < 4; i++) cfg.rx[i] = rx >> (24 - 8 * i);
+  for (int i = 0; i < 4; i++) cfg.id[i] = id >> (24 - 8 * i);
+  cfg.id[4] = id45 >> 8;
+  cfg.id[5] = id45;
+  if (cfg.secs > 3600 || cfg.park >= FASSTEST_CHANNELS) {
+    _print("@err usage: ftrx [secs] [rx] [id0..3] [id4..5] [ch12] [park]\r\n");
+    return;
+  }
+  _job_stop();
+  _printf("@ok ftrx secs=%lu rx=%08lx id=%08lx%04lx ch12=%u park=%u\r\n", cfg.secs, rx, id,
+          id45 & 0xFFFF, cfg.ch12, cfg.park);
+  fasstest_em_run(&cfg, _printf);
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // Time to settle after a radio call before reading the edges, us
 #define TIMING_SETTLE_US 300
 
@@ -2028,6 +2052,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "sfhss")) _cmd_sfhss(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
+  else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);
   else _printf("@err unknown command %s\r\n", cmd);
 }
 
