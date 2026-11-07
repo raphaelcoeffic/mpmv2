@@ -118,6 +118,11 @@ void radio_rx_stop();
 // True while the RX command runs (it ends on errors, e.g. RX queue full)
 bool radio_rx_active();
 
+// The radio's work between the protocol's calls, from the main loop: on the
+// CC27xx, a long packet (over RF_FIFO_PAYLOAD) streamed through the FIFOs
+// (rf.h), else lost before radio_receive(); nothing on the CC26xx
+void radio_poll();
+
 // TX power word for the next packets (CMD_SET_TX_POWER), without a new
 // radio_init(): power per packet (LBT). radio_init() sets phy->tx_power again
 radio_status_t radio_set_tx_power(uint16_t tx_power);

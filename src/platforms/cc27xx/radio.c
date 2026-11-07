@@ -394,6 +394,11 @@ void radio_rx_stop()
   if (_state == STATE_RX) _stop();
 }
 
+void radio_poll()
+{
+  if (_state != STATE_IDLE) rf_busy();
+}
+
 bool radio_rx_active()
 {
   _var_restart();

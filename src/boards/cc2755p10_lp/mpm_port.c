@@ -156,6 +156,7 @@ static void _log_send()
 
 void mpm_port_idle()
 {
+  radio_poll();
   if (_file_req_ready) _file_request();
   if (log_on) _log_send();
 }

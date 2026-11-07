@@ -729,6 +729,8 @@ void radio_rx_stop()
   IntEnable(INT_RFC_CPE_0);
 }
 
+void radio_poll() {}
+
 // Variable length RX: between two packets, or stalled, the command is done
 bool radio_rx_active()
 {

@@ -806,6 +806,17 @@ outputs 1824 and 224, the others hold. FT12: bind, 65 s of 12CH S.BUS
 frames with flags 00, telemetry 3 per second, link quality 96 to 100 %.
 EdgeTX does not decode frame 0x13 yet.
 
+Without the R7008SB, the bench's receiver emulator (`ftrx`, the
+R7008SB's link reply and replies rebuilt byte for byte in
+`tests/fasst`) stands in for it, on the other radio. The ZBDongle-P's
+MPM and the CC2755 LaunchPad's (`cc27-mpm`, the dongle's module id) each
+against it: FT18 and FT12 bind ended by the link reply within 1 s, then
+all the replies to the radio (FT18: 179 of 187 in 28 s, pages 0 and 1;
+FT12: 89 of 92). The CC27 needs `radio_poll()` in its idle loop for
+FT18: the 366-byte RX of a reply (11 chips, the 96 early bits) streams
+through its 255-byte FIFO, and is lost if the CPU does not copy it out
+as it arrives (FT12's 175 bytes fit).
+
 ## Tests
 
 ```sh
