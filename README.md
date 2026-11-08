@@ -115,6 +115,23 @@ cmake -S . -B build-lp -G Ninja -DBOARD=CC2652R1_LAUNCHXL
 ninja -C build-lp flash-bench
 ```
 
+FrSky's XJT-Lite (CC2650, a reduced MPM): `firmware.bin` at 0x8000, behind
+FrSky's boot loader. `flash-firmware` writes it over cJTAG (`XJT_OPENOCD`:
+an OpenOCD with J-Link cJTAG support,
+[raphaelcoeffic/openocd](https://github.com/raphaelcoeffic/openocd), branch
+jlink-cjtag):
+
+```bash
+cmake -S . -B build-xjt -G Ninja -DBOARD=XJT_LITE
+ninja -C build-xjt                     # firmware.elf, firmware.bin
+ninja -C build-xjt flash-firmware
+```
+
+Only with a boot loader of your own in place of FrSky's: `XJT_APP_START`
+(a 4 KB sector, 0x8000 by default) links the image for the address that
+boot loader starts it at. FrSky's boot loader only starts 0x8000: an image
+linked for another address doesn't run behind it.
+
 Host unit tests (a C compiler):
 
 ```bash

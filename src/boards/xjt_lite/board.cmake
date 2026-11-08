@@ -2,10 +2,25 @@
 # loader, kept as it is (it starts the image at 0x8000, no checks). The last
 # sector (CCFG) is never written. Flashed with OpenOCD over cJTAG on a
 # J-Link (a patched OpenOCD: github.com/raphaelcoeffic/openocd, jlink-cjtag)
+#
+# XJT_APP_START: the application's address behind another boot loader
+# (-DXJT_APP_START=0x2000), a flash sector (4 KB) below the CCFG's
 
 message("## Target is FrSky XJT-Lite (CC2650F128): reduced MPM")
 
 set(XJT_OPENOCD openocd CACHE STRING "OpenOCD with J-Link cJTAG support")
+set(XJT_APP_START 0x8000 CACHE STRING "Application start address (FrSky's boot loader: 0x8000)")
+# (if() compares decimal numbers only)
+math(EXPR xjt_app_start "${XJT_APP_START}")
+math(EXPR xjt_app_offset "${xjt_app_start} % 0x1000")
+math(EXPR xjt_ccfg_sector "0x1F000")
+math(EXPR xjt_frsky_start "0x8000")
+if (xjt_app_offset OR xjt_app_start GREATER_EQUAL xjt_ccfg_sector)
+    message(FATAL_ERROR "XJT_APP_START=${XJT_APP_START}: a 4 KB sector below 0x1F000")
+endif()
+if (NOT xjt_app_start EQUAL xjt_frsky_start)
+    message("## Application at ${XJT_APP_START} (not behind FrSky's boot loader)")
+endif()
 
 set(cc26xx_chip cc26x0)
 include(platforms/cc26xx/platform.cmake)
@@ -14,7 +29,8 @@ list(APPEND board_definitions MPM_REDUCED)
 
 # The MPM port: FrSky D and X, V2x2, XK (mpm/multi/mpm_config.h), without
 # the A7105 and CYRF6936 emulations (RAM). firmware.elf and firmware.bin in
-# the build directory; flash-firmware: at 0x8000, with the patched OpenOCD
+# the build directory; flash-firmware: at XJT_APP_START, with the patched
+# OpenOCD
 set(xjt_chip_sources ${mpm_chip_sources})
 list(REMOVE_ITEM xjt_chip_sources mpm/multi/a7105.c mpm/multi/cyrf6936.c)
 add_board_app(firmware ${board_dir}/xjt_lite.ld
@@ -31,11 +47,12 @@ add_board_app(firmware ${board_dir}/xjt_lite.ld
     ${board_dir}/board.c
 )
 target_mpm(firmware_elf)
+target_link_options(firmware_elf PRIVATE -Wl,--defsym=__app_start=${XJT_APP_START})
 add_custom_target(firmware ALL DEPENDS ${CMAKE_BINARY_DIR}/firmware.bin)
 
 add_custom_target(flash-firmware
     COMMAND ${XJT_OPENOCD} -f board/frsky_xjt_lite.cfg
-            -c "program ${CMAKE_BINARY_DIR}/firmware.bin 0x8000 verify reset exit"
+            -c "program ${CMAKE_BINARY_DIR}/firmware.bin ${XJT_APP_START} verify reset exit"
     DEPENDS firmware
     USES_TERMINAL
     VERBATIM
