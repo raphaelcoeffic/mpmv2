@@ -31,7 +31,7 @@ add_custom_command(
 # image header (no CRC, already checked) and <name>-update.bin for an
 # STK500 update. flash-<name>: the boot loader, then the application at
 # 0x2000, then a reset
-function(add_cc27_application name)
+function(add_application name)
     add_board_app(${name} ${board_dir}/app.ld ${ARGN} ${platform_dir}/board.c ${board_dir}/board.c
         core/app_header.c core/syscalls.c)
     add_update_image(${name} ${name}-update.bin)
@@ -50,14 +50,14 @@ endfunction()
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)
-add_cc27_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c ${board_dir}/bench_port.c
+add_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c ${board_dir}/bench_port.c
     core/fasst_frame.c core/frame.c drivers/sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 
 # The MPM port: the radio's link on UART0 (100000 8E2, mpm_port.c), the
 # protocols of the MPM v2 build, the EEPROM in RAM (eeprom_ram.c) and the host's
 # file "eeprom" (file_server_ram.c)
-add_cc27_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c core/eeprom_ram.c
+add_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c core/eeprom_ram.c
     core/file_server_ram.c ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/fasst_frame.c core/frame.c core/log.c ${mpm_sources} ${mpm_chip_sources})
 target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
 target_mpm(cc27-mpm_elf)
