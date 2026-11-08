@@ -139,11 +139,12 @@ dongle through the ROM boot loader (`rom_flash.py --sonoff` in JavaScript,
 backup button included), then runs guided recordings and saves them as one
 text file: `# key: value` header lines (system, mode, area), then per
 recording `@step`, `@system`, `@note`, `@time` and the bench's lines. FASST:
-`fasstrx 0 0 48` (stopped by a newline). T-FHSS: `preset tfhss`, `ch 45` (or
-`ch 105`: channels n = 10 and 22, between the Wi-Fi channels), `rx 16 fixed`,
-`stop`; its live count is the number of packets sharing the most common CRC
-syndrome (CRC-16/MCRF4XX of the raw 12 bytes XOR the CRC field: constant for
-one TX on one channel, the whitening key being fixed there). Two reference
+`fasstrx 0 0 48` (stopped by a newline). T-FHSS: `tfhssrx 0 10 1` (follows
+the hops from channel n = 10), `tfhssrx 0 1 0` for the link step (parked on
+the bind channel) and `tfhssrx 0 22 0` (parked: in case following fails),
+each stopped by a newline; its live count is the number of packets sharing
+the most common key syndrome (as `tfhssrx`: the same for all packets of one
+TX). Two reference
 systems count packets with `crc=ok`: S-FHSS (`preset sfhss`, `ch 100` or
 `ch 190`, `rx 13`), a known protocol that checks a helper's setup, and Mini-Z
 (`preset kyosho`, `ch 13` or `ch 140`, `rx 38`: the Kyosho FHSS bind packets,

@@ -10,18 +10,20 @@
   zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
   ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
   --sonoff), then records guided runs (docs/bench.md) into one text file:
-  FASST with fasstrx (follows the hops), the others on one channel per
-  recording: T-FHSS (preset tfhss, rx 16 fixed: timing and hops not known yet),
-  S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
+  FASST with fasstrx and T-FHSS with tfhssrx (both follow the hops; T-FHSS
+  links on channel 1, parked there), the others on one channel per
+  recording: S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
   Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
   Capture file: "# " header lines (key: value), then per recording
   "@step <n> <title>", "@system <FASST|T-FHSS|S-FHSS|Mini-Z> [ch=<n>]",
   "@note <text>", "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx
-  ...", its "@fasst ..." lines and "@end fasstrx ...". Others: the "@ok"
-  answers to preset, ch and rx, the "@rx ..." lines and "@ok stop ...". T-FHSS
-  ch is n = 1..31, the others the bench ch.
+  ...", its "@fasst ..." lines and "@end fasstrx ...". T-FHSS: "@ok tfhssrx
+  ...", its "@rx ...", "@lock ...", "@period ..." lines and "@end tfhssrx ...".
+  Others: the "@ok" answers to preset, ch and rx, the "@rx ..." lines and
+  "@ok stop ...". T-FHSS ch is the channel n = 1..31 it starts on (follow=0:
+  stays on), the others the bench ch.
 -->
 <style>
 :root {
@@ -177,7 +179,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "3";
+const PAGE_VERSION = "4";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -198,12 +200,13 @@ const COMMON_STEPS = [
     what: "Switch the transmitter off, wait 5 seconds, switch it on again, and leave it on until the end." },
 ];
 
-// Systems other than FASST record one channel per step: cmds(step) starts the
-// bench, count "syndrome" (T-FHSS: same CRC syndrome, i.e. same TX and channel)
-// or "crc" (packets with crc=ok) gives the "good" counter.
+// run(step): a bench command that records until a newline stops it (FASST,
+// T-FHSS), else cmds(step) starts the bench on one channel, "stop" stops it.
+// count "key" (T-FHSS: same key syndrome, i.e. same TX) or "crc" (packets
+// with crc=ok) gives the "good" counter.
 // T-FHSS: n = 1..31 at 2407.5 + 2 (n - 1) MHz (bench ch = CC2500 CHANNR =
-// 5 (n - 1)). 10 and 22: between Wi-Fi channels 1/6 and 6/11
-const TFHSS_CH = 10, TFHSS_CH2 = 22;
+// 5 (n - 1)); links on n = 1. 10 and 22: between Wi-Fi channels 1/6 and 6/11
+const TFHSS_CH = 10, TFHSS_CH2 = 22, TFHSS_BIND_CH = 1;
 // S-FHSS: CHANNR 6 k + 16, 2400 + 0.25 ch MHz: 100 = 2425, 190 = 2447.5
 const SFHSS_CH = 100, SFHSS_CH2 = 190;
 // Kyosho FHSS bind (MPM Kyosho sub 0): ID 5475C52A, A7105 ch 0x0D and 0x8C in
@@ -214,24 +217,25 @@ const SYSTEMS = {
     name: "FASST", file: "fasst",
     modes: ["FASST multi-channel (MULT)", "FASST 7 channels (7CH)",
             "FASST 10 channels (TM-10 / TM-14)", "Don't know"],
+    run: () => `fasstrx 0 0 ${RX_BYTES} 100 0 1`, packet: "@fasst ",
     steps: COMMON_STEPS,
   },
   tfhss: {
     name: "T-FHSS", file: "tfhss",
-    cmds: (step) => ["preset tfhss", `ch ${5 * (step.ch - 1)}`, "rx 16 fixed"],
-    count: "syndrome", good: "look like real packets",
+    run: (step) => `tfhssrx 0 ${step.ch} ${step.follow ? 1 : 0}`, packet: "@rx ",
+    count: "key", good: "look like real packets",
     modes: ["T-FHSS", "T-FHSS SR", "Don't know"],
     steps: [
-      ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH })),
-      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_CH,
+      ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH, follow: true })),
+      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_BIND_CH,
         what: "Only if you have a T-FHSS receiver: put it in link (bind) mode as its manual says, close to the transmitter, and link it. Skip this step if you have none." },
-      { title: "Another channel", secs: 30, ch: TFHSS_CH2,
-        what: "Transmitter on, sticks centred, nothing to do: this one listens on a second channel." },
+      { title: "One channel only", secs: 30, ch: TFHSS_CH2,
+        what: "Transmitter on, sticks centred, nothing to do: this one stays on one channel." },
     ],
   },
   sfhss: {
     name: "S-FHSS", file: "sfhss",
-    cmds: (step) => ["preset sfhss", `ch ${step.ch}`, "rx 13"],
+    cmds: (step) => ["preset sfhss", `ch ${step.ch}`, "rx 13"], packet: "@rx ",
     count: "crc", good: "with a good CRC",
     modes: ["S-FHSS"],
     steps: [
@@ -244,7 +248,7 @@ const SYSTEMS = {
   },
   miniz: {
     name: "Mini-Z", file: "miniz",
-    cmds: (step) => ["preset kyosho", `ch ${step.ch}`, "rx 38"],
+    cmds: (step) => ["preset kyosho", `ch ${step.ch}`, "rx 38"], packet: "@rx ",
     count: "crc", good: "with a good CRC",
     modes: ["Mini-Z Evo (built in)", "Mini-Z FHSS (FS-RM005 module)", "Don't know"],
     steps: [
@@ -580,7 +584,7 @@ function benchLine(line) {
     const p = bench.pending;
     bench.pending = null;
     if (p) p(line);
-    if (bench.onEvent && line.startsWith("@ok fasstrx")) bench.onEvent(line);
+    if (bench.onEvent && /^@ok (fasstrx|tfhssrx) /.test(line)) bench.onEvent(line);
   } else if (line.startsWith("@") && bench.onEvent) {
     bench.onEvent(line);
   }
@@ -634,12 +638,14 @@ async function afterConnect() {
   }
 }
 
-// fasstrx that stops on request and the tfhss preset (the page's needs; the
-// sfhss and kyosho presets are older)
+// fasstrx and tfhssrx that stop on request (the page's needs; the sfhss and
+// kyosho presets are older)
 async function sniffingWorks() {
   try {
-    await benchCmd("preset tfhss");
     await benchCmd("fasstrx 0 0 1");
+    await link.writeText("\n");
+    await sleep(200);
+    await benchCmd("tfhssrx 0 10 0");
     await link.writeText("\n");
     await sleep(200);
     return true;
@@ -739,7 +745,8 @@ const WHITE = [0x00, 0xc0, 0x4c, 0xed, 0xde, 0x9b, 0xff, 0xc6, 0x11, 0x77, 0x70,
 // T-FHSS: 12 bytes XOR a key (TX ID, hop channel), CRC-16/MCRF4XX of the plain
 // bytes, low byte first. The CRC is affine, so crc(raw) ^ crc field = crc(key)
 // with a zero start: the same for all packets of one TX on one channel (0:
-// not whitened, e.g. bind). The live count shows the most common value's
+// not whitened, e.g. bind). Without the channel's part (key byte 7 = n):
+// the same for all packets of one TX. The live count shows the most common value's
 function crcMcrf(bytes) {
   let c = 0xffff;
   for (const b of bytes) {
@@ -748,11 +755,13 @@ function crcMcrf(bytes) {
   }
   return c;
 }
-function tfhssSyndrome(hex) {
+function tfhssSyndrome(hex, n) {
   if (hex.length < 28) return -1;
   const p = [];
   for (let i = 0; i < 14; i++) p.push(parseInt(hex.substr(2 * i, 2), 16));
-  return crcMcrf(p.slice(0, 12)) ^ (p[12] | (p[13] << 8));
+  const ch = new Array(12).fill(0);
+  ch[7] = n;
+  return crcMcrf(p.slice(0, 12)) ^ (p[12] | (p[13] << 8)) ^ crcMcrf(ch) ^ crcMcrf(new Array(12).fill(0));
 }
 
 function crc10ch(hex) {
@@ -817,9 +826,10 @@ $("b-extra").onclick = () => {
 async function record(step, index, li) {
   if (running) return;
   const go = li.querySelector(".go"), live = li.querySelector(".live");
-  const sys = system(), oneCh = !!sys.cmds;
+  const sys = system(), oneCh = !sys.run;
   const rec = { step: index + 1, title: step.title,
-                system: sys.name + (oneCh ? ` ch=${step.ch}` : ""),
+                system: sys.name + (step.ch ? ` ch=${step.ch}` : "") +
+                        (sys.run && step.ch ? ` follow=${step.follow ? 1 : 0}` : ""),
                 note: li.querySelector(".note").value.trim(),
                 time: new Date().toISOString(), lines: [], packets: 0, good: 0 };
   const syndromes = new Map();
@@ -843,13 +853,13 @@ async function record(step, index, li) {
   };
   bench.onEvent = (line) => {
     rec.lines.push(line);
-    if (line.startsWith(oneCh ? "@rx " : "@fasst ")) {
+    if (line.startsWith(sys.packet)) {
       rec.packets++;
       const parts = line.split(" ");
       if (sys.count === "crc") {
         if (parts.includes("crc=ok")) rec.good++;
-      } else if (sys.count === "syndrome") {
-        const s = tfhssSyndrome(parts[3] || "");
+      } else if (sys.count === "key") {
+        const s = tfhssSyndrome(parts[3] || "", Math.floor(Number(parts[2]) / 5) + 1);
         if (s >= 0) syndromes.set(s, (syndromes.get(s) || 0) + 1);
         const top = Math.max(0, ...syndromes.values());
         rec.good = top >= 3 ? top : 0;
@@ -905,7 +915,7 @@ async function record(step, index, li) {
     if (oneCh) {
       for (const c of sys.cmds(step)) rec.lines.push("@ok " + (await benchCmd(c)));
     } else {
-      await benchCmd(`fasstrx 0 0 ${RX_BYTES} 100 0 1`);
+      await benchCmd(sys.run(step));
     }
   } catch (e) {
     clearInterval(tick);
