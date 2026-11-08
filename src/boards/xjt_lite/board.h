@@ -24,7 +24,8 @@
 //            ANT_SEL is strapped (one antenna). See doc/SE2431L_202410L.pdf
 //
 // DIO_11  -> red LED, DIO_13 -> green LED (1 = on). DIO_12: driven
-//            with them by the stock app, no visible LED
+//            with them by the stock app, no visible LED here, the green
+//            LED on some boards: both driven
 //
 // DIO_9  <-> I2C EEPROM SDA, DIO_10 -> SCL (open drain, board pull-ups):
 //            256 bytes (M24C02 type) at 0x51
@@ -40,7 +41,7 @@
 //
 #define LED_RED       IOID_11
 #define LED_GREEN     IOID_13
-#define LED_UNKNOWN   IOID_12
+#define LED_GREEN_ALT IOID_12
 //
 #define EEPROM_SDA    IOID_9
 #define EEPROM_SCL    IOID_10

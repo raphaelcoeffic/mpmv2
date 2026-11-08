@@ -21,15 +21,13 @@ void board_pins_init()
   IOCPortConfigureSet(FEM_CTX, IOC_PORT_RFC_GPO1, IOC_STD_OUTPUT);
 
   // S.Port released: the buffer's output off, its input (UART TX) idle.
-  // FrSky's boot loader leaves UART0 on DIO_29/30: S.Port in back to a
-  // plain input, or it stays muxed to UART0 RX next to MODULE_RX
+  // S.Port in: unused (taken off UART0 by mpm_port_init())
   _gpio_output(SPORT_TX_EN_N, 1);
   _gpio_output(SPORT_TX, 1);
-  IOCPinTypeGpioInput(SPORT_RX);
 
   _gpio_output(LED_RED, 0);
   _gpio_output(LED_GREEN, 0);
-  _gpio_output(LED_UNKNOWN, 0);
+  _gpio_output(LED_GREEN_ALT, 0);
 }
 
 void board_app_init() {}

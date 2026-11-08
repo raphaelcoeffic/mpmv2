@@ -81,20 +81,34 @@ static void _telem_invert(bool invert)
   while (micros() - t < TELEM_IDLE_US) {}
 }
 
+// UART0 on our pins only: another boot loader than FrSky's (which leaves
+// none) may leave its RX or TX on other pins, and two pins on the UART's RX
+// garble it
+static void _uart_pins_release()
+{
+  for (uint32_t pin = 0; pin < NUM_IO_MAX; pin++) {
+    uint32_t port = HWREG(IOC_BASE + IOC_O_IOCFG0 + 4 * pin) & IOC_IOCFG0_PORT_ID_M;
+    if (port == IOC_PORT_MCU_UART0_RX || port == IOC_PORT_MCU_UART0_TX)
+      IOCPinTypeGpioInput(pin);
+  }
+}
+
 void mpm_port_init()
 {
-  // TX on no pin until the first frame: SPORT_TX stays the GPIO of
+  _uart_pins_release();
+  // RX inverted before the UART starts (not inverted, the idle line is a
+  // break). TX on no pin until the first frame: SPORT_TX stays the GPIO of
   // board_init()
+  IOCPortConfigureSet(MODULE_RX, IOC_PORT_MCU_UART0_RX, IOC_STD_INPUT | IOC_IOMODE_INV);
   uart_device_t dev = {
       .mode = UART_8E2,
       .baud_rate = MPM_BAUDRATE,
-      .rx = MODULE_RX,
+      .rx = IOID_UNUSED,
       .tx = IOID_UNUSED,
       .cts = IOID_UNUSED,
       .rts = IOID_UNUSED,
   };
   uart_init(UART0, &dev);
-  IOCIOModeSet(MODULE_RX, IOC_IOMODE_INV);
   uart_callbacks_t cb = {
       .frame_received = _frame_received,
       .error = _uart_error,
@@ -130,7 +144,11 @@ void mpm_port_write(const uint8_t* data, uint8_t len) { uart_tx_irq(UART0, data,
 
 uint16_t mpm_port_write_free() { return uart_tx_free(UART0); }
 
-void mpm_port_led(bool on) { GPIO_writeDio(LED_GREEN, on); }
+void mpm_port_led(bool on)
+{
+  GPIO_writeDio(LED_GREEN, on);
+  GPIO_writeDio(LED_GREEN_ALT, on);
+}
 
 void mpm_port_reset_rf() { radio_off(); }
 
