@@ -6,6 +6,7 @@
 #include "bench.h"
 #include "bench_fasst.h"
 #include "fasst_frame.h"
+#include "tfhss.h"
 #include "bench_port.h"
 #include "board.h"
 #include "frame.h"
@@ -1702,6 +1703,194 @@ static void _cmd_sfhss(char* args)
   if (!_apply_phy()) _report_radio_error("radio init");
 }
 
+static radio_status_t _tfhss_channel(uint8_t n)
+{
+  _channel = 5 * (n - 1);
+  return _radio_set_frequency(_ch_khz(_channel) + _trim_khz);
+}
+
+// Futaba T-FHSS test TX for tfhssrx (tfhss.h): our guess of the timing, not
+// the real thing. One servo packet (type) per hop on channel n, reps packets
+// 700 us apart, hops period_us apart along a row (255: the 16-channel
+// list); ID 12345678, x 5A, b5..b8 01..04 as the loopback reference
+static void _cmd_tfhss(char* args)
+{
+  uint32_t secs = _number_or(&args, 10), row = _number_or(&args, 8);
+  uint32_t period = _number_or(&args, 4000), type = _number_or(&args, 0);
+  uint32_t reps = _number_or(&args, 1);
+  if (secs == 0 || secs > 600 || (row >= TFHSS_ROWS && row != TFHSS_ROW_LIST) || period < 1000 ||
+      period > 100000 || type >= TFHSS_TYPE_REPLY || reps == 0 || reps > 2 || reps * 700 > period) {
+    _print("@err usage: tfhss [secs] [row] [period_us] [type] [reps]\r\n");
+    return;
+  }
+  if (!_load_preset("tfhss")) return;
+  _printf("@ok tfhss secs=%lu row=%lu period=%lu type=%lu reps=%lu\r\n", secs, row, period, type,
+          reps);
+
+  uint8_t key[TFHSS_DATA_LEN] = {0, 0, 0x12, 0x34, 0x56, 0x78, 0x5A, 0, 1, 2, 3, 4};
+  uint8_t field = row == TFHSS_ROW_LIST ? 0 : row;
+  uint8_t plain[TFHSS_DATA_LEN] = {type | (field & 7) << 5, field >> 3};
+  // One buffer per packet: the RF core reads it when the packet starts
+  uint8_t pkt[TFHSS_PACKET_LEN], air[2][RADIO_MAX_PKT_LEN];
+  uint16_t value = 2048;
+  int sweep = 16;
+  uint32_t hops = secs * 1000000 / period, late = 0, errors = 0, h = 0;
+  uint32_t t = micros() + 2000;
+  for (; h < hops && !_host_stop(); h++) {
+    uint8_t n = tfhss_channel(row, h % (row == TFHSS_ROW_LIST ? 16 : TFHSS_CHANNELS));
+    _channel = 5 * (n - 1);
+    if (radio_set_frequency_start(_ch_khz(_channel) + _trim_khz) != RADIO_OK) errors++;
+    if (value + sweep > 3072 || value + sweep < 1024) sweep = -sweep;
+    value += sweep;
+    plain[2] = h;
+    plain[3] = value << 4;
+    plain[4] = value >> 4;
+    key[7] = n;
+    tfhss_packet(pkt, plain, key);
+    for (uint32_t r = 0; r < reps; r++) {
+      uint16_t len = frame_tx_data(&_frame, pkt, sizeof(pkt), air[r]);
+      if (!micros_before(t - 200)) late++;
+      if (!len || radio_tx_start_at(air[r], len, t + 700 * r) != RADIO_OK) errors++;
+    }
+    t += period;
+  }
+  if (radio_tx_wait() != RADIO_OK) errors++;
+  _printf("@ok tfhss hops=%lu late=%lu errors=%lu\r\n", h, late, errors);
+  if (!_apply_phy()) _report_radio_error("radio init");
+}
+
+// T-FHSS RX, blocking (docs/bench.md): parked on channel n, or following the
+// hops. A TX packet (type below TFHSS_TYPE_REPLY, row field 0..30) gives the
+// next channel from its row (the 16-channel list on every other try: the
+// receiver's other mode) and the TX's key syndrome; the next TX packet on
+// that channel with the same key syndrome confirms the lock. Hop period
+// unknown: straight to the next channel, back to n after TFHSS_WAIT_US
+// without one; the shortest of TFHSS_PERIOD_SAMPLES times between TX
+// packets on consecutive hops is the period (one may span a whole cycle
+// of short hops). Then: on the channel until shortly before the next hop
+// (the receiver's replies), a missed hop one further on the same timing,
+// TFHSS_CHANNELS in a row: parked again
+#define TFHSS_WAIT_US 50000
+#define TFHSS_PERIOD_SAMPLES 4
+#define TFHSS_LEAD_US 600
+// After the expected sync word: the packet itself (14 + 2 CRC bytes at
+// 384 kbps) and some slack
+#define TFHSS_LATE_US 800
+
+static void _cmd_tfhssrx(char* args)
+{
+  uint32_t secs = _number_or(&args, 10), park = _number_or(&args, 10);
+  uint32_t follow = _number_or(&args, 1);
+  if (secs > 3600 || park == 0 || park > TFHSS_CHANNELS || follow > 1) {
+    _print("@err usage: tfhssrx [secs] [n] [follow]\r\n");
+    return;
+  }
+  if (!_load_preset("tfhss")) return;
+  _rx_len = TFHSS_PACKET_LEN;
+  _rx_fixed = true;
+  uint16_t rx_len = frame_rx_len(&_frame, TFHSS_PACKET_LEN);
+  uint8_t c = park;
+  if (_tfhss_channel(c) != RADIO_OK || _radio_rx_start(rx_len) != RADIO_OK) {
+    _report_radio_error("tfhssrx");
+    return;
+  }
+  _printf("@ok tfhssrx secs=%lu n=%lu follow=%lu\r\n", secs, park, follow);
+
+  // Locked on a TX: its key syndrome, the row (or TFHSS_ROW_LIST); the
+  // channel hop_c first heard at t_hop; misses hops since
+  bool locked = false, confirmed = false, try_list = false, moving = false;
+  uint8_t row = 0, hop_c = 0;
+  uint16_t key_syn = 0;
+  uint32_t t_hop = 0, t_move = 0, t_deadline = 0, misses = 0;
+  uint32_t period = 0, period_min = 0, samples = 0;
+  uint32_t packets = 0, tx = 0, replies = 0, missed = 0, locks = 0, tries = 0, restarts = 0;
+  radio_packet_t pkt;
+  uint32_t t_end = micros() + secs * 1000000;
+  while ((secs == 0 || micros_before(t_end)) && !_host_stop()) {
+    if (_radio_receive(&pkt)) {
+      uint8_t p[FRAME_PAYLOAD_MAX], len;
+      uint16_t pcf;
+      _report_packet(&pkt);
+      if (frame_decode_pcf(&_frame, pkt.data, pkt.len, _rx_len, p, &len, &pcf) == FRAME_SHORT ||
+          len < TFHSS_PACKET_LEN)
+        continue;
+      packets++;
+      bool is_tx = tfhss_type(p) < TFHSS_TYPE_REPLY && tfhss_row(p) < TFHSS_ROWS;
+      tx += is_tx;
+      replies += tfhss_type(p) >= TFHSS_TYPE_REPLY;
+      uint16_t syn = tfhss_key_syndrome(p, c);
+      if (!follow || !is_tx || (locked && syn != key_syn)) continue;
+
+      if (!locked) {
+        locked = true;
+        confirmed = false;
+        tries++;
+        key_syn = syn;
+        hop_c = c;
+        t_hop = pkt.timestamp_us;
+        misses = 0;
+      } else if (c != hop_c) {
+        // The first TX packet on a new hop
+        uint32_t dt = pkt.timestamp_us - t_hop;
+        if (!confirmed) {
+          confirmed = true;
+          locks++;
+          _printf("@lock %lu n=%u row=%u key=%04x\r\n", pkt.timestamp_us, c,
+                  try_list ? TFHSS_ROW_LIST : tfhss_row(p), key_syn);
+        }
+        if (!period) {
+          if (!samples++ || dt < period_min) period_min = dt;
+          if (samples == TFHSS_PERIOD_SAMPLES) {
+            period = period_min;
+            _printf("@period %lu us=%lu\r\n", pkt.timestamp_us, period);
+          }
+        } else if (misses == 0 && dt < period_min * 3 / 2) {
+          period = (7 * period + dt) / 8;
+          if (dt < period_min) period_min = dt;
+        }
+        hop_c = c;
+        t_hop = pkt.timestamp_us;
+        misses = 0;
+      }
+      row = try_list ? TFHSS_ROW_LIST : tfhss_row(p);
+      // Next hop: now (period unknown) or shortly before it, the later the
+      // more the hops' spacing varies
+      t_move = period ? t_hop + period_min - TFHSS_LEAD_US : pkt.timestamp_us;
+      moving = true;
+    } else if (moving && !micros_before(t_move)) {
+      moving = false;
+      c = tfhss_next(row, c);
+      _radio_rx_stop();
+      _tfhss_channel(c);
+      _radio_rx_start(rx_len);
+      t_deadline = period ? t_hop + (misses + 1) * period + (period - period_min) + TFHSS_LATE_US
+                          : micros() + TFHSS_WAIT_US;
+    } else if (locked && !moving && !micros_before(t_deadline)) {
+      // No TX packet on this hop
+      missed += confirmed;
+      if (!confirmed || !period || ++misses >= TFHSS_CHANNELS) {
+        if (!confirmed) try_list = !try_list;
+        locked = false;
+        c = park;
+        _radio_rx_stop();
+        _tfhss_channel(c);
+        _radio_rx_start(rx_len);
+      } else {
+        t_move = t_hop + (misses + 1) * period - (period - period_min) - TFHSS_LEAD_US;
+        moving = true;
+      }
+    } else if (!radio_rx_active()) {
+      restarts++;
+      _radio_rx_start(rx_len);
+    }
+  }
+  _radio_rx_stop();
+  _printf("@end tfhssrx packets=%lu tx=%lu replies=%lu missed=%lu locks=%lu tries=%lu period=%lu "
+          "period_min=%lu restarts=%lu\r\n",
+          packets, tx, replies, missed, locks, tries, period, period_min, restarts);
+  _tfhss_channel(park);
+}
+
 // FASST RX (bench_fasst.c), blocking
 static void _cmd_fasstrx(char* args)
 {
@@ -2050,6 +2239,8 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
   else if (!strcmp(cmd, "fasst")) _cmd_fasst(args);
   else if (!strcmp(cmd, "sfhss")) _cmd_sfhss(args);
+  else if (!strcmp(cmd, "tfhss")) _cmd_tfhss(args);
+  else if (!strcmp(cmd, "tfhssrx")) _cmd_tfhssrx(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);

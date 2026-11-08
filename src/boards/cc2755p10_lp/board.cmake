@@ -51,7 +51,7 @@ endfunction()
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)
 add_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c ${board_dir}/bench_port.c
-    core/fasst_frame.c core/frame.c drivers/sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
+    core/fasst_frame.c core/frame.c core/tfhss.c drivers/sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 
 # The MPM port: the radio's link on UART0 (100000 8E2, mpm_port.c), the
