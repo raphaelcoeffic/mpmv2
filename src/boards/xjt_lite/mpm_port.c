@@ -144,11 +144,7 @@ void mpm_port_write(const uint8_t* data, uint8_t len) { uart_tx_irq(UART0, data,
 
 uint16_t mpm_port_write_free() { return uart_tx_free(UART0); }
 
-void mpm_port_led(bool on)
-{
-  GPIO_writeDio(LED_GREEN, on);
-  GPIO_writeDio(LED_GREEN_ALT, on);
-}
+void mpm_port_led(bool on) { GPIO_writeDio(LED_GREEN, on); }
 
 void mpm_port_reset_rf() { radio_off(); }
 

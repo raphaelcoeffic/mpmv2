@@ -27,7 +27,7 @@ void board_pins_init()
 
   _gpio_output(LED_RED, 0);
   _gpio_output(LED_GREEN, 0);
-  _gpio_output(LED_GREEN_ALT, 0);
+  _gpio_output(LED_UNKNOWN, 0);
 }
 
 void board_app_init() {}

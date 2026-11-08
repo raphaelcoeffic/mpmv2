@@ -23,9 +23,8 @@
 // DIO_4   -> SE2431L CTX: 1 = TX (PA, about 23 dB of gain)
 //            ANT_SEL is strapped (one antenna). See doc/SE2431L_202410L.pdf
 //
-// DIO_11  -> red LED, DIO_13 -> green LED (1 = on). DIO_12: driven
-//            with them by the stock app, no visible LED here, the green
-//            LED on some boards: both driven
+// DIO_11  -> red LED, DIO_12 -> green LED (1 = on). DIO_13: driven
+//            with them by the stock app, no visible LED
 //
 // DIO_9  <-> I2C EEPROM SDA, DIO_10 -> SCL (open drain, board pull-ups):
 //            256 bytes (M24C02 type) at 0x51
@@ -40,8 +39,8 @@
 #define FEM_CTX       IOID_4
 //
 #define LED_RED       IOID_11
-#define LED_GREEN     IOID_13
-#define LED_GREEN_ALT IOID_12
+#define LED_GREEN     IOID_12
+#define LED_UNKNOWN   IOID_13
 //
 #define EEPROM_SDA    IOID_9
 #define EEPROM_SCL    IOID_10
