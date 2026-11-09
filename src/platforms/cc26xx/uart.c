@@ -1,4 +1,3 @@
-#include <driverlib/cpu.h>
 #include <driverlib/ioc.h>
 #include <driverlib/uart.h>
 #include <driverlib/prcm.h>
@@ -29,9 +28,6 @@
 
 // Error IRQs
 #define UART_ERRORS (UART_INT_OE | UART_INT_BE | UART_INT_PE | UART_INT_FE)
-
-// UART found enabled: wait before setting it up (uart_init())
-#define UART_IDLE_WAIT_US 2000
 
 #define MAX_DMA_XFER_SIZE(size)  \
   ((size) > UDMA_XFER_SIZE_MAX ? UDMA_XFER_SIZE_MAX : (size))
@@ -123,14 +119,7 @@ void uart_init(uart_t uart, const uart_device_t* dev)
       IOCPortConfigureSet(pins[i], _uart_ioc_port[uart][i], i & 1 ? IOC_STD_OUTPUT : IOC_STD_INPUT);
   }
 
-  // Left on by a boot loader: disabled, it still finishes the character
-  // it is receiving, and a format written meanwhile may not take (the
-  // XJT-Lite behind a boot loader at 57600 8N1 kept it, the registers
-  // reading ours: framing errors on every frame). A character at 9600 baud
-  // first (12 bits, 1.25 ms)
-  bool was_on = HWREG(base + UART_O_CTL) & UART_CTL_UARTEN;
   UARTDisable(base);
-  if (was_on) CPUdelay(UART_IDLE_WAIT_US * 48 / 4);  // 4 cycles per loop at 48 MHz
 
   uint32_t sys_clk = SysCtrlClockGet();
   uint32_t cfg;

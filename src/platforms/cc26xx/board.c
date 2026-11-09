@@ -13,6 +13,15 @@ void board_init()
 {
   CPUcpsid();
 
+  // Off first: whatever a boot loader left in them (a UART left on keeps
+  // its format whatever we write, SSI FIFO words, timers, DMA) back to its
+  // reset state. GPIO too: its pins float until board_pins_init()
+  PRCMPowerDomainOff(POWER_DOMAINS);
+  while (PRCMPowerDomainsAllOff(PRCM_DOMAIN_PERIPH) != PRCM_DOMAIN_POWER_OFF) {
+  }
+  while (PRCMPowerDomainsAllOff(PRCM_DOMAIN_SERIAL) != PRCM_DOMAIN_POWER_OFF) {
+  }
+
   // XOSC_HF (48 MHz xtal or HPOSC) for the RF core
   OSCHF_TurnOnXosc();
   while (!OSCHF_AttemptToSwitchToXosc()) {
