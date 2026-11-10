@@ -32,7 +32,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mpm_bench import Bench  # noqa: E402
 
-CASES = ["tx", "hop_tx", "rx_tx", "rx_hop_tx", "rx_tx_at", "rx_hop_tx_at", "tx_at", "rx", "hop_rx",
+CASES = ["tx", "hop_tx", "fs_tx", "rx_tx", "rx_hop_tx", "rx_tx_at", "rx_hop_tx_at", "tx_at", "rx", "hop_rx",
          "tx_rx", "chain"]
 TX_AT_LEAD_US = 1000  # bench.c's tx_at case
 MARK_MAX_S = 5e-6
@@ -97,7 +97,7 @@ def analyze(t, cpa, clna, n: int, lead: float):
             pr = after(pa, 1, m)
             pf = after(pa, 0, pr)
             lf, lr = after(elna, 0, m), after(elna, 1, m)
-            if case in ("tx", "hop_tx"):
+            if case in ("tx", "hop_tx", "fs_tx"):
                 add(f"{case}: call to PA on", m, pr)
             elif case in ("rx_tx", "rx_hop_tx"):
                 add(f"{case}: call to LNA off", m, lf)

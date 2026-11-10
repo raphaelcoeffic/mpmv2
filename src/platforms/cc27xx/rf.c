@@ -24,11 +24,13 @@
 
 // SYSTIM: 0.25 us ticks
 #define US(x) ((x) * 4U)
-// Start of an operation: some margin for the PBE to be ready (TI: 50 us)
-#define START_DELAY US(100)
-// The same with the radio on and tuned (rf_fs_start()): the PBE takes the
-// op at once
-#define START_DELAY_TUNED US(30)
+// Start of an operation: SYSTIM0 a little after the op is posted. A compare
+// in the past fires at once; the cold start still takes it, the TX on a
+// tuned synthesizer (rf_fs_start()) misses it (0: PA ~1 ms late, 1 us OK).
+// Measured (Saleae, FrSky X): call to PA ~80 us, ~24 us tuned; TI's 50 us
+// margin (we had 100) is for their scheduler.
+#define START_DELAY US(5)
+#define START_DELAY_TUNED US(5)
 // Hard stop: the PBE ends the operation within (measured: some us)
 #define STOP_TIMEOUT US(1000)
 
@@ -280,7 +282,8 @@ static void _end(void)
   _cancel_systim0();
   _clear_events(0xFFFFFFFFU);
   LRF_disable();
-  LRF_disableSynthRefsys();
+  // The synthesizer's reference stays on: enabling it costs 30 us
+  // (LRF_REFSYS_ENABLE_TIME) on each op start
   _running = false;
 }
 

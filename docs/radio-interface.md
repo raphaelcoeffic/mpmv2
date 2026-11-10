@@ -112,28 +112,36 @@ a Saleae; average (maximum) in us from the call):
 
 | What | CC2755 | CC2652 |
 |---|---|---|
-| TX: call to PA on | 179 (189) | 124 |
-| Hop + TX: call to PA on | 177 (177) | 262 |
-| RX running, then TX: call to PA on | 187 (189) | 159 |
-| RX running, then hop + TX: call to PA on | 220 (221) | 295 |
-| RX running: call to LNA off (the RX stop) | 4.5 (5) | 34 (the call) |
+| TX: call to PA on | 85 (94) | 124 |
+| Hop + TX: call to PA on | 83 (83) | 262 |
+| Tuned ahead (`radio_set_frequency_start()`), TX: call to PA on | 26 (28) | 124 |
+| RX running, then TX: call to PA on | 94 (95) | 159 |
+| RX running, then hop + TX: call to PA on | 128 (130) | 295 |
+| RX running: call to LNA off (the RX stop) | 5 (5) | 34 (the call) |
 | `radio_tx_start_at()`: PA on after the time given (idle, RX running, RX running + hop, 400 us ahead) | 54 (55) | 102 |
-| RX: call to LNA on | 175 (178) | 67 |
-| RX hop: call to LNA on | 218 (220) | 233 |
-| TX end to RX on: plain, chained | 186, 185 | 88, 79 |
+| RX: call to LNA on | 81 (83) | 67 |
+| RX hop: call to LNA on | 123 (126) | 233 |
+| TX end to RX on: plain, chained | 91, 90 | 88, 79 |
 
+- **Where an operation's start goes** (TX, before: 179 us): ~20 us CPU
+  (`rf_tx_start()`: setup, commands), the start delay (was 100 us, TI's
+  scheduler margin; now 5 us), the synthesizer's reference (30 us,
+  `LRF_REFSYS_ENABLE_TIME`, when `_end()` turned it off: now left on) and
+  54 us from the start trigger to the PA (synthesizer calibration and lock,
+  PA ramp). Tuned ahead, the TX skips the calibration: 26 us.
+- **Start delay:** a SYSTIM compare in the past fires at once (TRM 15.3.1);
+  the cold start takes such an event, the TX on a tuned synthesizer misses
+  it (delay 0: PA ~1 ms late; 1 us is enough). Links both ways 300/300 at 5
+  us.
 - **The abort is free:** the RX stops within 5 us of the call, RX running
   adds 9 us to a TX (the CC2652: 34 us).
 - **The hop is free from idle:** the synthesizer is programmed by each TX
-  or RX operation; with RX running it adds 33 us.
-- **TX at a time:** on time with RX running from about 135 us ahead (100
-  us: 33 us late), with a hop from about 170 us (150 us: 17 us late); the
-  CC2652 needs 100 and 200 us.
-- **The cost is each operation's start:** 175 us before the LNA is on, 177
-  before the PA (CC2652: 67 and 124). TX to RX takes 185 us, chained or
-  not: within AFHDS2A's 200 us, above ESB's 130 us ack window. Where those
-  175 us go (synthesizer calibration at each operation?) is the CC27's
-  lead for its own PBE / RFE code (`docs/topsm.md`).
+  or RX operation; with RX running it adds 34 us (the RX restarts on the
+  new channel first).
+- **TX at a time:** on time with RX running from 60 us ahead, with a hop
+  from 80 us (60 us: 15 us late); the CC2652 needs 100 and 200 us.
+- **TX to RX:** 90 us (was 185 us), within AFHDS2A's 200 us and ESB's 130 us
+  ack window.
 
 **RX timestamps.**
 - The RF core appends its timer (RAT, 4 MHz, same clock as the CPU) to each

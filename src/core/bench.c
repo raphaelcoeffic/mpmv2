@@ -2052,6 +2052,21 @@ static void _cmd_timing(char* args)
   }
   radio_set_frequency(f0);
 
+  // Tuned ahead (radio_set_frequency_start(), settled), then TX: the TX
+  // without its synthesizer start, radio_tx_start() to the PA enable
+  tstat_t fs_tx = {"fs_tx"};
+  for (uint32_t i = 0; i < n; i++) {
+    radio_set_frequency_start(i & 1 ? f0 : f1);
+    delay_us(TIMING_SETTLE_US);
+    _edges_clear();
+    t0 = get_ticks();
+    radio_tx_start(buf, air_len);
+    radio_tx_wait();
+    delay_us(TIMING_SETTLE_US);
+    _tstat_add(&fs_tx, t0, _edge(BENCH_EDGE_PA, 1, t0));
+  }
+  radio_set_frequency(f0);
+
   // RX running, then TX: radio_tx_start() (stops RX) to the PA enable
   tstat_t rx_tx = {"rx_tx"};
   for (uint32_t i = 0; i < n; i++) {
@@ -2208,7 +2223,8 @@ static void _cmd_timing(char* args)
 
   bench_port_timing(false);
   const tstat_t* all[] = {&init,    &fs,          &fs_same,      &tx_call,    &tx_start,
-                          &tx_pa,   &tx_end,      &hop_tx,       &rx_tx,      &rx_hop_tx,
+                          &tx_pa,   &tx_end,      &hop_tx,       &fs_tx,      &rx_tx,
+                          &rx_hop_tx,
                           &rx_tx_at, &rx_hop_tx_at, &tx_at,
                           &rx_call, &rx_stop,     &rx_on,        &rx_off,     &hop_rx,
                           &tx_rx,   &chain_tx_rx, &chain_window, &rssi_valid, &rssi_call};
