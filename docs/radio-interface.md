@@ -76,7 +76,9 @@ LaunchPad. October 2026, NRF 1 Mbps, average (maximum) in us:
 | TX: PA off to `radio_tx_wait()` returning | 20 | 20 |
 | Hop + TX: call to PA on | 259 (260) | 263 (266) |
 | RX running, then TX: call to PA on | 156 (156) | 156 (157) |
+| RX running, then hop + TX: call to PA on (FrSky X after the telemetry) | 295 (297) | |
 | `radio_tx_start_at()`: PA on after the time given | 102 (103) | 102 (103) |
+| The same with RX running (`rx_tx_at`), or RX running and a hop first (`rx_hop_tx_at`), 400 us ahead | 102 (103) | |
 | `radio_rx_start()` returns | 26 (26) | 26 (26) |
 | RX: call to LNA on | 67 (67) | |
 | `radio_rx_stop()` returns | 32 (32) | 32 (34) |
@@ -94,6 +96,12 @@ LaunchPad. October 2026, NRF 1 Mbps, average (maximum) in us:
 - **Spread:** all within 1 to 3 us from run to run.
 - **PA on beyond the airtime:** about 6 bit times + 20 us, the ramps on both
   sides of the packet (31 us at 1 Mbps, 227 us at FrSky D's 31 kbps).
+- **RX abort before TX** (2026-11-10, FrSky X, `timing ... [lead]`): the
+  abort costs the RX stop, 34 us, nothing more. A TX at a time is on time
+  with RX running down to 100 us ahead; with a hop first it needs about
+  200 us (150 us ahead: 49 us late; 100 us ahead: 99 us late), the hop's
+  137 us + the stop. The CC2650's 108 us abort + 170 us `CMD_FS`
+  (FrSky X V1 FCC, one-packet RX since c97c837) has no CC2652 equivalent.
 - **TX start is fixed:** with the synthesizer already in TX mode (`CMD_FS`
   `bTxMode`), the TX command still takes 124 us. It relocks the synthesizer
   itself, it seems.

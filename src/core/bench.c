@@ -109,11 +109,13 @@
 //                                period, timer_set_alarm()), n alarms (default
 //                                100): @timing sched_late, callback start after
 //                                its deadline. An rx job goes on meanwhile
-//   timing [n] [len]             RF core latencies on the current PHY, framing
+//   timing [n] [len] [lead]      RF core latencies on the current PHY, framing
 //                                and channel, n runs each (default 20), len
 //                                byte payloads (default 16): @timing <what> n= min=
 //                                avg= max= (us), @edges <what>: the PA (and
-//                                LaunchPad: LNA) enable edges of the first run
+//                                LaunchPad: LNA) enable edges of the first run;
+//                                lead: the RX then TX-at-a-time cases, us
+//                                (default 400)
 //
 // Events: @rx <time_us> <ch> <hex> [crc=ok|bad] rssi=<dBm> [foff=<khz>] [pid=<n>]
 //           time_us: when the sync word was found (CC2652: RF core timer)
@@ -1945,13 +1947,17 @@ static void _cmd_ftrx(char* args)
 
 // Time to settle after a radio call before reading the edges, us
 #define TIMING_SETTLE_US 300
+// RX running, then TX at an absolute time this far ahead (FrSky X V1 FCC:
+// about 400 us between the telemetry read and the next TX), us
+#define TIMING_LEAD_US 400
 
 static void _cmd_timing(char* args)
 {
   uint32_t n = _number_or(&args, 20);
   uint32_t len = _number_or(&args, 16);
-  if (n == 0 || n > 1000 || len == 0 || len > FRAME_PAYLOAD_MAX) {
-    _print("@err usage: timing [n (1..1000)] [payload_len (1..200)]\r\n");
+  uint32_t lead = _number_or(&args, TIMING_LEAD_US);
+  if (n == 0 || n > 1000 || len == 0 || len > FRAME_PAYLOAD_MAX || lead > 5000) {
+    _print("@err usage: timing [n (1..1000)] [payload_len (1..200)] [lead_us (0..5000)]\r\n");
     return;
   }
   if (_sx) {
@@ -2054,6 +2060,45 @@ static void _cmd_timing(char* args)
     delay_us(TIMING_SETTLE_US);
     _tstat_add(&rx_tx, t0, _edge(BENCH_EDGE_PA, 1, t0));
   }
+
+  // RX running, then hop and TX, as FrSky X between the telemetry and the
+  // next packet: radio_set_frequency() (stops RX) + radio_tx_start() to the
+  // PA enable
+  tstat_t rx_hop_tx = {"rx_hop_tx"};
+  for (uint32_t i = 0; i < n; i++) {
+    radio_rx_start(rx_len);
+    delay_us(TIMING_SETTLE_US);
+    _edges_clear();
+    t0 = get_ticks();
+    radio_set_frequency(i & 1 ? f0 : f1);
+    radio_tx_start(buf, air_len);
+    radio_tx_wait();
+    delay_us(TIMING_SETTLE_US);
+    _tstat_add(&rx_hop_tx, t0, _edge(BENCH_EDGE_PA, 1, t0));
+  }
+  radio_set_frequency(f0);
+
+  // RX running, then TX at an absolute time lead us ahead, without and with
+  // a hop first: the PA enable from that time (tx_at: the same from idle;
+  // more = the RX stop and the hop didn't fit in the lead)
+  tstat_t rx_tx_at = {"rx_tx_at"}, rx_hop_tx_at = {"rx_hop_tx_at"};
+  for (uint32_t k = 0; k < 2; k++) {
+    for (uint32_t i = 0; i < n; i++) {
+      radio_rx_start(rx_len);
+      delay_us(TIMING_SETTLE_US);
+      _edges_clear();
+      bool masked = bench_port_irq_disable();
+      t0 = get_ticks();
+      uint32_t at = micros() + lead;
+      if (!masked) bench_port_irq_enable();
+      if (k) radio_set_frequency(i & 1 ? f0 : f1);
+      radio_tx_start_at(buf, air_len, at);
+      radio_tx_wait();
+      delay_us(TIMING_SETTLE_US);
+      _tstat_add(k ? &rx_hop_tx_at : &rx_tx_at, t0 + us2ticks(lead), _edge(BENCH_EDGE_PA, 1, t0));
+    }
+  }
+  radio_set_frequency(f0);
 
   // TX at an absolute time (radio_tx_start_at(), 1 ms ahead): the PA enable
   // from that time
@@ -2159,7 +2204,8 @@ static void _cmd_timing(char* args)
 
   bench_port_timing(false);
   const tstat_t* all[] = {&init,    &fs,          &fs_same,      &tx_call,    &tx_start,
-                          &tx_pa,   &tx_end,      &hop_tx,       &rx_tx,      &tx_at,
+                          &tx_pa,   &tx_end,      &hop_tx,       &rx_tx,      &rx_hop_tx,
+                          &rx_tx_at, &rx_hop_tx_at, &tx_at,
                           &rx_call, &rx_stop,     &rx_on,        &rx_off,     &hop_rx,
                           &tx_rx,   &chain_tx_rx, &chain_window, &rssi_valid, &rssi_call};
   for (uint32_t i = 0; i < sizeof(all) / sizeof(all[0]); i++)
