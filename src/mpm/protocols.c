@@ -47,6 +47,9 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_AFHDS2A, "FlSky2A", "\x08" "PWM,IBUS" "PPM,IBUS" "PWM,SBUS" "PPM,SBUS" "Gyro_Off" "Gyro_On\0" "G_On_Rev", 7,
    MPM_OPTION_SRVFREQ, true, true, AFHDS2A_init, AFHDS2A_callback, 0},
 #endif
+#ifdef CFLIE_NRF24L01_INO
+  {PROTO_CFLIE, "CFlie", 0, 0, MPM_OPTION_NONE, false, false, CFLIE_init, CFLIE_callback, 0},
+#endif
 #ifdef FRSKY_RX_CC2500_INO
   {PROTO_FRSKY_RX, "FrSkyRX", "\x07" "Multi\0 " "CloneTX" "EraseTX", 3, MPM_OPTION_RFTUNE, false, false,
    FRSKY_RX_init, FRSKY_RX_callback, 0},
@@ -66,6 +69,10 @@ const mpm_protocol_t mpm_protocols[] = {
 #ifdef FRSKYX_CC2500_INO
   {PROTO_FRSKYX2, "FrSkyX2", STR_SUBTYPE_FRSKYX, 6, MPM_OPTION_RFTUNE, true, false, FRSKYX_init,
    FRSKYX_callback, 0},
+#endif
+#ifdef PROPEL_NRF24L01_INO
+  {PROTO_PROPEL, "Propel", "\x04" "74-Z", 1, MPM_OPTION_NONE, false, false, PROPEL_init, PROPEL_callback,
+   0},
 #endif
 #ifdef DSM_RX_CYRF6936_INO
   {PROTO_DSM_RX, "DSM_RX", "\x07" "Multi\0 " "CloneTX" "EraseTX", 3, MPM_OPTION_NONE, false, true,

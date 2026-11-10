@@ -49,6 +49,14 @@
 #define V2X2_NRF24L01_INO
 #define XK_CCNRF_INO
 #define MJXQ_CCNRF_INO
+#ifdef MPM_SKETCH
+// Untested: no model on the bench. Their ESB acks (nrf24l01.c's EN_AA)
+// checked against an NRF24L01 as PRX only: CFlie's search and commander
+// packets at 250k, 1M and 2M, Propel's bind (the ID in the ack payload).
+// The MULTI-Module repo's build only (mpm/sketch): no C copies here
+#define CFLIE_NRF24L01_INO
+#define PROPEL_NRF24L01_INO
+#endif
 
 // Futaba FASST 10ch, on the radio directly (proto_fasst.c, core/fasst_frame.c)
 #define FASST_INO

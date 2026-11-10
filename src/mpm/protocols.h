@@ -34,6 +34,14 @@ uint16_t XK_callback();
 void MJXQ_init();
 uint16_t MJXQ_callback();
 #endif
+#ifdef CFLIE_NRF24L01_INO
+void CFLIE_init();
+uint16_t CFLIE_callback();
+#endif
+#ifdef PROPEL_NRF24L01_INO
+void PROPEL_init();
+uint16_t PROPEL_callback();
+#endif
 #ifdef FUTABA_CC2500_INO
 void SFHSS_init();
 uint16_t SFHSS_callback();
