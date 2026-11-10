@@ -1301,7 +1301,13 @@ uint32_t frame_rx_sync(const frame_t* f) { return f->rx_sync; }
 
 uint32_t frame_rx_sync_alt(const frame_t* f) { return f->rx_sync_alt; }
 
-bool frame_rx_sync_weak(const frame_t* f) { return f->rx_sync_errors * 2 < SYNC_SCORE_GOOD; }
+// 32 bit sync words only: the strict threshold (0x32) is out of reach for a
+// shorter one (CC2652, raw 16 bit d391: 0% with it, 78% at 0x1F, 100% at
+// 0x10 and with the default; measured)
+bool frame_rx_sync_weak(const frame_t* f)
+{
+  return f->sync_len == 4 && f->rx_sync_errors * 2 < SYNC_SCORE_GOOD;
+}
 
 static bool _has_pid(const frame_t* f)
 {

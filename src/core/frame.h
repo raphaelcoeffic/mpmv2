@@ -118,7 +118,8 @@ uint32_t frame_rx_sync(const frame_t* f);
 uint32_t frame_rx_sync_alt(const frame_t* f);
 
 // True if the RX sync word is too close to the bits sent before it (repeated
-// patterns, e.g. address 6565656565): use a stricter sync threshold
+// patterns, e.g. address 6565656565): use a stricter sync threshold. 32 bit
+// sync words only
 bool frame_rx_sync_weak(const frame_t* f);
 
 // True if a payload of len bytes can be sent / received
