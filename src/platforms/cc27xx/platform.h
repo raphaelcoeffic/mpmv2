@@ -8,3 +8,6 @@
 
 // The chip in an application's image header (app_image.h)
 #define PLATFORM_CHIP_ID 0x2755
+
+// 2 Mbps on the proprietary PHY, both ways (radio_phy_t ble_2m not needed)
+#define RADIO_2M_BLE 0

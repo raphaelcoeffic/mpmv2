@@ -8,10 +8,15 @@
 // (RX_ADDR_P0, RX_PW_P0 or the dynamic length) into a 3 payload RX FIFO,
 // packets with a bad CRC dropped as on the chip; RX_DR set, RPD from the RSSI.
 //
-// Not emulated: auto acknowledgement and retransmissions (with EN_AA the
-// packet control field is sent and TX_DS set once the packet is out: no ack
-// is received, MAX_RT never set), ack payloads, RX pipes 1 to 5, the 3
-// payload TX FIFO (one payload, sent at once)
+// Auto acknowledgement (EN_AA pipe 0, as a PTX): each try sends and waits for
+// the ack on RX_ADDR_P0 within the retransmit delay (SETUP_RETR ARD, from
+// the RX start), blocking (radio_send_rx()); the first try when the payload
+// is written, the next ones at each register or payload read, up to ARC
+// retransmissions, then MAX_RT. An ack sets TX_DS, its payload goes to the
+// RX FIFO (RX_DR). OBSERVE_TX ARC_CNT counts the retransmissions.
+//
+// Not emulated: RX pipes 1 to 5, acks as a PRX, the 3 payload TX FIFO (one
+// payload, sent at once)
 #include "chips.h"
 
 #include "board.h"
@@ -57,6 +62,8 @@ static enum { S_OFF, S_RX, S_TX } _state;
 
 static uint8_t _tx_payload[FRAME_NRF_PAYLOAD_MAX], _tx_len;
 static bool _tx_busy;  // sent, TX_DS not yet set
+static bool _ack_wait;  // EN_AA: sent, no ack nor MAX_RT yet
+static uint8_t _arc_cnt;
 static uint8_t _rx_fifo[RX_FIFO_DEPTH][FRAME_NRF_PAYLOAD_MAX], _rx_fifo_len[RX_FIFO_DEPTH];
 static uint8_t _rx_count;
 
@@ -115,7 +122,8 @@ static bool _prepare()
     _tx.pid = pid;
     _rx = rx;
 
-    // The bench presets nrf250k, nrf1m and nrf2m
+    // The bench presets nrf250k, nrf1m and nrf2m (nrf2mble where the
+    // platform receives 2 Mbps only on it)
     uint8_t dr = _reg[NRF24L01_06_RF_SETUP];
     radio_phy_t phy = {
         .symbol_rate = dr & RF_DR_LOW ? 250000 : dr & RF_DR_HIGH ? 2000000 : 1000000,
@@ -126,6 +134,8 @@ static bool _prepare()
         .if_freq = (int16_t)0x8000,
         .tx_power = _power,
         .sync_threshold = frame_rx_sync_weak(&_rx) ? 0x32 : 0,
+        // 32 bit sync words only (3 byte addresses: the proprietary PHY)
+        .ble_2m = RADIO_2M_BLE && (dr & RF_DR_HIGH) && frame_sync_bits(&_tx) == 32,
     };
     if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
       _phy = phy;
@@ -142,14 +152,55 @@ static bool _prepare()
   return true;
 }
 
+static void _rx_fifo_put(const uint8_t* payload, uint8_t n)
+{
+  if (_rx_count == RX_FIFO_DEPTH) return;  // full: the chip drops it
+  if (n > FRAME_NRF_PAYLOAD_MAX) n = FRAME_NRF_PAYLOAD_MAX;
+  memcpy(_rx_fifo[_rx_count], payload, n);
+  _rx_fifo_len[_rx_count++] = n;
+  _status |= STATUS_RX_DR;
+}
+
+// EN_AA: one try, the packet then its ack (the PRX's packet control field;
+// an ack payload needs DPL)
+static void _try_acked()
+{
+  uint8_t retr = _reg[NRF24L01_04_SETUP_RETR];
+  uint8_t max_len = _rx.dpl ? FRAME_NRF_PAYLOAD_MAX : 0;
+  uint32_t window = ((retr >> 4) + 1) * 250;
+  radio_status_t st = radio_send_rx(_air, _air_len, frame_rx_sync(&_rx), frame_rx_len(&_rx, max_len),
+                                    window, &_pkt);
+  uint8_t payload[FRAME_PAYLOAD_MAX], n;
+  uint16_t pcf;
+  if (st == RADIO_OK &&
+      frame_decode_pcf(&_rx, _pkt.data, _pkt.len, max_len, payload, &n, &pcf) == FRAME_OK) {
+    _ack_wait = false;
+    _status |= STATUS_TX_DS;
+    if (n) _rx_fifo_put(payload, n);
+    return;
+  }
+  if (_arc_cnt >= (retr & 0x0F)) {
+    _ack_wait = false;
+    _status |= STATUS_MAX_RT;
+    return;
+  }
+  _arc_cnt++;
+}
+
 static void _send()
 {
   if (!_tx_len || !_prepare()) return;
   _air_len = frame_tx_data(&_tx, _tx_payload, _tx_len, _air);
   if (!_air_len) return;
+  _tx_len = 0;  // the FIFO entry leaves when sent
+  if (_reg[NRF24L01_01_EN_AA] & 1) {
+    _arc_cnt = 0;
+    _ack_wait = true;
+    _try_acked();
+    return;
+  }
   radio_tx_start(_air, _air_len);
   _tx_busy = true;
-  _tx_len = 0;  // the FIFO entry leaves when sent
 }
 
 static void _rx_start()
@@ -184,16 +235,13 @@ static void _poll()
     _tx_busy = false;
     _status |= STATUS_TX_DS;
   }
+  if (_ack_wait) _try_acked();
   while (_state == S_RX && radio_receive(&_pkt)) {
     uint8_t payload[FRAME_PAYLOAD_MAX];
     uint8_t n = 0;
     uint8_t len = _dpl() ? FRAME_NRF_PAYLOAD_MAX : _reg[NRF24L01_11_RX_PW_P0] & 0x3F;
     if (frame_decode(&_rx, _pkt.data, _pkt.len, len, payload, &n) != FRAME_OK) continue;
-    if (_rx_count == RX_FIFO_DEPTH) continue;  // full: the chip drops it
-    if (n > FRAME_NRF_PAYLOAD_MAX) n = FRAME_NRF_PAYLOAD_MAX;
-    memcpy(_rx_fifo[_rx_count], payload, n);
-    _rx_fifo_len[_rx_count++] = n;
-    _status |= STATUS_RX_DR;
+    _rx_fifo_put(payload, n);
   }
 }
 
@@ -283,7 +331,7 @@ uint8_t NRF24L01_ReadReg(uint8_t reg)
     case NRF24L01_07_STATUS:
       return _status | (_rx_count ? 0 : STATUS_RX_P_NO_EMPTY);
     case NRF24L01_08_OBSERVE_TX:
-      return 0;
+      return _arc_cnt;
     case NRF24L01_09_CD: {
       int8_t dbm = radio_rssi();
       return _state == S_RX && dbm != RADIO_RSSI_NONE && dbm >= RPD_DBM;
@@ -296,7 +344,7 @@ uint8_t NRF24L01_ReadReg(uint8_t reg)
       return _tx_addr[0];
     case NRF24L01_17_FIFO_STATUS:
       return (_rx_count ? 0 : FIFO_RX_EMPTY) | (_rx_count == RX_FIFO_DEPTH ? FIFO_RX_FULL : 0) |
-             (_tx_len || _tx_busy ? 0 : FIFO_TX_EMPTY);
+             (_tx_len || _tx_busy || _ack_wait ? 0 : FIFO_TX_EMPTY);
   }
   return reg < NREGS ? _reg[reg] : 0;
 }
@@ -325,12 +373,17 @@ void NRF24L01_Strobe(uint8_t state)
   switch (state) {
     case FLUSH_TX:
       _tx_len = 0;
+      _ack_wait = false;
       break;
     case FLUSH_RX:
       _rx_count = 0;
       break;
     case REUSE_TX_PL:  // the last packet sent, again (same packet id)
-      if (_state == S_TX && _air_len) {
+      if (_state == S_TX && _air_len && (_reg[NRF24L01_01_EN_AA] & 1)) {
+        _arc_cnt = 0;
+        _ack_wait = true;
+        _try_acked();
+      } else if (_state == S_TX && _air_len) {
         radio_tx_start(_air, _air_len);
         _tx_busy = true;
       }
@@ -371,7 +424,8 @@ void NRF24L01_Reset()
   _status = 0x0E & ~STATUS_RX_P_NO_EMPTY;
   _tx_len = _rx_count = 0;
   _air_len = 0;
-  _tx_busy = false;
+  _tx_busy = _ack_wait = false;
+  _arc_cnt = 0;
   _power = _power_word();
   _phy_on = false;  // radio_init() at the next TX or RX
   _setup_dirty = true;

@@ -19,3 +19,12 @@
 #else
 #define PLATFORM_CHIP_ID 0x2652
 #endif
+
+// 2 Mbps on the Bluetooth LE 2M PHY (radio_phy_t ble_2m): the proprietary
+// PHY receives nothing at 2 Mbps (sends with 2 to 3% losses on some
+// channels). The CC2650 has neither
+#if defined(MCU_CC26X0)
+#define RADIO_2M_BLE 0
+#else
+#define RADIO_2M_BLE 1
+#endif
