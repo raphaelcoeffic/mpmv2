@@ -19,3 +19,5 @@ bool bench_port_timing(bool on)
 }
 
 bool bench_port_timing_lna() { return false; }
+
+void bench_port_timing_mark() {}

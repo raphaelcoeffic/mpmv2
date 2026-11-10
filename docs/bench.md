@@ -182,7 +182,12 @@ What differs from the CC2652 bench:
   no CRC verdicts (all packets count as ok);
 - RX at a multiple of the rate for a large deviation (`redpineslow`,
   below): packets of 255 / 4 - 3 bytes at most there;
-- no `timing` (no test pins), no SX1281, `radio_hposc_offset()` 0;
+- `timing` runs, but its edges come out as missed: no edge capture. The
+  RFE's PA and LNA enables (TI's RFE images: RFE GPO0, GPO1) go out on
+  LRFD0 / LRFD1 = DIO17 / DIO18 (BoosterPack pins 32 / 31, behind solder
+  bridges in front of the headers, open as shipped), each run's start a
+  1 us pulse on DIO17: `timing_saleae.py` measures them with a Saleae;
+- no SX1281, `radio_hposc_offset()` 0;
 - packets up to 255 bytes; the RX FIFO entry carries the frequency
   estimate (about deviation / 72 per step, the sender above is positive,
   compressed beyond about 60 steps), the RSSI and the sync time (SYSTIM,
@@ -448,6 +453,7 @@ test, a suite's run (`run_suite()`) and the suites' tests (`suite_cases()`,
 | `frskyl_reverse.py` | FrSky L CC2652 -> CC2500: 60 byte chunks of the chip stream, compared bit by bit |
 | `freqscan.py` | The CC2652 receives or sends at several frequency offsets: where a chip really is, the offset between the two boards |
 | `timing.py` | Bench `timing` per PHY (NRF, FrSky D and X, AFHDS2A, DSM): TX start, hop, turnarounds, RSSI, as a table ([radio-interface.md](radio-interface.md)) |
+| `timing_saleae.py` | Bench `timing` on the CC2755 LaunchPad, the PA / LNA enables on DIO17 / DIO18 read by a Saleae Logic (Logic 2's automation server) ([radio-interface.md](radio-interface.md)) |
 | `autotrim.py` | `autotrim`: the CC2652 learns the trim from the MPM's packets, then sends to it; `--sweep`: the frequency estimate (`foff`) per trim |
 | `radio_sim.py` | The radio side of the MPM serial link for the firmware without `BENCH` (MPM core): frames every 7 ms at 100000 8E2, status, protocol list scan, bind, test protocol to the 4-in-1, `drive` a real receiver (bind, CH1-4 sweep, FrSky link telemetry), `sport` S.Port requests to a FrSky X receiver as a Lua script (UNI setup fields, `--push`); `--eeprom` / `--save-eeprom FILE`: the module's EEPROM loaded before, saved after ([mpm-core.md](mpm-core.md#files-over-usb)) |
 | `proto_compare.py` | A protocol ported to the MPM core (LaunchPad) against the 4-in-1 running it, same module id and channels: the MPM v2 receives both, bind phase and data, payloads and intervals compared; `--low-power` / `--range`: the LaunchPad's power flag ([mpm-core.md](mpm-core.md#mpm-protocol-files)) |

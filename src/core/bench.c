@@ -511,7 +511,11 @@ void bench_edge(uint32_t ticks, uint8_t signal, uint8_t level)
   if (_n_edges < TIMING_EDGES) _edges[_n_edges++] = (edge_t){ticks, signal, level};
 }
 
-static void _edges_clear() { _n_edges = 0; }
+static void _edges_clear()
+{
+  _n_edges = 0;
+  bench_port_timing_mark();
+}
 
 // First edge of signal to level at or after ticks, TIMING_NONE if none
 static uint32_t _edge(uint8_t signal, uint8_t level, uint32_t after)

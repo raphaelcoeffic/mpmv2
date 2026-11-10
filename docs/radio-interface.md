@@ -106,6 +106,35 @@ LaunchPad. October 2026, NRF 1 Mbps, average (maximum) in us:
   `bTxMode`), the TX command still takes 124 us. It relocks the synthesizer
   itself, it seems.
 
+**CC2755 LaunchPad** (2026-11-10, FrSky X, `timing_saleae.py`: the RFE's
+PA / LNA enables on DIO17 / DIO18 and a marker at each run's start, read by
+a Saleae; average (maximum) in us from the call):
+
+| What | CC2755 | CC2652 |
+|---|---|---|
+| TX: call to PA on | 179 (189) | 124 |
+| Hop + TX: call to PA on | 177 (177) | 262 |
+| RX running, then TX: call to PA on | 187 (189) | 159 |
+| RX running, then hop + TX: call to PA on | 220 (221) | 295 |
+| RX running: call to LNA off (the RX stop) | 4.5 (5) | 34 (the call) |
+| `radio_tx_start_at()`: PA on after the time given (idle, RX running, RX running + hop, 400 us ahead) | 54 (55) | 102 |
+| RX: call to LNA on | 175 (178) | 67 |
+| RX hop: call to LNA on | 218 (220) | 233 |
+| TX end to RX on: plain, chained | 186, 185 | 88, 79 |
+
+- **The abort is free:** the RX stops within 5 us of the call, RX running
+  adds 9 us to a TX (the CC2652: 34 us).
+- **The hop is free from idle:** the synthesizer is programmed by each TX
+  or RX operation; with RX running it adds 33 us.
+- **TX at a time:** on time with RX running from about 135 us ahead (100
+  us: 33 us late), with a hop from about 170 us (150 us: 17 us late); the
+  CC2652 needs 100 and 200 us.
+- **The cost is each operation's start:** 175 us before the LNA is on, 177
+  before the PA (CC2652: 67 and 124). TX to RX takes 185 us, chained or
+  not: within AFHDS2A's 200 us, above ESB's 130 us ack window. Where those
+  175 us go (synthesizer calibration at each operation?) is the CC27's
+  lead for its own PBE / RFE code (`docs/topsm.md`).
+
 **RX timestamps.**
 - The RF core appends its timer (RAT, 4 MHz, same clock as the CPU) to each
   packet. `radio.c` converts it to `micros()`.

@@ -111,3 +111,5 @@ bool bench_port_timing_lna()
   return false;
 #endif
 }
+
+void bench_port_timing_mark() {}

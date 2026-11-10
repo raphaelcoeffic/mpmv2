@@ -30,6 +30,9 @@ void bench_port_led(bench_led_t state);
 bool bench_port_timing(bool on);
 // The LNA enable captured too
 bool bench_port_timing_lna();
+// The start of a timing run, on a board that shows the enables on pins for
+// a logic analyzer instead of capturing them (CC2755 LaunchPad); else nothing
+void bench_port_timing_mark();
 
 // bench.c: an edge, from the port's interrupt
 void bench_edge(uint32_t ticks, uint8_t signal, uint8_t level);
