@@ -33,6 +33,8 @@
 #define START_DELAY_TUNED US(5)
 // Hard stop: the PBE ends the operation within (measured: some us)
 #define STOP_TIMEOUT US(1000)
+// rf_rx(): a packet under way at the end of the window, at most this longer
+#define RX_END_MAX US(20000)
 
 #define BUFRAM(reg) (LRFD_BUFRAM_BASE + PBE_GENERIC_RAM_O_##reg)
 
@@ -560,9 +562,17 @@ int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)
   int res = rf_rx_start(freq_hz, len < 2 ? 2 : len, false, 0);
   if (res) return res;
   uint32_t start = _now();
+  uint32_t wp = HWREG_READ_LRF(LRFDPBE_BASE + LRFDPBE_O_RXFWP);
 
-  // The PBE takes SYSTIM0 as the start; the stop is ours (hard stop)
+  // The PBE takes SYSTIM0 as the start; the stop is ours (hard stop). A
+  // packet under way at the end (the PBE writes the FIFO from the sync word
+  // on) is received to its end, as the CC2652's RX: an ESB ack with its
+  // payload may end after the window (250 kbps, 4 bytes: 550 us after the TX
+  // for CFlie's 500 us)
   while (rf_busy() && (int32_t)(_now() - start - START_DELAY - US(timeout_us)) < 0) {
+  }
+  while (rf_busy() && HWREG_READ_LRF(LRFDPBE_BASE + LRFDPBE_O_RXFWP) != wp &&
+         (int32_t)(_now() - start - START_DELAY - US(timeout_us) - RX_END_MAX) < 0) {
   }
   pkt->len = 0;
   if (rf_rx_read(pkt)) {

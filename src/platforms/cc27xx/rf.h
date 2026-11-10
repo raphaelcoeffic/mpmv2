@@ -67,7 +67,8 @@ typedef struct {
   uint8_t data[RF_MAX_PAYLOAD];
 } rf_packet_t;
 
-// Blocking: one packet of len bytes (2 at least) within timeout_us
+// Blocking: one packet of len bytes (2 at least) within timeout_us (its
+// sync word: a packet under way at the end is received to its end)
 int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt);
 
 // Non-blocking: the operation starts at SYSTIM time at (0: as soon as
