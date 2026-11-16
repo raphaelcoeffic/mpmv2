@@ -583,7 +583,12 @@ int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)
   return res == RF_ERR_TIMEOUT ? RF_ERR_NO_PACKET : res;
 }
 
-int8_t rf_rssi(void) { return _running ? LRF_readRssi() : RF_RSSI_NONE; }
+int8_t rf_rssi(void)
+{
+  if (!_running) return RF_RSSI_NONE;
+  int8_t rssi = LRF_readRssi();
+  return rssi == LRF_RSSI_INVALID ? RF_RSSI_NONE : rssi;  // not valid yet: 127
+}
 
 void rf_stats(rf_stats_t *stats)
 {
