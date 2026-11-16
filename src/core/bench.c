@@ -99,6 +99,9 @@
 //   tx <hex>                     send one packet
 //   txraw <hex>                  send air bytes as given after the sync word, no
 //                                framing, up to 640 (802.15.4 spread in software)
+//   txrxraw <rx_len> <window_us> <hex>  txraw, then receive one packet of rx_len
+//                                air bytes for window_us (the RX sync word):
+//                                @raw, or @noreply
 //   txp <period_us> <count> <hex>  send periodically, count 0 = forever
 //   seq <idx>                    8 bit counter at byte idx for txp, 255 = off
 //   rx <len> [fixed]             receive continuously, len = payload size
@@ -1534,6 +1537,34 @@ static void _cmd_txraw(char* args)
   _print("@ok txraw\r\n");
 }
 
+// txraw with a reply window: a frame and its answer (Jeti bind, doc/jeti.md)
+static void _cmd_txrxraw(char* args)
+{
+  if (!_need_phy()) return;
+  uint32_t rx_len, window;
+  int len;
+  if (!_number(&args, &rx_len) || !_number(&args, &window) || rx_len == 0 ||
+      rx_len > RADIO_MAX_PKT_LEN || (len = _hex(args, _raw_buf, sizeof(_raw_buf))) <= 0) {
+    _print("@err usage: txrxraw <rx_len> <window_us> <hex (up to 640 bytes)>\r\n");
+    return;
+  }
+  _job_stop();
+  static radio_packet_t pkt;
+  radio_status_t st =
+      radio_send_rx(_raw_buf, len, frame_rx_sync(&_frame), rx_len, window, &pkt);
+  if (st == RADIO_NO_PACKET) {
+    _print("@noreply\r\n");
+    return;
+  }
+  if (st != RADIO_OK) {
+    _report_radio_error("txrxraw");
+    return;
+  }
+  _printf("@raw %lu %d ", pkt.timestamp_us, _channel);
+  _print_hex(pkt.data, pkt.len);
+  _printf(" rssi=%d\r\n", pkt.rssi);
+}
+
 static void _cmd_txp(char* args)
 {
   uint32_t period, count;
@@ -2375,6 +2406,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "tx")) _cmd_tx(args);
   else if (!strcmp(cmd, "txp")) _cmd_txp(args);
   else if (!strcmp(cmd, "txraw")) _cmd_txraw(args);
+  else if (!strcmp(cmd, "txrxraw")) _cmd_txrxraw(args);
   else if (!strcmp(cmd, "seq")) _cmd_seq(args);
   else if (!strcmp(cmd, "rx")) _cmd_rx(args);
   else if (!strcmp(cmd, "rxraw")) _cmd_rxraw(args);
