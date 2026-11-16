@@ -32,7 +32,8 @@
  *   time                the microsecond clock of the trace
  *   ppm -|+ FRAME PULSE CH1 [CH2 ...]
  *                       PPM on the PPM pin instead of the UART, all times
- *                       in us: the frame length, the pulse length, the
+ *                       in us (fractions to 1/8 us: 1500.25): the frame
+ *                       length, the pulse length, the
  *                       channels (pulse included, 1 to 16 of them); -:
  *                       pulses low (EdgeTX's default), +: pulses high. A
  *                       new train starts at the end of the current frame
@@ -205,7 +206,7 @@ static void line_init(void)
 }
 
 /*
- * PPM: the state machine takes one word per pulse (ppm.pio), the FIFO
+ * PPM: the state machine takes two words per pulse (ppm.pio), the FIFO
  * refilled from the interrupt, from one of two trains: the other one is
  * written by the ppm command and taken at the next frame start
  */
@@ -214,7 +215,9 @@ static void line_init(void)
 #define PPM_IRQ PIO0_IRQ_0
 #define PPM_MAX_CH 16
 
-static uint32_t ppm_words[2][PPM_MAX_CH + 1];
+#define PPM_UNIT 8 // state machine cycles per us
+
+static uint32_t ppm_words[2][2 * (PPM_MAX_CH + 1)];
 static uint32_t ppm_len[2];
 static volatile int ppm_cur, ppm_next = -1;
 static uint32_t ppm_pos;
@@ -236,31 +239,49 @@ static void ppm_irq(void)
     }
 }
 
-static uint32_t ppm_word(uint32_t pulse, uint32_t space)
+static void ppm_word(uint32_t *w, uint32_t pulse, uint32_t space)
 {
-    return (pulse - 2) << 16 | (space - 5);
+    w[0] = pulse - 2;
+    w[1] = space - 6;
 }
 
-// The train for the next frame start; false if the times don't fit
+// A time in us with an optional fraction ("1500.25"), in 1/8 us
+static uint32_t ppm_time(const char *s)
+{
+    char *end;
+    uint32_t t = strtoul(s, &end, 10) * PPM_UNIT;
+    if (*end == '.') {
+        uint32_t num = 0, den = 1;
+        for (end++; *end >= '0' && *end <= '9' && den < 100000; end++) {
+            num = num * 10 + (*end - '0');
+            den *= 10;
+        }
+        t += (num * PPM_UNIT + den / 2) / den;
+    }
+    return t;
+}
+
+// The train for the next frame start, times in 1/8 us; false if they don't fit
 static bool ppm_set(uint32_t frame, uint32_t pulse, const uint32_t *ch, uint32_t n)
 {
+    const uint32_t us = PPM_UNIT;
     uint32_t sum = 0;
-    if (!n || n > PPM_MAX_CH || pulse < 50 || pulse > 1000)
+    if (!n || n > PPM_MAX_CH || pulse < 50 * us || pulse > 1000 * us)
         return false;
     for (uint32_t i = 0; i < n; i++) {
-        if (ch[i] < pulse + 50 || ch[i] > 60000)
+        if (ch[i] < pulse + 50 * us || ch[i] > 60000 * us)
             return false;
         sum += ch[i];
     }
-    if (frame < sum + pulse + 50 || frame - sum > 60000)
+    if (frame < sum + pulse + 50 * us || frame - sum > 60000 * us)
         return false;
 
     irq_set_enabled(PPM_IRQ, false);
     int b = ppm_on ? 1 - ppm_cur : 0;
     for (uint32_t i = 0; i < n; i++)
-        ppm_words[b][i] = ppm_word(pulse, ch[i] - pulse);
-    ppm_words[b][n] = ppm_word(pulse, frame - sum - pulse);
-    ppm_len[b] = n + 1;
+        ppm_word(&ppm_words[b][2 * i], pulse, ch[i] - pulse);
+    ppm_word(&ppm_words[b][2 * n], pulse, frame - sum - pulse);
+    ppm_len[b] = 2 * (n + 1);
     if (ppm_on) {
         ppm_next = b;
     } else {
@@ -278,10 +299,8 @@ static void ppm_start(void)
         ppm_offset = pio_add_program(PPM_PIO, &ppm_program);
     pio_sm_config c = ppm_program_get_default_config(ppm_offset);
     sm_config_set_set_pins(&c, LINK_TX_PIN, 1);
-    // x (the space) from the low half
-    sm_config_set_out_shift(&c, true, false, 32);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
-    sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / 1000000.0f);
+    sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (1000000.0f * PPM_UNIT));
     pio_sm_init(PPM_PIO, PPM_SM, ppm_offset, &c);
     pio_sm_set_pins_with_mask(PPM_PIO, PPM_SM, 0, 1u << LINK_TX_PIN);
     pio_sm_set_consecutive_pindirs(PPM_PIO, PPM_SM, LINK_TX_PIN, 1, true);
@@ -535,11 +554,11 @@ static void command(char *line)
         uint32_t ch[PPM_MAX_CH];
         uint32_t n = argc - 4;
         for (uint32_t i = 0; i < n; i++)
-            ch[i] = strtoul(argv[4 + i], NULL, 10);
+            ch[i] = ppm_time(argv[4 + i]);
         bool negative = !strcmp(argv[1], "-");
         if (ppm_on && negative != ppm_negative)
             ppm_stop();
-        if (!ppm_set(strtoul(argv[2], NULL, 10), strtoul(argv[3], NULL, 10), ch, n)) {
+        if (!ppm_set(ppm_time(argv[2]), ppm_time(argv[3]), ch, n)) {
             ctrl_printf("err ppm times");
         } else {
             ppm_negative = negative;
