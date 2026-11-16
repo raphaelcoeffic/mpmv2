@@ -2019,20 +2019,23 @@ static void _cmd_jetirx(char* args)
   jeti_rx_cfg_t cfg = {.stop = _host_stop};
   cfg.secs = _number_or(&args, 10);
   cfg.ch = _number_or(&args, 16);
-  cfg.follow = _number_or(&args, 1);
+  uint32_t follow = _number_or(&args, 1);
+  cfg.follow = follow & 1;
+  cfg.hw = follow & 2;
   cfg.frame_len = _number_or(&args, 384);
   cfg.burst_at = _number_or(&args, 0);
   cfg.burst_len = _number_or(&args, 150);
   cfg.burst_every = _number_or(&args, 2);
-  if (cfg.secs > 3600 || cfg.ch < 11 || cfg.ch > 26 || cfg.frame_len < 64 ||
+  if (cfg.secs > 3600 || cfg.ch < 11 || cfg.ch > 26 || cfg.frame_len < 64 || follow > 3 ||
+      (cfg.hw && !RADIO_IEEE) ||
       cfg.frame_len > RADIO_MAX_PKT_LEN || cfg.burst_len > 400 || cfg.burst_every == 0) {
-    _print("@err usage: jetirx [secs] [ch 11..26] [follow] [len] [burst_at_us burst_len "
-           "burst_every]\r\n");
+    _print("@err usage: jetirx [secs] [ch 11..26] [follow: 1 follow, 2 IEEE hardware] [len] "
+           "[burst_at_us burst_len burst_every]\r\n");
     return;
   }
   _job_stop();
-  _printf("@ok jetirx secs=%lu ch=%u follow=%u len=%u\r\n", cfg.secs, cfg.ch, cfg.follow,
-          cfg.frame_len);
+  _printf("@ok jetirx secs=%lu ch=%u follow=%u hw=%u len=%u\r\n", cfg.secs, cfg.ch, cfg.follow,
+          cfg.hw, cfg.frame_len);
   jeti_rx_run(&cfg, _printf);
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }

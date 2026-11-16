@@ -79,6 +79,13 @@
 #include "radio.h"
 #include "timer.h"
 
+// The RF core's IEEE 802.15.4 modem and packet commands (RADIO_IEEE: the
+// CC2652): PSDUs both ways, FCS by the RF core. Else (or -DJETI_HW=0) the
+// frames spread / despread here and sent / received as 2 Mbps MSK
+#ifndef JETI_HW
+#define JETI_HW RADIO_IEEE
+#endif
+
 #define JETI_STEP_US 10000
 #define JETI_RING 5
 #define JETI_FRAME_STEPS 2
@@ -155,7 +162,12 @@ static struct {
 } _j;
 
 static uint8_t _frame[JETI_HDR + JETI_BOX_PAYLOAD];
+#if JETI_HW
+#define _tx_buf _frame  // the PSDU: the RF core adds PHR and FCS
+#else
 static uint8_t _air[JETI_TX_LEN(JETI_HDR + JETI_BOX_PAYLOAD + JETI_FCS)];
+#define _tx_buf _air
+#endif
 static uint8_t _psdu[JETI_PSDU_MAX], _plain[JETI_PSDU_MAX];
 static radio_packet_t _pkt;
 
@@ -203,18 +215,23 @@ static uint8_t* _list(uint8_t* p, const uint8_t* ring, uint8_t si)
   return p;
 }
 
-// The frame on the air: _air, its length returned
+// The frame for the radio in _tx_buf, its length returned: the PSDU
+// (JETI_HW), else its air bytes
 static uint16_t _prepare(uint8_t payload_len)
 {
   uint8_t len = JETI_HDR + payload_len;
   jeti_scramble(_frame, _frame, len);
   _j.n++;
+#if JETI_HW
+  return len;
+#else
   return jeti_spread(_air, _frame, len);
+#endif
 }
 
 static void _send(uint8_t payload_len)
 {
-  radio_tx_start_at(_air, _prepare(payload_len), mpm_callback_deadline() + JETI_TX_AT_US);
+  radio_tx_start_at(_tx_buf, _prepare(payload_len), mpm_callback_deadline() + JETI_TX_AT_US);
 }
 
 // Carrier sense on the tuned channel: false if busy
@@ -249,10 +266,17 @@ static uint16_t _rx_on_us(uint8_t payload_len)
 // A reply to us: its payload in _plain, its length returned (0: none)
 static uint8_t _reply()
 {
+#if JETI_HW
+  // The PSDU, its FCS checked and removed by the RF core
+  uint8_t len = _pkt.len;
+  if (len < JETI_HDR + 8 || len > JETI_PSDU_MAX) return 0;
+  memcpy(_psdu, _pkt.data, len);
+#else
   uint8_t len, pre, dmax;
   int got = jeti_despread(_pkt.data, _pkt.len, _psdu, &len, &pre, &dmax);
   if (got != len || len < JETI_HDR + 8 + JETI_FCS || !jeti_fcs_ok(_psdu, len)) return 0;
   len -= JETI_FCS;
+#endif
   jeti_descramble(_psdu, _plain, len);
   const uint8_t* h = _plain;
   if ((h[JETI_TYPE] & 0xF) != 2 || h[JETI_TYPE + P_SUB] != 0x13 ||
@@ -548,7 +572,7 @@ static uint16_t _data_cca()
     _j.st = ST_TX;
     return JETI_FRAME_STEPS * JETI_STEP_US - JETI_CCA_AT_US;
   }
-  radio_tx_start_at(_air, _j.air_len,
+  radio_tx_start_at(_tx_buf, _j.air_len,
                     mpm_callback_deadline() + JETI_TX_AT_US - JETI_CCA_AT_US);
   if (mpm.disable_telem) {
     _j.st = ST_TX;
@@ -593,7 +617,11 @@ void JETI_init()
   _load_rx();
   _j.power = _tx_power();
   radio_phy_t phy;
+#if JETI_HW
+  phy = (radio_phy_t){.ieee = true, .tx_power = _j.power};
+#else
   jeti_phy(&phy, _j.power);
+#endif
   if (radio_init(&phy) != RADIO_OK) {
     mpm_sub_invalid();
     return;

@@ -1,8 +1,11 @@
 // Jeti Duplex follower (bench_jeti.h, doc/jeti.md)
 #include "bench_jeti.h"
 #include "jeti_frame.h"
+#include "platform.h"
 #include "radio.h"
 #include "timer.h"
+
+#include <string.h>
 
 #define JETI_LIST (JETI_HDR + 5)
 #define JETI_DATA_LEN 37    // module frame with channel data (42 unbound)
@@ -19,6 +22,7 @@
 #define JETI_LOST_US 300000
 #define JETI_PARK_US 600000
 #define JETI_BURST_MAX 400
+
 static const int16_t _bits_offset_us[4] = {0, 2600, 500, -1200};
 
 static radio_packet_t _pkt;
@@ -55,6 +59,7 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
 {
   radio_phy_t phy;
   jeti_phy(&phy, 0);
+  if (cfg->hw) phy = (radio_phy_t){.ieee = true};
   // Noise: an LCG's bytes
   uint32_t r = 12345;
   for (int i = 0; i < JETI_BURST_MAX; i++) _burst[i] = (r = r * 1103515245u + 12345) >> 24;
@@ -83,7 +88,24 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
     radio_poll();
     if (radio_receive(&_pkt)) {
       uint8_t len, pre, dmax;
-      int got = jeti_despread(_pkt.data, _pkt.len, _psdu, &len, &pre, &dmax);
+      int got;
+      if (cfg->hw) {
+        // The PSDU without its FCS: put back for the print
+        len = _pkt.len + JETI_FCS;
+        if (len > JETI_PSDU_MAX) {
+          bad++;
+          continue;
+        }
+        memcpy(_psdu, _pkt.data, _pkt.len);
+        uint16_t fcs = jeti_crc16(_psdu, _pkt.len);
+        _psdu[_pkt.len] = fcs;
+        _psdu[_pkt.len + 1] = fcs >> 8;
+        got = len;
+        pre = 0;  // t_sfd: the RF core's timestamp as is (a fixed offset)
+        dmax = 0;
+      } else {
+        got = jeti_despread(_pkt.data, _pkt.len, _psdu, &len, &pre, &dmax);
+      }
       if (got < 0) {
         bad++;
         continue;

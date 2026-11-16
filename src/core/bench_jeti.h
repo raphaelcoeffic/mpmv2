@@ -19,12 +19,16 @@
 // module data frame (37 B and more, type low nibble 1) locks: the ring
 // from its list, the phase from its time. The RX hops with the clock, as
 // the receiver does; after a module frame it stays on the channel for the
-// receiver's reply (4 ms). 0.3 s without a module frame: parked on ch again
+// receiver's reply (4 ms). 0.3 s without a module frame: parked on ch again.
 typedef struct {
   uint32_t secs;        // 0: until stopped
   uint8_t ch;           // IEEE channel to start on (11..26)
   uint16_t frame_len;   // air bytes per module frame capture (after the sync)
   bool follow;
+  // The RF core's IEEE 802.15.4 receiver (RADIO_IEEE) instead of the MSK
+  // capture and despreading: frames with a good FCS only (d=0, frame_len
+  // ignored), t_sfd the RF core's timestamp (a chip-dependent fixed offset)
+  bool hw;
   // Burst test (carrier sense): after every burst_every-th module frame, a
   // burst_len byte burst of noise on its channel burst_at us after its SFD
   // (then the reply listened to as usual), printed as "@jb <t_sfd> <status>"
