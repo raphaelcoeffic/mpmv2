@@ -50,7 +50,7 @@ endfunction()
 
 # Radio bench: bench.c's shell (docs/bench.md) on UART0 at 921600 baud,
 # radio.h, timer.h and uart.h from the platform (platforms/cc27xx)
-add_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c core/bench_jeti.c ${board_dir}/bench_port.c
+add_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c core/bench_jeti.c core/jeti_frame.c ${board_dir}/bench_port.c
     core/fasst_frame.c core/frame.c core/tfhss.c drivers/sx1281.c ${cc27xx_hal_sources} ${cc27xx_rf_sources})
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 

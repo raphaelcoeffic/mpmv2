@@ -1,25 +1,9 @@
 // Jeti Duplex follower (bench_jeti.h, doc/jeti.md)
 #include "bench_jeti.h"
-#include "platform.h"
+#include "jeti_frame.h"
 #include "radio.h"
 #include "timer.h"
 
-// 802.15.4 symbol 0 in MSK form (the RX sync word: one preamble symbol)
-#define JETI_SYNC 0xE077AE6C
-// The 16 symbols' chip sequences in MSK form at 2 Mchip/s, first chip in bit
-// 31; that bit depends on the previous symbol's last chip: left out
-static const uint32_t _msk[16] = {
-    0x6077AE6C, 0x4E077AE6, 0x6CE077AE, 0x66CE077A, 0x2E6CE077, 0x7AE6CE07,
-    0x77AE6CE0, 0x077AE6CE, 0x1F885193, 0x31F88519, 0x131F8851, 0x1931F885,
-    0x51931F88, 0x051931F8, 0x0851931F, 0x78851931,
-};
-#define JETI_MSK_MASK 0x7FFFFFFF
-#define JETI_SYMBOL_US 16
-#define JETI_PREAMBLE_SYMBOLS 8
-#define JETI_PSDU_MAX 127
-
-#define JETI_HDR 7         // MAC header: FCF, seq, PAN, dst
-#define JETI_TYPE JETI_HDR  // payload byte 0, plain
 #define JETI_LIST (JETI_HDR + 5)
 #define JETI_DATA_LEN 37    // module frame with channel data (42 unbound)
 #define JETI_REPLY_LEN 480  // air bytes for a reply (up to ~54 B PSDU: JETIBOX text)
@@ -39,73 +23,7 @@ static const int16_t _bits_offset_us[4] = {0, 2600, 500, -1200};
 static radio_packet_t _pkt;
 static uint8_t _psdu[JETI_PSDU_MAX];
 
-static uint32_t _ch_khz(uint8_t ch) { return 2405000 + 5000 * (ch - 11); }
-
-static uint8_t _symbol(const uint8_t* d, uint8_t* dist)
-{
-  uint32_t w = (uint32_t)d[0] << 24 | (uint32_t)d[1] << 16 | (uint32_t)d[2] << 8 | d[3];
-  uint8_t best = 0, bd = 32;
-  for (uint8_t s = 0; s < 16; s++) {
-    uint8_t n = __builtin_popcount((w ^ _msk[s]) & JETI_MSK_MASK);
-    if (n < bd) {
-      bd = n;
-      best = s;
-    }
-  }
-  *dist = bd;
-  return best;
-}
-
-// Despread the capture after the sync word: the preamble's remaining
-// symbols, the SFD (7, A), the PHR, the PSDU. Returns the PSDU bytes the
-// capture holds, -1 without an SFD; *len: the PHR's length, *pre: the
-// preamble symbols after the sync word, *dmax: the worst symbol distance
-static int _despread(const uint8_t* d, uint16_t n, uint8_t* len, uint8_t* pre, uint8_t* dmax)
-{
-  uint16_t syms = n / 4, i = 0;
-  uint8_t dist, s;
-  *dmax = 0;
-  while (i < syms && i < JETI_PREAMBLE_SYMBOLS && (s = _symbol(d + 4 * i, &dist)) == 0) i++;
-  *pre = i;
-  if (i + 4 > syms || s != 7 || _symbol(d + 4 * (i + 1), &dist) != 0xA) return -1;
-  i += 2;
-  uint8_t d0, d1;
-  uint8_t lo = _symbol(d + 4 * i, &d0), hi = _symbol(d + 4 * (i + 1), &d1);
-  *len = (lo | hi << 4) & 0x7F;
-  *dmax = d0 > d1 ? d0 : d1;
-  i += 2;
-  int k = 0;
-  for (; k < *len && i + 2 <= syms; k++, i += 2) {
-    lo = _symbol(d + 4 * i, &d0);
-    hi = _symbol(d + 4 * (i + 1), &d1);
-    _psdu[k] = lo | hi << 4;
-    if (d0 > *dmax) *dmax = d0;
-    if (d1 > *dmax) *dmax = d1;
-  }
-  return k;
-}
-
-static uint16_t _crc16_kermit(const uint8_t* p, uint8_t n)
-{
-  uint16_t c = 0;
-  while (n--) {
-    c ^= *p++;
-    for (int b = 0; b < 8; b++) c = c & 1 ? (c >> 1) ^ 0x8408 : c >> 1;
-  }
-  return c;
-}
-
-// Payload scrambler (doc/jeti/jdec.py): key register fed with every
-// plaintext byte, payload bytes from 1 on sent as p ^ k
-static void _descramble(const uint8_t* in, uint8_t* out, uint8_t n)
-{
-  uint8_t k = 0;
-  for (uint8_t i = 0; i < n; i++) {
-    uint8_t p = i <= JETI_TYPE ? in[i] : in[i] ^ k;
-    out[i] = p;
-    k = ((uint8_t)((k << 1) + p) ^ (k & 0x80 ? 0xC8 : 0)) ^ 0x93;
-  }
-}
+static uint32_t _ch_khz(uint8_t ch) { return jeti_freq_khz(ch - 11); }
 
 static void _print_frame(jeti_print_t print, uint32_t t_sfd, uint8_t ch, int got, uint8_t len,
                          uint8_t dmax, int off)
@@ -117,8 +35,7 @@ static void _print_frame(jeti_print_t print, uint32_t t_sfd, uint8_t ch, int got
     hex[2 * i + 1] = digits[_psdu[i] & 0xF];
   }
   hex[2 * got] = 0;
-  bool fcs = got == len && len >= 2 &&
-             _crc16_kermit(_psdu, len - 2) == (_psdu[len - 2] | _psdu[len - 1] << 8);
+  bool fcs = got == len && jeti_fcs_ok(_psdu, len);
   print("@jf %lu %u rssi=%d d=%u fcs=%u ", t_sfd, ch, _pkt.rssi, dmax, fcs);
   print("%s", hex);
   if (off != INT16_MIN) print(" off=%d", off);
@@ -134,15 +51,8 @@ static void _rx_on(uint8_t ch, uint16_t len)
 
 void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
 {
-  radio_phy_t phy = {
-      .symbol_rate = 2000000,
-      .deviation = 500000,
-      .rx_bw = 100,
-      .preamble_bytes = 4,
-      .sync_bits = 32,
-      .if_freq = (int16_t)0x8000,
-      .ble_2m = RADIO_2M_BLE,  // CC2652: 2 Mbps only there
-  };
+  radio_phy_t phy;
+  jeti_phy(&phy, 0);
   uint8_t c = cfg->ch;
   bool ok = radio_init(&phy) == RADIO_OK;
   radio_set_sync_word(JETI_SYNC, JETI_SYNC);
@@ -168,7 +78,7 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
     radio_poll();
     if (radio_receive(&_pkt)) {
       uint8_t len, pre, dmax;
-      int got = _despread(_pkt.data, _pkt.len, &len, &pre, &dmax);
+      int got = jeti_despread(_pkt.data, _pkt.len, _psdu, &len, &pre, &dmax);
       if (got < 0) {
         bad++;
         continue;
@@ -181,7 +91,7 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
       if (type == 1 && got >= JETI_LIST + 3 && !reply) {
         module++;
         uint8_t pl[JETI_LIST + 3];
-        _descramble(_psdu, pl, sizeof(pl));
+        jeti_descramble(_psdu, pl, sizeof(pl));
         uint8_t list[5] = {pl[JETI_LIST] & 0xF, pl[JETI_LIST + 1] >> 4, pl[JETI_LIST + 1] & 0xF,
                            pl[JETI_LIST + 2] >> 4, pl[JETI_LIST + 2] & 0xF};
         uint32_t m = t_sfd - _bits_offset_us[(pl[JETI_HDR + 5] >> 5) & 3];
