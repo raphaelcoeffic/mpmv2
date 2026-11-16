@@ -20,6 +20,12 @@
  *   idle on|off          answer 0xF0 (nothing pressed) or stay silent
  *                        when no button is set (default on)
  *   screen               the last screen again
+ *   sensor off|text|ex   be a sensor (the bus master) instead: every
+ *                        SENSOR_GAP_US after its packet, a simple text
+ *                        packet (text), preceded by an EX packet (ex: data,
+ *                        every 4th a text one for ids 0..2); the device's
+ *                        answers come as @g words, the last shown on the
+ *                        screen ("btn")
  *
  * Core 1 runs the line, core 0 the USB serial.
  */
@@ -44,6 +50,9 @@
 #define ECHO_US 2000    // our own answer comes back: ignored for this long
 #define GROUP_MAX 64
 #define TEXT_LEN 32
+#define SENSOR_GAP_US 30000  // the bus released after our packet (spec: >= 20 ms)
+#define SENSOR_SERIAL 0xA409  // third-party manufacturer ID range 0xA400..0xA41F
+#define SENSOR_DEVICE 0x4D50
 
 typedef struct {
   uint32_t t_us;
@@ -62,6 +71,8 @@ static uint _sm_rx, _sm_tx;
 static volatile uint8_t _press;     // buttons, bits LDUR in 7..4
 static volatile uint8_t _press_n;   // answers left with them
 static volatile bool _idle = true;
+static volatile uint8_t _sensor;    // 0 off, 1 text, 2 EX + text
+static volatile uint16_t _btn = 0x1FF;  // the device's last answer
 
 static void _line_init(void)
 {
@@ -101,6 +112,81 @@ static void _tx_word(uint16_t w)
   pio_sm_put(_pio, _sm_tx, (w & 0x1FF) | par << 9);
 }
 
+// EX CRC8 (x^8 + x^2 + x + 1) from the length byte on
+static uint8_t _crc8(const uint8_t* p, int n)
+{
+  uint8_t c = 0;
+  while (n--) {
+    c ^= *p++;
+    for (int b = 0; b < 8; b++) c = c & 0x80 ? (uint8_t)(c << 1) ^ 0x07 : (uint8_t)(c << 1);
+  }
+  return c;
+}
+
+// One EX packet after 0x7E 0x9F into p (from the length byte, CRC
+// included): its length. k: the packet count
+static int _ex(uint8_t* p, uint32_t k)
+{
+  static const char* desc[3] = {"MPM test", "Volt", "Temp"};
+  static const char* unit[3] = {"", "V", "\xB0" "C"};
+  int n = 1;
+  p[n++] = SENSOR_SERIAL & 0xFF;
+  p[n++] = SENSOR_SERIAL >> 8;
+  p[n++] = SENSOR_DEVICE & 0xFF;
+  p[n++] = SENSOR_DEVICE >> 8;
+  p[n++] = 0;
+  uint8_t type;
+  if (k % 4 == 0) {
+    uint8_t id = k / 4 % 3, dl = strlen(desc[id]), ul = strlen(unit[id]);
+    type = 0;
+    p[n++] = id;
+    p[n++] = dl << 3 | ul;
+    memcpy(p + n, desc[id], dl);
+    n += dl;
+    memcpy(p + n, unit[id], ul);
+    n += ul;
+  } else {
+    // id 1 int14, 1 decimal: 12.0..13.5 V; id 2 int6: 20..24 C
+    uint16_t v = 120 + k % 16;
+    type = 1;
+    p[n++] = 0x11;
+    p[n++] = v & 0xFF;
+    p[n++] = 1 << 5 | (v >> 8 & 0x1F);
+    p[n++] = 0x20;
+    p[n++] = 20 + k % 5;
+  }
+  p[0] = type << 6 | n;  // bytes after it, the CRC's included
+  p[n] = _crc8(p, n);
+  return n + 1;
+}
+
+// 9 data bits + odd parity, waiting for room in the TX FIFO
+static void _tx_word_blocking(uint16_t w)
+{
+  uint32_t par = (__builtin_popcount(w & 0x1FF) & 1) ^ 1;
+  pio_sm_put_blocking(_pio, _sm_tx, (w & 0x1FF) | par << 9);
+}
+
+// The sensor's packet: [0x7E 0x9F EX] 0xFE text 0xFF (separators bit 8 =
+// 0, the rest 1); returns when the last word is in the TX FIFO
+static void _sensor_packet(uint32_t k)
+{
+  if (_sensor == 2) {
+    uint8_t ex[32];
+    int n = _ex(ex, k);
+    _tx_word_blocking(0x07E);
+    _tx_word_blocking(0x19F);
+    for (int i = 0; i < n; i++) _tx_word_blocking(0x100 | ex[i]);
+  }
+  char text[TEXT_LEN + 1];
+  uint16_t btn = _btn;
+  snprintf(text, sizeof(text), "MPM test sensor %4.1fV btn %03x  ", (120 + k % 16) / 10.0,
+           btn);
+  _tx_word_blocking(0x0FE);
+  for (int i = 0; i < TEXT_LEN; i++) _tx_word_blocking(0x100 | (uint8_t)text[i]);
+  _tx_word_blocking(0x0FF);
+}
+
 // Core 1: words from the PIO; text packets to the screen queue, the rest
 // grouped to the group queue (both dropped if full); the answer after each
 // packet
@@ -111,13 +197,23 @@ static void _core1(void)
   int text = -1;  // characters so far in a packet, -1 outside one
   uint32_t t_last = 0, t_answer = 0, t_echo = 0;
   bool answer = false;
+  uint32_t t_sensor = 0, k = 0;
   for (;;) {
     uint32_t now = time_us_32();
+    if (_sensor && (int32_t)(now - t_sensor) >= 0) {
+      // All words in the FIFO, the last one out ~8 words (FIFO) later
+      _sensor_packet(k++);
+      uint32_t end = time_us_32() + 9 * WORD_US;
+      t_echo = end + 200;
+      t_sensor = end + SENSOR_GAP_US;
+      answer = false;
+      continue;
+    }
     if (g.n && now - t_last > WORD_US + GAP_US) {
       queue_try_add(&_groups, &g);
       g.n = g.err = 0;
     }
-    if (answer && (int32_t)(now - t_answer) >= 0) {
+    if (answer && !_sensor && (int32_t)(now - t_answer) >= 0) {
       answer = false;
       uint8_t b = 0xF0;
       if (_press_n) {
@@ -153,6 +249,7 @@ static void _core1(void)
       continue;
     }
     text = -1;
+    if (_sensor && !bad) _btn = d;
     if (g.n && t - t_last > WORD_US + GAP_US) {
       queue_try_add(&_groups, &g);
       g.n = g.err = 0;
@@ -189,10 +286,14 @@ static void _command(char* line)
     char* v = strtok(NULL, " ");
     _idle = !v || strcmp(v, "off");
     printf("@ok idle %s\n", _idle ? "on" : "off");
+  } else if (!strcmp(arg, "sensor")) {
+    char* v = strtok(NULL, " ");
+    _sensor = !v || !strcmp(v, "ex") ? 2 : !strcmp(v, "text") ? 1 : 0;
+    printf("@ok sensor %s\n", _sensor == 2 ? "ex" : _sensor ? "text" : "off");
   } else if (!strcmp(arg, "screen")) {
     puts("@ok screen");
   } else {
-    puts("@err commands: k <l|d|u|r...> [n], idle on|off, screen");
+    puts("@err commands: k <l|d|u|r...> [n], idle on|off, screen, sensor off|text|ex");
   }
 }
 
