@@ -38,7 +38,7 @@ function(add_application name)
 endfunction()
 
 # Radio bench (docs/bench.md)
-add_application(bench core/main_bench.c core/bench.c core/bench_fasst.c core/fasst_frame.c
+add_application(bench core/main_bench.c core/bench.c core/bench_fasst.c core/bench_jeti.c core/fasst_frame.c
     core/frame.c core/tfhss.c drivers/sx1281.c core/syscalls.c ${board_dir}/bench_port.c)
 
 # The MPM port: the radio's link on UART0 through the CP2102N (100000 8E2,

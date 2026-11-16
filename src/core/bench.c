@@ -5,6 +5,7 @@
 
 #include "bench.h"
 #include "bench_fasst.h"
+#include "bench_jeti.h"
 #include "fasst_frame.h"
 #include "tfhss.h"
 #include "bench_port.h"
@@ -1980,6 +1981,26 @@ static void _cmd_fasstrx(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// Jeti Duplex follower (bench_jeti.c), blocking
+static void _cmd_jetirx(char* args)
+{
+  jeti_rx_cfg_t cfg = {.stop = _host_stop};
+  cfg.secs = _number_or(&args, 10);
+  cfg.ch = _number_or(&args, 16);
+  cfg.follow = _number_or(&args, 1);
+  cfg.frame_len = _number_or(&args, 384);
+  if (cfg.secs > 3600 || cfg.ch < 11 || cfg.ch > 26 || cfg.frame_len < 64 ||
+      cfg.frame_len > RADIO_MAX_PKT_LEN) {
+    _print("@err usage: jetirx [secs] [ch 11..26] [follow] [len]\r\n");
+    return;
+  }
+  _job_stop();
+  _printf("@ok jetirx secs=%lu ch=%u follow=%u len=%u\r\n", cfg.secs, cfg.ch, cfg.follow,
+          cfg.frame_len);
+  jeti_rx_run(&cfg, _printf);
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // FASSTest receiver emulator (bench_fasst.c), blocking
 static void _cmd_ftrx(char* args)
 {
@@ -2365,6 +2386,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "tfhss")) _cmd_tfhss(args);
   else if (!strcmp(cmd, "tfhssrx")) _cmd_tfhssrx(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
+  else if (!strcmp(cmd, "jetirx")) _cmd_jetirx(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);
   else _printf("@err unknown command %s\r\n", cmd);

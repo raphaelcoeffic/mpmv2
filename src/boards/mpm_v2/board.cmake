@@ -115,7 +115,7 @@ endfunction()
 add_application(firmware mpm-v2 core/main_mpm.c)
 
 # Radio bench: test shell on UART0 instead of the MPM (docs/bench.md)
-add_application(bench mpm-v2-bench core/main_bench.c core/bench.c core/bench_fasst.c ${board_dir}/bench_port.c
+add_application(bench mpm-v2-bench core/main_bench.c core/bench.c core/bench_fasst.c core/bench_jeti.c ${board_dir}/bench_port.c
     core/tfhss.c drivers/sx1281.c)
 
 # cmake --build <dir> --target flash: the MPM firmware.
