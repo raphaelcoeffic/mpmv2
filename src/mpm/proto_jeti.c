@@ -24,10 +24,16 @@
 //   receiver that missed the change.
 // - Carrier sense, as the receiver's before its replies (doc/jeti.md, burst
 //   test): RX on the frame's channel from JETI_CCA_AT_US, the RSSI's
-//   maximum over JETI_CCA_US (802.15.4's 8 symbols); at JETI_CCA_DBM and
-//   above the frame is skipped (no random back-off: the frame must stay in
-//   its step), counted as unanswered for the sweep, which moves its slot
-//   at the next tick. TX LQI: the frames sent in % (last JETI_LQI_FRAMES).
+//   maximum over JETI_CCA_US (802.15.4's 8 symbols; JETI_HW: radio_cca(),
+//   the RSSI or a frame under way), at JETI_CCA_DBM and above busy. As the
+//   module (doc/jeti.md "Module CSMA"): 802.15.4 CSMA-CA, a random backoff
+//   before each CCA, the place bits (byte 5) from the send time; past the
+//   step's window (JETI_WINDOW_END_US) the frame goes on the next step
+//   (its channel, the early place), and the next frame 2 steps after that;
+//   past that window too, the frame is lost, counted as unanswered for the
+//   sweep, which moves its slot at the next tick. Senders in phase with us
+//   drift apart through the random backoffs. TX LQI: the frames sent in %
+//   (last JETI_LQI_FRAMES).
 // - Bind (the receiver in pairing: bind plug in Ext at power-up, or the
 //   JETIBOX's Pairing): the receiver hops on its last transmitter's
 //   channels, which we don't know: we stay JETI_BIND_DWELL steps on each
@@ -73,6 +79,7 @@
 #ifdef JETI_INO
 #include <string.h>
 
+#include "debug.h"
 #include "jeti_frame.h"
 #include "mpm_compat.h"  // rf_power_word(), eeprom, link telemetry
 #undef sub_protocol      // its MULTI-Module name: mpm.sub_protocol here
@@ -92,11 +99,33 @@
 // TX start in the step: the SFD ~150 us later at 4.9 ms, the module's
 // mean frame time for byte 5 bits 5-6 = 2
 #define JETI_TX_AT_US 4750
+#define JETI_PLACE_EARLY 3
 #define JETI_PLACE_MIDDLE 2
+#define JETI_PLACE_LATE 1
 #define JETI_SFD_US (JETI_TX_AT_US + 150)
+// The step's mean frame time (the module's places: early -1.2, middle +0.5,
+// late +2.6 ms from it; the bits are its plan, the frames up to ~1 ms
+// off). Our label by the SFD's offset from it: early below
+// JETI_MIDDLE_FROM_US, middle below JETI_LATE_FROM_US, late up to
+// JETI_WINDOW_END_US (the module's latest, 4.0 ms)
+#define JETI_MEAN_US (JETI_SFD_US - 500)
+#define JETI_MIDDLE_FROM_US (-350)
+#define JETI_LATE_FROM_US 1600
+#define JETI_WINDOW_END_US 4000
+#define JETI_EARLY_US (-1200)
 // Carrier sense before it: RX on, the first valid RSSI, JETI_CCA_US of
-// samples (given up at JETI_CCA_MAX_US: clear), RX off, TX at JETI_TX_AT_US
-#define JETI_CCA_AT_US (JETI_TX_AT_US - 450)
+// samples (given up at JETI_CCA_MAX_US: clear), RX off, TX JETI_CCA_TX_US
+// after the CCA's start (JETI_TX_AT_US for the first attempt without
+// backoff)
+#define JETI_CCA_TX_US 450
+#define JETI_CCA_AT_US (JETI_TX_AT_US - JETI_CCA_TX_US)
+// CSMA-CA as the module's (AT86RF230, doc/jeti.md "Module CSMA"): before
+// each CCA a random backoff of 0..2^BE-1 periods of 320 us (802.15.4's
+// unit), BE from JETI_MIN_BE (the module's frames: 0 or 1 unit), +1 per
+// busy CCA up to JETI_MAX_BE; the place bits from the send time
+#define JETI_BACKOFF_US 320
+#define JETI_MIN_BE 1
+#define JETI_MAX_BE 3
 #define JETI_CCA_US 128
 #define JETI_CCA_MAX_US 330
 #define JETI_CCA_DBM (-70)  // EN 300 328's LBT threshold at 20 dBm, per MHz
@@ -153,6 +182,15 @@ static struct {
   uint8_t bind_ch, dwell;
   uint16_t power;
   uint8_t lqi_frames, lqi_replies, lqi_sent;
+  // The data frame's CSMA: its CCA's time from the start of the step it
+  // was planned in, moved to the next step (0/1), BE, place bits, ring slot
+  uint16_t u;
+  uint8_t slide, be, place, slot;
+  uint32_t rnd;
+  // Carrier sense: radio_cca() flags seen (energy, signal, frame; JETI_HW),
+  // busy CCAs, frames sent late (place late), on the next step, given up,
+  // of n frames
+  uint16_t cca_n, cca_busy[3], cca_retry, cca_late, cca_next, cca_lost;
   uint16_t air_len, payload_len;  // the next data frame's
   uint16_t rx_on;                  // from the step's start: RX on
   // Remote JETIBOX: open (frames with its byte lately), the last press
@@ -205,11 +243,11 @@ static uint8_t* _slots(uint8_t* p, uint8_t n)
 }
 
 // The ring rotated (current step's channel last), byte 5 with the place
-static uint8_t* _list(uint8_t* p, const uint8_t* ring, uint8_t si)
+static uint8_t* _list(uint8_t* p, const uint8_t* ring, uint8_t si, uint8_t place)
 {
   uint8_t l[JETI_RING];
   for (int j = 0; j < JETI_RING; j++) l[j] = ring[(si + 1 + j) % JETI_RING];
-  *p++ = JETI_PLACE_MIDDLE << 5 | l[0];
+  *p++ = place << 5 | l[0];
   *p++ = l[1] << 4 | l[2];
   *p++ = l[3] << 4 | l[4];
   return p;
@@ -238,6 +276,28 @@ static void _send(uint8_t payload_len)
 static bool _clear()
 {
   radio_rx_start(JETI_RX_LEN);
+#if JETI_HW
+  // The RF core's CCA (radio_cca()): energy, an O-QPSK signal below the
+  // threshold too (another Jeti or 802.15.4 sender), a frame under way
+  uint32_t t0 = micros(), first = 0;
+  bool valid = false;
+  uint8_t flags = 0;
+  while (micros() - t0 < JETI_CCA_MAX_US) {
+    uint8_t f = radio_cca(JETI_CCA_DBM);
+    if (f == RADIO_CCA_INVALID) continue;
+    if (!valid) {
+      valid = true;
+      first = micros();
+    }
+    flags |= f;
+    if (micros() - first >= JETI_CCA_US) break;
+  }
+  radio_rx_stop();
+  for (int i = 0; i < 3; i++) _j.cca_busy[i] += flags >> i & 1;
+  // The correlator alone not counted: it found little here that the energy
+  // missed, false ones possibly
+  return !(flags & (RADIO_CCA_ENERGY | RADIO_CCA_FRAME));  // no valid RSSI: clear
+#else
   uint32_t t0 = micros(), first = 0;
   bool valid = false;
   int8_t max = RADIO_RSSI_NONE;
@@ -253,6 +313,7 @@ static bool _clear()
   }
   radio_rx_stop();
   return max < JETI_CCA_DBM;  // no valid RSSI (RADIO_RSSI_NONE): clear
+#endif
 }
 
 // From the step's start: our TX's end (preamble, sync word, 4 us per air
@@ -363,7 +424,7 @@ static uint16_t _bind_tx()
   *p++ = _j.short_addr;
   *p++ = _j.short_addr >> 8;
   *p++ = JETI_ID_BYTE;
-  p = _list(p, ring, 0);
+  p = _list(p, ring, 0, JETI_PLACE_MIDDLE);
   if (!boot) {
     *p++ = 0x11;
     *p++ = 0x80;
@@ -522,6 +583,38 @@ static void _telem_jeti(uint8_t n, int8_t rssi)
   }
 }
 
+// Random backoff for the current BE
+static uint16_t _backoff()
+{
+  _j.rnd = _j.rnd * 1103515245u + 12345;
+  return ((_j.rnd >> 16) & ((1u << _j.be) - 1)) * JETI_BACKOFF_US;
+}
+
+// The SFD's offset from its step's mean for a CCA at _j.u
+static int16_t _offset()
+{
+  return (int16_t)(_j.u + JETI_CCA_TX_US + 150 - JETI_MEAN_US - _j.slide * JETI_STEP_US);
+}
+
+// Byte 5 (list and place) rewritten for the frame's step and the place
+// its send time gets
+static void _set_place()
+{
+  int16_t off = _offset();
+  uint8_t place = off < JETI_MIDDLE_FROM_US ? JETI_PLACE_EARLY
+                  : off < JETI_LATE_FROM_US ? JETI_PLACE_MIDDLE
+                                            : JETI_PLACE_LATE;
+  if (place == _j.place && !_j.slide) return;
+  _j.place = place;
+  uint8_t len = JETI_HDR + _j.payload_len;
+  jeti_descramble(_frame, _frame, len);
+  _list(_frame + JETI_HDR + 5, _j.ring, _j.slot, place);
+  jeti_scramble(_frame, _frame, len);
+#if !JETI_HW
+  _j.air_len = jeti_spread(_air, _frame, len);
+#endif
+}
+
 // Data: a frame every 2 steps on the current step's channel
 static uint16_t _data_tx()
 {
@@ -541,7 +634,7 @@ static uint16_t _data_tx()
   *p++ = _j.short_addr;
   *p++ = _j.short_addr >> 8;
   *p++ = JETI_ID_BYTE;
-  p = _list(p, _j.ring, _j.si);
+  p = _list(p, _j.ring, _j.si, JETI_PLACE_MIDDLE);
   *p++ = 0x11;
   *p++ = (_j.n & 3) << 6;  // a 2-bit frame counter, as the module's
   *p++ = 0xB6;             // unknown, the module's 0xa7..0xc9
@@ -558,27 +651,75 @@ static uint16_t _data_tx()
   }
   _j.payload_len = p - (_frame + JETI_HDR);
   _j.air_len = _prepare(_j.payload_len);
+  _j.slot = _j.si;
+  _j.slide = 0;
+  _j.be = JETI_MIN_BE;
+  _j.place = JETI_PLACE_MIDDLE;
   _j.si = (_j.si + JETI_FRAME_STEPS) % JETI_RING;
   _j.st = ST_CCA;
-  return JETI_CCA_AT_US;
+  _j.u = JETI_CCA_AT_US + _backoff();
+  _set_place();
+  return _j.u;
 }
 
-// The data frame, if its channel is clear
+static void _cca_stats(uint16_t* counter)
+{
+  if (counter) (*counter)++;
+  if (++_j.cca_n < 500) return;
+  debugln("jeti cca of %u: energy %u signal %u frame %u, busy %u late %u next %u lost %u",
+          _j.cca_n, _j.cca_busy[0], _j.cca_busy[1], _j.cca_busy[2], _j.cca_retry, _j.cca_late,
+          _j.cca_next, _j.cca_lost);
+  _j.cca_n = _j.cca_busy[0] = _j.cca_busy[1] = _j.cca_busy[2] = 0;
+  _j.cca_retry = _j.cca_late = _j.cca_next = _j.cca_lost = 0;
+}
+
+// From the CCA at _j.u to the next frame's step (2 steps after the one used)
+static uint16_t _to_next(uint16_t after_cca)
+{
+  return (JETI_FRAME_STEPS + _j.slide) * JETI_STEP_US - _j.u - after_cca;
+}
+
+// The data frame's CCA: clear, sent JETI_CCA_TX_US later; busy, another
+// CCA after a backoff (BE + 1); past the step's window, on the next step
+// (its channel, the early place, BE reset); past that one's too, lost
 static uint16_t _data_cca()
 {
   if (!_clear()) {
-    _lqi(false, false);
-    _miss();
-    _j.st = ST_TX;
-    return JETI_FRAME_STEPS * JETI_STEP_US - JETI_CCA_AT_US;
+    _j.cca_retry++;
+    if (_j.be < JETI_MAX_BE) _j.be++;
+    uint16_t u0 = _j.u;
+    _j.u += JETI_CCA_TX_US + _backoff();
+    if (_offset() > JETI_WINDOW_END_US) {
+      uint8_t s1 = (_j.slot + 1) % JETI_RING;
+      // Not onto a slot the sweep moved for this frame (the receiver may
+      // still have the old channel there)
+      if (_j.slide || _j.moved[s1] + 1 == _j.n) {
+        _cca_stats(&_j.cca_lost);
+        _lqi(false, false);
+        _miss();
+        _j.st = ST_TX;
+        _j.u = u0;
+        return _to_next(0);
+      }
+      _j.slide = 1;
+      _j.slot = s1;
+      _j.si = (_j.si + 1) % JETI_RING;
+      _j.be = JETI_MIN_BE;
+      _j.u = JETI_STEP_US + JETI_MEAN_US + JETI_EARLY_US - 150 - JETI_CCA_TX_US + _backoff();
+      _j.tx_slot = s1;
+      radio_set_frequency_start(jeti_freq_khz(_j.ring[s1]));
+    }
+    _set_place();
+    return _j.u - u0;  // ST_CCA again
   }
-  radio_tx_start_at(_tx_buf, _j.air_len,
-                    mpm_callback_deadline() + JETI_TX_AT_US - JETI_CCA_AT_US);
+  _cca_stats(_j.slide ? &_j.cca_next : _j.place == JETI_PLACE_LATE ? &_j.cca_late : NULL);
+  radio_tx_start_at(_tx_buf, _j.air_len, mpm_callback_deadline() + JETI_CCA_TX_US);
   if (mpm.disable_telem) {
     _j.st = ST_TX;
-    return JETI_FRAME_STEPS * JETI_STEP_US - JETI_CCA_AT_US;
+    return _to_next(0);
   }
   _j.st = ST_RX;
+  // _rx_on_us(): from a TX at JETI_TX_AT_US
   return _rx_on_us(_j.payload_len) - JETI_CCA_AT_US;
 }
 
@@ -596,7 +737,7 @@ static uint16_t _data_read()
   _lqi(true, got);
   if (!got) _miss();
   _j.st = ST_TX;
-  return JETI_FRAME_STEPS * JETI_STEP_US - JETI_READ_US;
+  return _to_next(JETI_READ_US - JETI_CCA_AT_US);
 }
 
 void JETI_init()
@@ -615,6 +756,7 @@ void JETI_init()
     if (j == k) _j.ring[k++] = c;
   }
   _load_rx();
+  _j.rnd = mpm.id ^ micros();
   _j.power = _tx_power();
   radio_phy_t phy;
 #if JETI_HW
