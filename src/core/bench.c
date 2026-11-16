@@ -96,6 +96,8 @@
 //                                from the modem's estimate (@rx foff=)
 //   freq <khz>                   frequency in kHz
 //   tx <hex>                     send one packet
+//   txraw <hex>                  send air bytes as given after the sync word, no
+//                                framing, up to 640 (802.15.4 spread in software)
 //   txp <period_us> <count> <hex>  send periodically, count 0 = forever
 //   seq <idx>                    8 bit counter at byte idx for txp, 255 = off
 //   rx <len> [fixed]             receive continuously, len = payload size
@@ -104,6 +106,8 @@
 //                                CC2500 variable length), the RF core ends
 //                                each packet at its length; fixed: receive
 //                                the maximum length instead
+//   rxraw <len>                  receive continuously, len air bytes after the
+//                                sync word, no framing: @raw
 //   stop                         stop the current job
 //   sched <period_us> [n]        alarm chain on absolute deadlines (previous +
 //                                period, timer_set_alarm()), n alarms (default
@@ -120,12 +124,13 @@
 // Events: @rx <time_us> <ch> <hex> [crc=ok|bad] rssi=<dBm> [foff=<khz>] [pid=<n>]
 //           time_us: when the sync word was found (CC2652: RF core timer)
 //           foff: sender's carrier above ours, estimate
+//         @raw <time_us> <ch> <hex> rssi=<dBm> (rxraw)
 //         @trim <khz> (autotrim changed the trim)
 //         @ack <time_us> <ch> <hex> tries=<n> rssi=<dBm> (ack payloads)
 //         @ev txdone <n>
 
 #define BENCH_BAUDRATE 921600
-#define LINE_MAX_LEN 300
+#define LINE_MAX_LEN 1400  // txraw: up to 640 bytes in hex
 #define SEQ_OFF 255
 // TI specifies 2360 to 2500 MHz, Redpine hops up to 2502 MHz
 #define FREQ_MAX_KHZ 2510000
@@ -170,6 +175,7 @@ static bool _frame_ok;
 
 static job_t _job;
 static uint8_t _tx_buf[FRAME_PAYLOAD_MAX];
+static uint8_t _raw_buf[640];  // txraw: air bytes after the sync word, no framing
 static uint8_t _tx_len;
 static uint32_t _tx_period;
 static uint32_t _tx_count;
@@ -179,6 +185,7 @@ static uint8_t _seq_idx = SEQ_OFF;
 static uint8_t _seq;
 static uint8_t _rx_len;
 static bool _rx_fixed;  // the maximum length even with a length field
+static uint16_t _rx_raw;  // rxraw: air bytes after the sync word, printed as received
 
 static uint32_t _stat_tx;
 static uint32_t _stat_rx;
@@ -448,6 +455,13 @@ static bool _send_packet(const uint8_t* payload, uint8_t len, ack_t* ack)
 // Returns true if the frame is valid (CRC)
 static bool _report_packet(const radio_packet_t* pkt)
 {
+  if (_rx_raw) {
+    _led_event(BENCH_LED_RX);
+    _printf("@raw %lu %d ", pkt->timestamp_us, _channel);
+    _print_hex(pkt->data, pkt->len);
+    _printf(" rssi=%d\r\n", pkt->rssi);
+    return false;
+  }
   uint8_t payload[FRAME_PAYLOAD_MAX];
   uint8_t len;
   uint16_t pcf;
@@ -481,6 +495,7 @@ static uint16_t _rx_var_len(const uint8_t* data, uint16_t n, void* ctx)
 
 static bool _rx_start()
 {
+  if (_rx_raw) return _radio_rx_start(_rx_raw) == RADIO_OK;
   uint8_t hdr_len = frame_rx_hdr_len(&_frame);
   uint16_t max_len = frame_rx_len(&_frame, _rx_len);
   if (!_sx && !_rx_fixed && hdr_len)
@@ -1500,6 +1515,24 @@ static void _cmd_tx(char* args)
   _print("\r\n");
 }
 
+// Air bytes as they are after the sync word (no framing), up to 640: for
+// frames the framing code can't build, spread in software (802.15.4 MSK)
+static void _cmd_txraw(char* args)
+{
+  if (!_need_phy()) return;
+  int len = _hex(args, _raw_buf, sizeof(_raw_buf));
+  if (len <= 0) {
+    _print("@err usage: txraw <hex (up to 640 bytes)>\r\n");
+    return;
+  }
+  _job_stop();
+  if (_radio_send(_raw_buf, len) != RADIO_OK) {
+    _report_radio_error("txraw");
+    return;
+  }
+  _print("@ok txraw\r\n");
+}
+
 static void _cmd_txp(char* args)
 {
   uint32_t period, count;
@@ -1542,6 +1575,7 @@ static void _cmd_rx(char* args)
   char* opt = _next_arg(&args);
   bool fixed = opt && !strcmp(opt, "fixed");
   if (!_need_phy()) return;
+  _rx_raw = 0;
   uint16_t air_len = frame_rx_len(&_frame, len);
   if (air_len == 0 || air_len > RADIO_MAX_PKT_LEN) {
     _print("@err bad rx length for this framing (prefix?)\r\n");
@@ -1562,6 +1596,27 @@ static void _cmd_rx(char* args)
   _printf(" syncthr=0x%02x", _phy.sync_threshold);
   if (!_sx && !fixed && frame_rx_hdr_len(&_frame)) _printf(" var=%u", frame_rx_hdr_len(&_frame));
   _print("\r\n");
+}
+
+// Long raw capture: len air bytes after the sync word, no framing
+static void _cmd_rxraw(char* args)
+{
+  uint32_t len;
+  if (!_number(&args, &len) || len == 0 || len > RADIO_MAX_PKT_LEN) {
+    _print("@err usage: rxraw <air_len>\r\n");
+    return;
+  }
+  if (!_need_phy()) return;
+  _job_stop();
+  _rx_raw = len;
+  _stat_tx = _stat_rx = _stat_err = 0;
+  if (!_rx_start()) {
+    _rx_raw = 0;
+    _report_radio_error("rxraw");
+    return;
+  }
+  _job = JOB_RX;
+  _printf("@ok rxraw len=%lu\r\n", len);
 }
 
 // FASST 10ch TX experiment (bench_fasst.c), blocking
@@ -2298,8 +2353,10 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "freq")) _cmd_freq(args);
   else if (!strcmp(cmd, "tx")) _cmd_tx(args);
   else if (!strcmp(cmd, "txp")) _cmd_txp(args);
+  else if (!strcmp(cmd, "txraw")) _cmd_txraw(args);
   else if (!strcmp(cmd, "seq")) _cmd_seq(args);
   else if (!strcmp(cmd, "rx")) _cmd_rx(args);
+  else if (!strcmp(cmd, "rxraw")) _cmd_rxraw(args);
   else if (!strcmp(cmd, "stop")) _cmd_stop();
   else if (!strcmp(cmd, "timing")) _cmd_timing(args);
   else if (!strcmp(cmd, "sched")) _cmd_sched(args);
@@ -2355,6 +2412,7 @@ static void _run_rx()
 {
   radio_packet_t pkt;
   bool retune = false;
+  if (!_sx) radio_poll();  // long packets: the RX FIFO drained as they come
   while (_radio_receive(&pkt)) {
     _stat_rx++;
     if (_report_packet(&pkt) && _autotrim) retune |= _autotrim_packet(&pkt);
