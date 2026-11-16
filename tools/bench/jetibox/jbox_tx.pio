@@ -1,0 +1,17 @@
+; JETIBOX line TX: UART 9 data bits, odd parity, 2 stop bits, 8 PIO cycles
+; per bit. Each word: 9 data bits + parity (LSB first). The pin is driven
+; (side-set pindirs) from the start bit to the end of the stop bits and
+; released while waiting for the next word: the line is the device's
+; outside our answers
+.program jbox_tx
+.side_set 1 opt pindirs
+.wrap_target
+    pull block          side 0
+    set pins, 0 [6]     side 1  ; start bit (with the next instruction: 8 cycles)
+    set x, 9
+bitloop:
+    out pins, 1
+    jmp x-- bitloop [6]
+    set pins, 1 [7]             ; 2 stop bits
+    set pins, 1 [7]
+.wrap

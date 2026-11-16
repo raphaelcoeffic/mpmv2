@@ -1,0 +1,13 @@
+; JETIBOX line RX: UART 9 data bits, odd parity, 2 stop bits, 8 PIO cycles
+; per bit. Samples the 9 data bits, the parity bit and the first stop bit,
+; then pushes them (shifted right: bits 21..31 of the word); a low stop bit
+; (framing error) waits for the line to go idle again
+.program jbox_rx
+start:
+    wait 0 pin 0
+    set x, 10 [10]          ; to the middle of data bit 0 (1.5 bits)
+bitloop:
+    in pins, 1
+    jmp x-- bitloop [6]
+    push noblock
+    wait 1 pin 0
