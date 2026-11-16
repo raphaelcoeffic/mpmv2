@@ -146,6 +146,18 @@ radio_status_t radio_set_tx_power(uint16_t tx_power);
 #define RADIO_RSSI_NONE (-128)
 int8_t radio_rssi();
 
+// IEEE 802.15.4 RX (radio_phy_t ieee): clear channel assessment now, as
+// RADIO_CCA_* flags: energy (the RSSI at or above rssi_dbm), an O-QPSK
+// signal (the RF core's correlator: 3 or more correlation peaks in 8
+// symbols), a frame being received (its SFD found). 0: clear;
+// RADIO_CCA_INVALID while the RSSI isn't valid yet, or without IEEE RX. A
+// reading only: no backoff, nothing sent
+#define RADIO_CCA_ENERGY 0x01
+#define RADIO_CCA_SIGNAL 0x02
+#define RADIO_CCA_FRAME 0x04
+#define RADIO_CCA_INVALID 0x80
+uint8_t radio_cca(int8_t rssi_dbm);
+
 // RF core receive counters of the current/last RX command
 typedef struct {
   uint16_t ok;        // packets received

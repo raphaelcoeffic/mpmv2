@@ -637,8 +637,12 @@ static void _init_ieee_rx()
   _ieee_rx.frameTypes.bAcceptFt5Reserved = 1;
   _ieee_rx.frameTypes.bAcceptFt6Reserved = 1;
   _ieee_rx.frameTypes.bAcceptFt7Reserved = 1;
+  // radio_cca(): energy (ours: the threshold per call), correlator, SFD
   _ieee_rx.ccaOpt.ccaEnEnergy = 1;
-  _ieee_rx.ccaRssiThr = (uint8_t)-70;
+  _ieee_rx.ccaOpt.ccaEnCorr = 1;
+  _ieee_rx.ccaOpt.ccaEnSync = 1;
+  _ieee_rx.ccaOpt.ccaCorrThr = 3;
+  _ieee_rx.ccaRssiThr = -70;
   _ieee_rx.endTrigger.triggerType = TRIG_NEVER;
   _rx_op = (rfc_radioOp_t*)&_ieee_rx;
 }
@@ -936,6 +940,28 @@ int8_t radio_rssi()
   uint32_t cmdsta = _doorbell(CMDR_DIR_CMD(CMD_GET_RSSI));
   if ((cmdsta & 0xFF) != CMDSTA_Done) return RADIO_RSSI_NONE;
   return (int8_t)(cmdsta >> 16);  // RADIO_RSSI_NONE (-128) until valid
+}
+
+uint8_t radio_cca(int8_t rssi_dbm)
+{
+#if RADIO_IEEE
+  if (!_ieee || !radio_rx_active() || RF_STATUS(_rx_op) != ACTIVE) return RADIO_CCA_INVALID;
+  // An immediate command: the running CMD_IEEE_RX's CCA state
+  static rfc_CMD_IEEE_CCA_REQ_t cmd;
+  memset(&cmd, 0, sizeof(cmd));
+  cmd.commandNo = CMD_IEEE_CCA_REQ;
+  uint32_t cmdsta = _doorbell((uint32_t)&cmd);
+  if ((cmdsta & 0xFF) != CMDSTA_Done || cmd.currentRssi == RADIO_RSSI_NONE)
+    return RADIO_CCA_INVALID;
+  uint8_t f = 0;
+  if (cmd.currentRssi >= rssi_dbm) f |= RADIO_CCA_ENERGY;
+  if (cmd.ccaInfo.ccaCorr == 1) f |= RADIO_CCA_SIGNAL;
+  if (cmd.ccaInfo.ccaSync) f |= RADIO_CCA_FRAME;
+  return f;
+#else
+  (void)rssi_dbm;
+  return RADIO_CCA_INVALID;
+#endif
 }
 
 void radio_rx_stats(radio_rx_stats_t* stats)

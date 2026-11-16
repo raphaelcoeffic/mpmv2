@@ -545,6 +545,16 @@ static int _ieee_rx_start(uint32_t freq_hz, bool repeat, uint32_t at)
   return RF_OK;
 }
 
+int rf_ieee_cca(int8_t *rssi, uint16_t *corr, bool *frame)
+{
+  if (!_ieee || !_running) return RF_ERR_PARAM;
+  int8_t r = LRF_readRssi();
+  *rssi = r == LRF_RSSI_INVALID ? RF_RSSI_NONE : r;
+  *corr = HWREGH_READ_LRF(IEEE_RAM(CORRCNT));
+  *frame = HWREGH_READ_LRF(IEEE_RAM(RXSTATUS)) != 0;
+  return RF_OK;
+}
+
 // IEEE RX entry: length (from numPad on), numPad, the pad bytes, PHR, the
 // PSDU without the FCS, RSSI, timestamp
 static bool _ieee_parse(const uint8_t *b, uint32_t n, rf_packet_t *pkt)

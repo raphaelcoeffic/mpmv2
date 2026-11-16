@@ -488,6 +488,24 @@ bool radio_receive_early(radio_packet_t* pkt)
   return true;
 }
 
+// TI's CC27xx CCA: signal at more than 3 correlation peaks in 128 us
+#define CCA_CORR_THRESHOLD 3
+
+uint8_t radio_cca(int8_t rssi_dbm)
+{
+  int8_t rssi;
+  uint16_t corr;
+  bool frame;
+  if (!_ieee || _state != STATE_RX || rf_ieee_cca(&rssi, &corr, &frame) != RF_OK ||
+      rssi == RF_RSSI_NONE)
+    return RADIO_CCA_INVALID;
+  uint8_t f = 0;
+  if (rssi >= rssi_dbm) f |= RADIO_CCA_ENERGY;
+  if (corr > CCA_CORR_THRESHOLD) f |= RADIO_CCA_SIGNAL;
+  if (frame) f |= RADIO_CCA_FRAME;
+  return f;
+}
+
 void radio_set_extra_overrides(const uint32_t* words, uint8_t n)
 {
   if (n > RADIO_EXTRA_OVERRIDES) n = RADIO_EXTRA_OVERRIDES;

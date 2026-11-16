@@ -44,6 +44,11 @@ int rf_configure(const LRF_Config *config);
 // rf_rx() and the long packets don't apply. rf_configure() ends it
 int rf_configure_ieee(void);
 
+// IEEE RX running: the instant RSSI (RF_RSSI_NONE: not valid yet), the PBE's
+// correlation peaks in the last 128 us (CORRCNT), a frame being received
+// (RXSTATUS, as TI's CCA). RF_ERR_PARAM without IEEE RX
+int rf_ieee_cca(int8_t *rssi, uint16_t *corr, bool *frame);
+
 // Modem registers that differ between TX and RX (phy_fsk): DEMMISC3 (the
 // PDIF decimation slows the modulator too), BAUD and BAUDPRE (RX at a
 // multiple of the rate). Written before LRF_programFrequency(), which
