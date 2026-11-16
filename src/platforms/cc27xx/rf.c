@@ -14,6 +14,11 @@
 #include DeviceFamily_constructPath(inc/hw_systim.h)
 #include DeviceFamily_constructPath(inc/pbe_common_ram_regs.h)
 #include DeviceFamily_constructPath(inc/pbe_generic_ram_regs.h)
+#include DeviceFamily_constructPath(inc/pbe_ieee_ram_regs.h)
+#include DeviceFamily_constructPath(inc/pbe_ieee_regdef_regs.h)
+
+#include "phy_ieee.h"
+
 
 // PBE events (LRFDDBELL RIS0)
 #define EV_OPDONE (1U << 0)
@@ -37,6 +42,7 @@
 #define RX_END_MAX US(20000)
 
 #define BUFRAM(reg) (LRFD_BUFRAM_BASE + PBE_GENERIC_RAM_O_##reg)
+#define IEEE_RAM(reg) (LRFD_BUFRAM_BASE + PBE_IEEE_RAM_O_##reg)
 
 static LRF_RadioState _state = RadioState_Down;
 static const LRF_Config *_config;
@@ -47,6 +53,7 @@ static uint32_t _events;
 static bool _running;
 static uint32_t _rx_fifo_size;
 static uint16_t _sync_thr;  // the PHY's DEMC1BE1 (32 bit sync words)
+static bool _ieee;          // rf_configure_ieee(): the IEEE PBE's RAM, not the generic one
 // OP_FS: the synthesizer tuned ahead for a TX at _fs_freq (rf_fs_start()),
 // kept on once locked (OPDONE)
 static bool _fs_on;
@@ -191,9 +198,59 @@ static void _rx_copy(bool end)
   if (!end) _write_fifo_ptr(LRFDPBE_BASE + LRFDPBE_O_RXFSRP, (_rx_pos + size - 4) % size);
 }
 
+// IEEE RX entries: the PSDU without its FCS (no APPENDCRC), then the RSSI and
+// the SYSTIM time of the sync (TI's IEEE handler: 185.5 us after the
+// preamble's start)
+#define IEEE_EXTRA_BYTES (1 + 4)
+#define IEEE_PSDU_MAX 127
+#define IEEE_FCS 2
+
+// The IEEE PBE: promiscuous (no PAN: every frame type, no filtering, no
+// auto ACK), frames with a bad FCS flushed
+static void _ieee_framing(void)
+{
+  uint16_t fifocfg = HWREGH_READ_LRF(IEEE_RAM(FIFOCFG));
+  fifocfg &= ~(PBE_IEEE_RAM_FIFOCFG_APPENDTIMESTAMP_M | PBE_IEEE_RAM_FIFOCFG_APPENDRSSI_M |
+               PBE_IEEE_RAM_FIFOCFG_APPENDLQI_M | PBE_IEEE_RAM_FIFOCFG_APPENDSTATUS_M |
+               PBE_IEEE_RAM_FIFOCFG_APPENDCRC_M | PBE_IEEE_RAM_FIFOCFG_AUTOFLUSHIGN_M |
+               PBE_IEEE_RAM_FIFOCFG_AUTOFLUSHCRC_M);
+  HWREGH_WRITE_LRF(IEEE_RAM(FIFOCFG)) =
+      fifocfg | PBE_IEEE_RAM_FIFOCFG_APPENDRSSI | PBE_IEEE_RAM_FIFOCFG_APPENDTIMESTAMP |
+      PBE_IEEE_RAM_FIFOCFG_AUTOFLUSHIGN_FLUSH | PBE_IEEE_RAM_FIFOCFG_AUTOFLUSHCRC_FLUSH;
+  HWREGH_WRITE_LRF(IEEE_RAM(EXTRABYTES)) = IEEE_EXTRA_BYTES;
+  HWREGH_WRITE_LRF(IEEE_RAM(PIB)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(FFTYPE)) = 0xFFFF;
+  HWREGH_WRITE_LRF(IEEE_RAM(COEXCFG)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(RXTIMEOUT)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(CFGAUTOACK)) =
+      PBE_IEEE_RAM_CFGAUTOACK_ACKMODE_NOFILT | PBE_IEEE_RAM_CFGAUTOACK_FLAGREQ_DIS;
+}
+
+static int _setup(const LRF_Config *config);
+
+int rf_configure_ieee(void)
+{
+  int res = _setup(&phy_ieee_common);
+  if (res) return res;
+  _ieee = true;
+  _ieee_framing();
+  return 0;
+}
+
 int rf_configure(const LRF_Config *config)
 {
+  int res = _setup(config);
+  if (res) return res;
+  _raw_framing();
+  return 0;
+}
+
+// The PHY's registers, its PBE's RAM included (the framing on top: the
+// caller's)
+static int _setup(const LRF_Config *config)
+{
   rf_stop();
+  _ieee = false;
   // Every register again (the same PHY too: phy_fsk changes some after)
   LRF_RadioState state = _state;
   if (state > RadioState_ImagesLoaded) state = RadioState_ImagesLoaded;
@@ -207,7 +264,6 @@ int rf_configure(const LRF_Config *config)
   _config = config;
   _sync_thr = HWREG_READ_LRF(LRFDMDM_BASE + LRFDMDM_O_DEMC1BE1);
   _modem_tx = _modem_rx = (rf_modem_t){0};
-  _raw_framing();
   return 0;
 }
 
@@ -369,6 +425,7 @@ int rf_stop(void)
 int rf_fs_start(uint32_t freq_hz)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
+  if (_ieee) return RF_ERR_PARAM;
   rf_stop();
   _rx_long = _rx_ready = false;
 
@@ -411,9 +468,104 @@ static bool _fs_ready(uint32_t freq_hz)
   return true;
 }
 
+// IEEE TX: one frame, the PBE's synthesizer calibration at the start
+static int _ieee_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at)
+{
+  if (len == 0 || len > IEEE_PSDU_MAX - IEEE_FCS) return RF_ERR_PARAM;
+  rf_stop();
+  _rx_long = _rx_ready = false;
+
+  uint32_t earliest = LRF_enableSynthRefsys();
+  LRF_programFrequency(freq_hz, true);
+  LRF_programTxPower(_power, freq_hz);
+  LRF_enable();
+  HWREGH_WRITE_LRF(IEEE_RAM(RXTIMEOUT)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(OPCFG)) =
+      PBE_IEEE_RAM_OPCFG_RXREPEATOK_YES | PBE_IEEE_RAM_OPCFG_RXREPEATNOK_YES |
+      PBE_IEEE_RAM_OPCFG_TXINFINITE_NO | PBE_IEEE_RAM_OPCFG_TXPATTERN_NO |
+      PBE_IEEE_RAM_OPCFG_TXFCMD_NONE | PBE_IEEE_RAM_OPCFG_START_SYNC |
+      PBE_IEEE_RAM_OPCFG_SINGLE_EN | PBE_IEEE_RAM_OPCFG_IFSPERIOD_DIS;
+
+  // FIFO entry: length (after the field), numPad 1, a pad byte, PHR (the
+  // PSDU's length with the FCS), the PSDU
+  uint32_t buf[(4 + 1 + IEEE_PSDU_MAX + 3) / 4];
+  uint8_t *b = (uint8_t *)buf;
+  uint16_t n = 2 + 1 + len;
+  b[0] = n;
+  b[1] = n >> 8;
+  b[2] = 1;
+  b[3] = 0;
+  b[4] = len + IEEE_FCS;
+  memcpy(b + 5, data, len);
+  LRF_prepareTxFifo();
+  LRF_writeTxFifoWords(buf, (2 + n + 3) / 4);
+
+  _clear_events(0xFFFFFFFFU);
+  _start_at(_start_time(at, earliest, START_DELAY));
+  LRF_waitForTopsmReady();
+  HWREGH_WRITE_LRF(LRFDPBE_BASE + LRFDPBE_O_API) = PBE_IEEE_REGDEF_API_OP_TX;
+  _running = true;
+  return RF_OK;
+}
+
+// IEEE RX: frames of any length, one (repeat false) or until rf_stop()
+static int _ieee_rx_start(uint32_t freq_hz, bool repeat, uint32_t at)
+{
+  rf_stop();
+  _rx_long = _rx_ready = false;
+
+  uint32_t earliest = LRF_enableSynthRefsys();
+  LRF_programFrequency(freq_hz, false);
+  LRF_enable();
+  HWREG_WRITE_LRF(LRFDMDM_BASE + LRFDMDM_O_SYSTIMEVTMUX0) = 21 << LRFDMDM_SYSTIMEVTMUX0_SEL0_S;
+  HWREG_WRITE_LRF(LRFDDBELL_BASE + LRFDDBELL_O_SYSTIMOEV) = LRFDDBELL_SYSTIMOEV_SRC2_MCESYSTIM0;
+  HWREG(SYSTIM_BASE + SYSTIM_O_CH4CFG) |=
+      SYSTIM_CH4CFG_INP_RISE | SYSTIM_CH4CFG_MODE_CAPT | SYSTIM_CH4CFG_REARM_EN;
+  _rx_fifo_size = LRF_prepareRxFifo();
+  LRF_setRxFifoEffSz(_rx_fifo_size);
+  HWREGH_WRITE_LRF(IEEE_RAM(NRXOK)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(NRXNOK)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(NRXIGNORED)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(NRXFIFOFULL)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(NRXTIMEOUT)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(RXTIMEOUT)) = 0;
+  HWREGH_WRITE_LRF(IEEE_RAM(OPCFG)) =
+      PBE_IEEE_RAM_OPCFG_STOP_SOFTEND |
+      (repeat ? PBE_IEEE_RAM_OPCFG_RXREPEATOK_YES | PBE_IEEE_RAM_OPCFG_RXREPEATNOK_YES
+              : PBE_IEEE_RAM_OPCFG_RXREPEATOK_NO | PBE_IEEE_RAM_OPCFG_RXREPEATNOK_YES) |
+      PBE_IEEE_RAM_OPCFG_TXINFINITE_NO | PBE_IEEE_RAM_OPCFG_TXPATTERN_NO |
+      PBE_IEEE_RAM_OPCFG_TXFCMD_NONE | PBE_IEEE_RAM_OPCFG_START_SYNC |
+      PBE_IEEE_RAM_OPCFG_SINGLE_DIS | PBE_IEEE_RAM_OPCFG_IFSPERIOD_DIS;
+
+  _clear_events(0xFFFFFFFFU);
+  _start_at(_start_time(at, earliest, START_DELAY));
+  LRF_waitForTopsmReady();
+  HWREGH_WRITE_LRF(LRFDPBE_BASE + LRFDPBE_O_API) = PBE_IEEE_REGDEF_API_OP_RX;
+  _running = true;
+  return RF_OK;
+}
+
+// IEEE RX entry: length (from numPad on), numPad, the pad bytes, PHR, the
+// PSDU without the FCS, RSSI, timestamp
+static bool _ieee_parse(const uint8_t *b, uint32_t n, rf_packet_t *pkt)
+{
+  uint32_t entry_len = b[0] | b[1] << 8;
+  uint8_t num_pad = b[2];
+  int len = (int)entry_len - 1 - num_pad - 1 - IEEE_EXTRA_BYTES;
+  if (len <= 0 || len > IEEE_PSDU_MAX || 2 + entry_len > n) return false;
+  const uint8_t *p = b + 3 + num_pad + 1;
+  memcpy(pkt->data, p, len);
+  pkt->len = len;
+  pkt->freq_est = 0;
+  pkt->rssi = (int8_t)p[len];
+  pkt->time = p[len + 1] | p[len + 2] << 8 | p[len + 3] << 16 | (uint32_t)p[len + 4] << 24;
+  return true;
+}
+
 int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
+  if (_ieee) return _ieee_tx_start(freq_hz, data, len, at);
   if (len > RF_MAX_PAYLOAD) return RF_ERR_PARAM;
   _tx_left = 0;
   _rx_active = false;
@@ -453,6 +605,7 @@ int rf_tx_start(uint32_t freq_hz, const uint8_t *data, uint16_t len, uint32_t at
 static int _rx_start(uint32_t freq_hz, uint16_t len, bool repeat, uint32_t at, bool clear_stats)
 {
   if (_state != RadioState_Configured) return RF_ERR_SETUP;
+  if (_ieee) return _ieee_rx_start(freq_hz, repeat, at);
   if (len > RF_MAX_PAYLOAD || len < 2) return RF_ERR_PARAM;
   rf_stop();
   _rx_long = len > RF_FIFO_PAYLOAD;
@@ -519,7 +672,8 @@ bool rf_rx_read(rf_packet_t *pkt)
   bool ok = false;
   if (words <= sizeof(buf) / 4) {
     LRF_readRxFifoWords(buf, words);
-    ok = _parse_entry((const uint8_t *)buf, words * 4, pkt);
+    ok = _ieee ? _ieee_parse((const uint8_t *)buf, words * 4, pkt)
+               : _parse_entry((const uint8_t *)buf, words * 4, pkt);
   } else {
     LRF_discardRxFifoWords(words);
   }
@@ -558,6 +712,7 @@ uint16_t rf_rx_peek(uint8_t *buf, uint16_t max)
 
 int rf_rx(uint32_t freq_hz, uint16_t len, uint32_t timeout_us, rf_packet_t *pkt)
 {
+  if (_ieee) return RF_ERR_PARAM;
   // One packet, then OPDONE
   int res = rf_rx_start(freq_hz, len < 2 ? 2 : len, false, 0);
   if (res) return res;
@@ -592,6 +747,16 @@ int8_t rf_rssi(void)
 
 void rf_stats(rf_stats_t *stats)
 {
+  if (_ieee) {
+    stats->rx_ok = HWREGH_READ_LRF(IEEE_RAM(NRXOK));
+    stats->rx_nok = HWREGH_READ_LRF(IEEE_RAM(NRXNOK));
+    stats->rx_ignored = HWREGH_READ_LRF(IEEE_RAM(NRXIGNORED));
+    stats->rx_empty = 0;
+    stats->rx_fifo_full = HWREGH_READ_LRF(IEEE_RAM(NRXFIFOFULL));
+    stats->rx_timeout = HWREGH_READ_LRF(IEEE_RAM(NRXTIMEOUT));
+    stats->last_rssi = (int8_t)HWREGH_READ_LRF(IEEE_RAM(LASTRSSI));
+    return;
+  }
   stats->rx_ok = HWREGH_READ_LRF(BUFRAM(NRXOK));
   stats->rx_nok = HWREGH_READ_LRF(BUFRAM(NRXNOK));
   stats->rx_ignored = HWREGH_READ_LRF(BUFRAM(NRXIGNORED));

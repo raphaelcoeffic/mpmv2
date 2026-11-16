@@ -36,6 +36,14 @@ void rf_init(void);
 // framing on top of it. Returns LRF_SetupResult (0: ok)
 int rf_configure(const LRF_Config *config);
 
+// IEEE 802.15.4 (phy_ieee: TI's O-QPSK 250 kbps PHY, its IEEE packet
+// engine) instead: rf_tx_start() sends a PSDU of len bytes without its FCS
+// (the PBE adds PHR and FCS), rf_rx_start() receives frames of any length
+// (len ignored), drops those with a bad FCS (no frame filtering);
+// rf_rx_read() gives the PSDU without its FCS (freq_est 0). rf_fs_start(),
+// rf_rx() and the long packets don't apply. rf_configure() ends it
+int rf_configure_ieee(void);
+
 // Modem registers that differ between TX and RX (phy_fsk): DEMMISC3 (the
 // PDIF decimation slows the modulator too), BAUD and BAUDPRE (RX at a
 // multiple of the rate). Written before LRF_programFrequency(), which

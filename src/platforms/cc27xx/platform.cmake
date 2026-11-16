@@ -11,7 +11,7 @@ set(platform_driverlib driverlib_cc27xxx10)
 set(cc27xx_hal_sources radio.c timer.c uart.c)
 list(TRANSFORM cc27xx_hal_sources PREPEND ${platform_dir}/)
 
-set(cc27xx_rf_sources rf.c lrf_hal.c phy_nesb.c phy_fsk250.c phy_fsk.c)
+set(cc27xx_rf_sources rf.c lrf_hal.c phy_nesb.c phy_fsk250.c phy_fsk.c phy_ieee.c)
 list(TRANSFORM cc27xx_rf_sources PREPEND ${platform_dir}/)
 
 # Radio timing (src/CMakeLists.txt)

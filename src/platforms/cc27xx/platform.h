@@ -11,3 +11,6 @@
 
 // 2 Mbps on the proprietary PHY, both ways (radio_phy_t ble_2m not needed)
 #define RADIO_2M_BLE 0
+
+// IEEE 802.15.4 (radio_phy_t ieee): TI's PHY and IEEE packet engine (rf.c)
+#define RADIO_IEEE 1

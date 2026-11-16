@@ -25,7 +25,10 @@
 //   (phy_fsk), each bit repeated rx_os times, a majority vote per bit (a
 //   tie: the later half's first sample). The sync word's first 32 / rx_os
 //   bits searched (its last ones would match d391d391's first half), the
-//   rest received as data, checked (1 bit error at most) and dropped.
+//   rest received as data, checked (1 bit error at most) and dropped;
+// - radio_phy_t ieee: rf.c's IEEE 802.15.4 mode (TI's PHY and packet
+//   engine): no tuning ahead (radio_set_frequency_start() only sets the
+//   frequency), no radio_send_rx(), variable length RX as plain RX.
 
 #include "radio.h"
 
@@ -56,6 +59,7 @@ typedef enum { STATE_IDLE, STATE_TX, STATE_RX } state_t;
 static bool _init;
 static radio_phy_t _phy;
 static bool _phy_ok;
+static bool _ieee;  // radio_phy_t ieee
 static uint32_t _freq_hz = 2440000000;
 static uint32_t _tx_sync, _rx_sync, _rx_sync_alt;
 static state_t _state;
@@ -136,12 +140,27 @@ static radio_status_t _rx_start(uint16_t len);
 
 radio_status_t radio_init(const radio_phy_t* phy)
 {
+  if (phy->ieee && phy->ble_2m) return RADIO_ERR_PARAM;
   if (!_init) {
     rf_init();
     _init = true;
   }
   _stop();
   _phy = *phy;
+  _ieee = phy->ieee;
+  if (_ieee) {
+    int res = rf_configure_ieee();
+    _phy_ok = res == 0;
+    _rx_os = 1;
+    if (!_phy_ok) {
+      _status = res;
+      return RADIO_ERR_BOOT;
+    }
+    for (uint8_t i = 0; i + 1 < _n_overrides; i += 2)
+      *(volatile uint32_t*)_overrides[i] = _overrides[i + 1];
+    rf_set_power(_dbm(phy->tx_power));
+    return RADIO_OK;
+  }
   phy_fsk_t fsk = {phy->symbol_rate, phy->deviation, -1, phy->fsk};
   if (phy->ble_2m) fsk = (phy_fsk_t){BLE_2M_RATE, BLE_2M_DEVIATION, -1, false};
   phy_fsk_info_t info;
@@ -177,7 +196,7 @@ radio_status_t radio_set_frequency(uint32_t freq_khz)
 radio_status_t radio_set_frequency_start(uint32_t freq_khz)
 {
   if (_state == STATE_TX) radio_tx_wait();  // as radio.h: after the packet
-  if (_state != STATE_IDLE || !_phy_ok) return radio_set_frequency(freq_khz);
+  if (_state != STATE_IDLE || !_phy_ok || _ieee) return radio_set_frequency(freq_khz);
   _freq_hz = freq_khz * 1000;
   return _result(rf_fs_start(_freq_hz));
 }
@@ -201,7 +220,7 @@ radio_status_t radio_tx_start_at(const uint8_t* data, uint16_t len, uint32_t at_
     int32_t ahead = (int32_t)(at_us - HWREG(SYSTIM_BASE + SYSTIM_O_TIME1U));
     if (ahead > 0) at = rf_time() + (uint32_t)ahead * 4;
   }
-  rf_set_sync(_tx_sync, _phy.sync_bits);
+  if (!_ieee) rf_set_sync(_tx_sync, _phy.sync_bits);
   radio_status_t st = _result(rf_tx_start(_freq_hz, data, len, at));
   if (st == RADIO_OK) _state = STATE_TX;
   return st;
@@ -309,8 +328,8 @@ static radio_status_t _rx_start(uint16_t len)
   if (!_phy_ok) return RADIO_ERR_PARAM;
   _stop();
   _var_len = 0;
-  _rx_syncs(_rx_sync, _rx_sync_alt ? _rx_sync_alt : _rx_sync);
-  radio_status_t st = _result(rf_rx_start(_freq_hz, _os_len(len), true, 0));
+  if (!_ieee) _rx_syncs(_rx_sync, _rx_sync_alt ? _rx_sync_alt : _rx_sync);
+  radio_status_t st = _result(rf_rx_start(_freq_hz, _ieee ? 2 : _os_len(len), true, 0));
   if (st != RADIO_OK) return st;
   _state = STATE_RX;
   _rx_len = len;
@@ -330,7 +349,7 @@ radio_status_t radio_rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len_f
                                   void* ctx)
 {
   radio_status_t st = radio_rx_start(max_len);
-  if (st != RADIO_OK || _rx_os != 1 || _phy.ble_2m) return st;
+  if (st != RADIO_OK || _rx_os != 1 || _phy.ble_2m || _ieee) return st;
   _var = max_len <= RF_FIFO_PAYLOAD;
   _var_hdr = hdr_len;
   _var_fn = len_fn;
@@ -374,7 +393,7 @@ static void _packet(const rf_packet_t* p, radio_packet_t* pkt, bool freq_offset)
   pkt->rssi = p->rssi;
   pkt->timestamp_us = _micros(p->time);
   uint32_t dev = _phy.ble_2m ? BLE_2M_DEVIATION : _phy.deviation;
-  pkt->freq_offset = freq_offset ? (int16_t)((int32_t)p->freq_est * (int32_t)dev /
+  pkt->freq_offset = freq_offset && !_ieee ? (int16_t)((int32_t)p->freq_est * (int32_t)dev /
                                              (FREQ_EST_STEPS_PER_DEV * 1000))
                                  : RADIO_FREQ_OFFSET_NONE;
 }
@@ -383,6 +402,7 @@ radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync
                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
 {
   pkt->len = 0;
+  if (_ieee) return RADIO_ERR_PARAM;
   radio_status_t st = radio_send(data, len);
   if (st != RADIO_OK) return st;
   _rx_syncs(rx_sync, rx_sync);
