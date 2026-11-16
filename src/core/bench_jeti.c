@@ -1,5 +1,6 @@
 // Jeti Duplex follower (bench_jeti.h, doc/jeti.md)
 #include "bench_jeti.h"
+#include "platform.h"
 #include "radio.h"
 #include "timer.h"
 
@@ -139,6 +140,7 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
       .preamble_bytes = 4,
       .sync_bits = 32,
       .if_freq = (int16_t)0x8000,
+      .ble_2m = RADIO_2M_BLE,  // CC2652: 2 Mbps only there
   };
   uint8_t c = cfg->ch;
   bool ok = radio_init(&phy) == RADIO_OK;
