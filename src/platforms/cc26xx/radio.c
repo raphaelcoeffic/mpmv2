@@ -5,6 +5,11 @@
 #include <inc/hw_rfc_rat.h>
 #include <driverlib/rf_ble_mailbox.h>
 #include <driverlib/rf_data_entry.h>
+#include "platform.h"  // RADIO_IEEE
+#if RADIO_IEEE
+#include <driverlib/rf_ieee_cmd.h>
+#include <driverlib/rf_ieee_mailbox.h>
+#endif
 #include <driverlib/rf_mailbox.h>
 #include <driverlib/rf_prop_cmd.h>
 #include <driverlib/rf_prop_mailbox.h>
@@ -41,6 +46,16 @@ static uint8_t _n_extra_overrides;
 
 static bool _ble_2m;  // Bluetooth LE 2M PHY (rf_chip_setup())
 #define _ble (RF_CHIP_BLE_2M && _ble_2m)
+// IEEE 802.15.4 (radio_phy_t ieee): CMD_IEEE_TX / CMD_IEEE_RX, PSDUs without
+// the FCS, one frame per RX entry after its length byte
+static bool _ieee_phy;
+#define _ieee (RADIO_IEEE && _ieee_phy)
+#define IEEE_PSDU_MAX 125  // 127 with the FCS
+#if RADIO_IEEE
+static rfc_CMD_IEEE_TX_t _ieee_tx;
+static rfc_CMD_IEEE_RX_t _ieee_rx;
+static rfc_ieeeRxOutput_t _ieee_out;
+#endif
 
 static rfc_CMD_FS_t _fs;
 static rfc_CMD_PROP_TX_t _tx;
@@ -112,6 +127,9 @@ static bool _cmd_done(uint16_t status) { return status >= DONE_OK; }
 
 static bool _cmd_ok(uint16_t status)
 {
+#if RADIO_IEEE
+  if (status == IEEE_DONE_OK) return true;
+#endif
   return status == DONE_OK || status == PROP_DONE_OK || status == BLE_DONE_OK;
 }
 
@@ -306,7 +324,7 @@ static void _cpe0_isr()
   }
 }
 
-static radio_status_t _power_up(bool ble)
+static radio_status_t _power_up(bool ble, bool ieee)
 {
   rf_chip_mode();
 
@@ -343,7 +361,8 @@ static radio_status_t _power_up(bool ble)
   IntPendClear(INT_RFC_CPE_0);
   IntEnable(INT_RFC_CPE_0);
 
-  rf_chip_patch(ble);
+  if (ieee) rf_chip_patch_ieee();
+  else rf_chip_patch(ble);
 
   if ((RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_PING)) & 0xFF) != CMDSTA_Done)
     return RADIO_ERR_BOOT;
@@ -386,11 +405,12 @@ static radio_status_t _fs_wait()
 
 radio_status_t radio_init(const radio_phy_t* phy)
 {
+  if (phy->ieee && (!RADIO_IEEE || phy->ble_2m)) return RADIO_ERR_PARAM;
   if (phy->ble_2m && !RF_CHIP_BLE_2M) return RADIO_ERR_PARAM;
   if (phy->ble_2m && phy->sync_bits != 32) return RADIO_ERR_PARAM;
-  if (phy->deviation > 511750 || phy->sync_bits < 8 || phy->sync_bits > 32 ||
-      phy->preamble_bytes == 0 || phy->preamble_bytes > 32 ||
-      phy->rx_bw < 64 || phy->rx_bw > 103)
+  if (!phy->ieee && (phy->deviation > 511750 || phy->sync_bits < 8 || phy->sync_bits > 32 ||
+                     phy->preamble_bytes == 0 || phy->preamble_bytes > 32 ||
+                     phy->rx_bw < 64 || phy->rx_bw > 103))
     return RADIO_ERR_PARAM;
 
   if (_powered) radio_off();
@@ -398,15 +418,20 @@ radio_status_t radio_init(const radio_phy_t* phy)
   rf_chip_hposc_init();
 
   _ble_2m = phy->ble_2m;
+  _ieee_phy = phy->ieee;
   // Bluetooth LE 2M PHY (500 kHz deviation): measured as 326 kHz
   _foff_deviation = _ble ? 326000 : phy->deviation;
   // Bluetooth LE 2M: its own 2 byte preamble and 32 bit access address
-  _ts_sync_us = _ble ? 24
-                     : (phy->preamble_bytes * 8 + phy->sync_bits) * 1000000ULL / phy->symbol_rate;
-  radio_status_t st = _power_up(_ble);
+  // IEEE 802.15.4: the RF core's timestamp, as it comes
+  _ts_sync_us = _ieee ? 0
+                : _ble ? 24
+                       : (phy->preamble_bytes * 8 + phy->sync_bits) * 1000000ULL / phy->symbol_rate;
+  radio_status_t st = _power_up(_ble, _ieee);
   if (st != RADIO_OK) return st;
 
-  st = _run_op(rf_chip_setup(phy, _ble, _extra_overrides, _n_extra_overrides));
+  rfc_radioOp_t* setup = _ieee ? rf_chip_setup_ieee(phy, _extra_overrides, _n_extra_overrides)
+                               : rf_chip_setup(phy, _ble, _extra_overrides, _n_extra_overrides);
+  st = _run_op(setup);
   if (st == RADIO_OK && _freq_khz) st = _run_fs();
   return st;
 }
@@ -453,6 +478,19 @@ void radio_set_rx_sync_alt(uint32_t rx_sync) { _rx_sync_alt = rx_sync; }
 
 static void _init_tx(const uint8_t* data, uint16_t len)
 {
+#if RADIO_IEEE
+  if (_ieee) {
+    // The PHR and the FCS added by the RF core
+    memset(&_ieee_tx, 0, sizeof(_ieee_tx));
+    _ieee_tx.commandNo = CMD_IEEE_TX;
+    _ieee_tx.startTrigger.triggerType = TRIG_NOW;
+    _ieee_tx.condition.rule = COND_NEVER;
+    _ieee_tx.payloadLen = len;
+    _ieee_tx.pPayload = (uint8_t*)data;
+    _tx_op = (rfc_radioOp_t*)&_ieee_tx;
+    return;
+  }
+#endif
   if (len > 255 || _ble) {
     memset(&_tx_adv, 0, sizeof(_tx_adv));
     _tx_adv.commandNo = CMD_PROP_TX_ADV;
@@ -490,7 +528,7 @@ static uint32_t _micros_to_rat(uint32_t us)
 radio_status_t radio_tx_start_at(const uint8_t* data, uint16_t len, uint32_t at_us)
 {
   if (!_powered) return RADIO_ERR_PARAM;
-  if (len == 0 || len > RADIO_MAX_PKT_LEN) return RADIO_ERR_PARAM;
+  if (len == 0 || len > (_ieee ? IEEE_PSDU_MAX : RADIO_MAX_PKT_LEN)) return RADIO_ERR_PARAM;
 
   radio_tx_wait();
   radio_rx_stop();
@@ -566,6 +604,46 @@ static void _init_var_queue(uint8_t hdr_len, uint16_t max_len)
 
 // repeat: continuous reception, else stop after the first packet. len 0:
 // unlimited (variable length RX)
+#if RADIO_IEEE
+// IEEE 802.15.4 RX: every frame with a good FCS (no frame filtering), its
+// PSDU without the FCS after a length byte (lenSz 1: the bytes after it,
+// RSSI and timestamp included)
+static void _init_ieee_rx()
+{
+  for (int i = 0; i < RX_ENTRIES; i++) {
+    rfc_dataEntryGeneral_t* e = (rfc_dataEntryGeneral_t*)_rx_entries[i];
+    e->config.lenSz = 1;
+    e->length = 1 + IEEE_PSDU_MAX + RX_APPENDED;
+  }
+  memset(&_ieee_out, 0, sizeof(_ieee_out));
+  memset(&_ieee_rx, 0, sizeof(_ieee_rx));
+  _ieee_rx.commandNo = CMD_IEEE_RX;
+  _ieee_rx.startTrigger.triggerType = TRIG_NOW;
+  _ieee_rx.condition.rule = COND_NEVER;
+  _ieee_rx.channel = 0;  // the CMD_FS frequency
+  _ieee_rx.rxConfig.bAutoFlushCrc = 1;
+  _ieee_rx.rxConfig.bAutoFlushIgn = 1;
+  _ieee_rx.rxConfig.bAppendRssi = 1;
+  _ieee_rx.rxConfig.bAppendTimestamp = 1;
+  _ieee_rx.pRxQ = &_rx_queue;
+  _ieee_rx.pOutput = &_ieee_out;
+  _ieee_rx.frameFiltOpt.frameFiltEn = 0;
+  _ieee_rx.frameFiltOpt.maxFrameVersion = 3;
+  _ieee_rx.frameTypes.bAcceptFt0Beacon = 1;
+  _ieee_rx.frameTypes.bAcceptFt1Data = 1;
+  _ieee_rx.frameTypes.bAcceptFt2Ack = 1;
+  _ieee_rx.frameTypes.bAcceptFt3MacCmd = 1;
+  _ieee_rx.frameTypes.bAcceptFt4Reserved = 1;
+  _ieee_rx.frameTypes.bAcceptFt5Reserved = 1;
+  _ieee_rx.frameTypes.bAcceptFt6Reserved = 1;
+  _ieee_rx.frameTypes.bAcceptFt7Reserved = 1;
+  _ieee_rx.ccaOpt.ccaEnEnergy = 1;
+  _ieee_rx.ccaRssiThr = (uint8_t)-70;
+  _ieee_rx.endTrigger.triggerType = TRIG_NEVER;
+  _rx_op = (rfc_radioOp_t*)&_ieee_rx;
+}
+#endif
+
 static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool repeat)
 {
   _init_rx_queue(len);
@@ -573,6 +651,12 @@ static void _init_rx(uint32_t sync_word, uint32_t sync_alt, uint16_t len, bool r
   _var = false;
   memset(&_rx_out, 0, sizeof(_rx_out));
   HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIEN) = IRQ_RX_ENTRY_DONE;
+#if RADIO_IEEE
+  if (_ieee) {
+    _init_ieee_rx();
+    return;
+  }
+#endif
 
   // Fixed length: no header, no length field
   if (len == 0 || len > 255 || sync_alt || _ble) {
@@ -651,8 +735,9 @@ static radio_status_t _rx_start_var(uint8_t hdr_len, uint16_t max_len, radio_len
       !len_fn)
     return RADIO_ERR_PARAM;
   // The Bluetooth LE PHY ends short packets with an error when their length
-  // comes after their end (measured): the maximum length
-  if (_ble) return radio_rx_start(max_len);
+  // comes after their end (measured): the maximum length. IEEE 802.15.4:
+  // the PHR's length
+  if (_ble || _ieee) return radio_rx_start(max_len);
 
   radio_tx_wait();
   radio_rx_stop();
@@ -693,7 +778,7 @@ radio_status_t radio_rx_start_var_once(uint8_t hdr_len, uint16_t max_len,
 radio_status_t radio_send_rx(const uint8_t* data, uint16_t len, uint32_t rx_sync,
                              uint16_t rx_len, uint32_t window_us, radio_packet_t* pkt)
 {
-  if (!_powered) return RADIO_ERR_PARAM;
+  if (!_powered || _ieee) return RADIO_ERR_PARAM;
   // Short packets only: acknowledgments
   if (len == 0 || len > 255 || rx_len == 0 || rx_len > 255) return RADIO_ERR_PARAM;
 
@@ -773,13 +858,17 @@ bool radio_receive(radio_packet_t* pkt)
 
   uint8_t* data = _var ? &((rfc_dataEntryPartial_t*)e)->rxData : &e->data;
   uint16_t len = _var ? _var_len[_rx_next] : _rx_len;
+  if (_ieee) {
+    len = data[0] >= RX_APPENDED ? data[0] - RX_APPENDED : 0;
+    data++;
+  }
   pkt->len = len;
   memcpy(pkt->data, data, len);
   pkt->rssi = (int8_t)data[len];
   uint8_t* ts = data + len + 1;
   uint32_t rat = ts[0] | ts[1] << 8 | ts[2] << 16 | (uint32_t)ts[3] << 24;
   pkt->timestamp_us = _powered ? _rat_to_micros(rat) + _ts_sync_us : micros();
-  int16_t foff = _rx_foff_set[_rx_next] ? _rx_foff[_rx_next] : FOFF_NONE;
+  int16_t foff = _rx_foff_set[_rx_next] && !_ieee ? _rx_foff[_rx_next] : FOFF_NONE;
   pkt->freq_offset = foff == FOFF_NONE ? RADIO_FREQ_OFFSET_NONE
                      : (int16_t)(foff * (int32_t)_foff_deviation /
                                  (FOFF_COUNTS_PER_DEVIATION * 1000));
@@ -851,6 +940,15 @@ int8_t radio_rssi()
 
 void radio_rx_stats(radio_rx_stats_t* stats)
 {
+#if RADIO_IEEE
+  if (_ieee) {
+    stats->ok = _ieee_out.nRxBeacon + _ieee_out.nRxData + _ieee_out.nRxAck +
+                _ieee_out.nRxMacCmd + _ieee_out.nRxReserved;
+    stats->nok = _ieee_out.nRxNok;
+    stats->buf_full = _ieee_out.nRxBufFull;
+    return;
+  }
+#endif
   stats->ok = _rx_out.nRxOk;
   stats->nok = _rx_out.nRxNok;
   stats->buf_full = _rx_out.nRxBufFull;

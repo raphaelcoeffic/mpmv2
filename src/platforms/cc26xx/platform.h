@@ -28,3 +28,11 @@
 #else
 #define RADIO_2M_BLE 1
 #endif
+
+// IEEE 802.15.4 (radio_phy_t ieee): the RF core's O-QPSK modem and packet
+// commands. Not on the CC2650 (its IEEE firmware is another RF core image)
+#if defined(MCU_CC26X0)
+#define RADIO_IEEE 0
+#else
+#define RADIO_IEEE 1
+#endif

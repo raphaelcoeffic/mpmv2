@@ -33,11 +33,16 @@ void rf_chip_mode();
 // and the others, then the RF core's access to the system bus (RX queue in
 // RAM)
 void rf_chip_patch(bool ble);
+// The same for IEEE 802.15.4 (RADIO_IEEE): its CPE patch
+void rf_chip_patch_ieee();
 
 // The setup command of phy (ble: the Bluetooth LE 2M one), the extra
 // override words (radio_set_extra_overrides()) after the chip's
 rfc_radioOp_t* rf_chip_setup(const radio_phy_t* phy, bool ble, const uint32_t* extra,
                              uint8_t n_extra);
+// IEEE 802.15.4's (CMD_RADIO_SETUP), NULL without (CC2650)
+rfc_radioOp_t* rf_chip_setup_ieee(const radio_phy_t* phy, const uint32_t* extra,
+                                  uint8_t n_extra);
 
 // The modem's frequency estimate of the last packet (DEMMAFC0 counts), or
 // FOFF_NONE. The modem is clocked only while an RX command runs, and reading

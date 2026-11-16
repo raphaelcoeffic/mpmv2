@@ -143,3 +143,15 @@ rfc_radioOp_t* rf_chip_setup(const radio_phy_t* phy, bool ble, const uint32_t* e
   _setup.pRegOverride = _overrides;
   return (rfc_radioOp_t*)&_setup;
 }
+
+// No IEEE 802.15.4 here (RADIO_IEEE 0): radio_init() refuses it first
+void rf_chip_patch_ieee() {}
+
+rfc_radioOp_t* rf_chip_setup_ieee(const radio_phy_t* phy, const uint32_t* extra,
+                                  uint8_t n_extra)
+{
+  (void)phy;
+  (void)extra;
+  (void)n_extra;
+  return 0;
+}

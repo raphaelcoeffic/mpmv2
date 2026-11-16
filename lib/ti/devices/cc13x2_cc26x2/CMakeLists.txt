@@ -6,6 +6,7 @@ set(driverlib_sources
     ${driverlib_c_sources}
     rf_patches/rf_patch_cpe_prop.c
     rf_patches/rf_patch_cpe_bt5.c
+    rf_patches/rf_patch_cpe_ieee_802_15_4.c
 )
 
 set(startup_file

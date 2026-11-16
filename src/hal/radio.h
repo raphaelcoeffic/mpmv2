@@ -26,6 +26,14 @@ typedef struct {
   // under the same packet commands: symbol_rate, deviation, rx_bw,
   // preamble_bytes, if_freq and fsk are ignored
   bool ble_2m;
+  // IEEE 802.15.4 2.4 GHz (O-QPSK, 250 kbps; RADIO_IEEE platforms): only
+  // tx_power counts. Packets are PSDUs without the FCS: radio_tx_start*()
+  // sends one with its PHR and FCS added, radio_rx_start() receives whole
+  // frames of any length (its len ignored) and drops those with a bad FCS
+  // (radio_rx_stats() nok), radio_receive() gives their PSDU without the FCS,
+  // timestamp_us the SFD. Sync words, variable length RX and radio_send_rx()
+  // don't apply
+  bool ieee;
 } radio_phy_t;
 
 typedef struct {

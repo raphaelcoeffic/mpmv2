@@ -11,6 +11,7 @@
 #include <driverlib/rf_prop_cmd.h>
 #include <driverlib/rf_prop_mailbox.h>
 #include <rf_patches/rf_patch_cpe_bt5.h>
+#include <rf_patches/rf_patch_cpe_ieee_802_15_4.h>
 #include <rf_patches/rf_patch_cpe_prop.h>
 
 #include <string.h>
@@ -116,6 +117,19 @@ static bool _hposc;
 static int16_t _hposc_offset;  // 2^-22 relative
 static uint32_t _hposc_check;
 
+// IEEE 802.15.4, as TI's setting for the CC2652R (ieee_802_15_4: CMD_RADIO_SETUP
+// mode 1)
+static const uint32_t _ieee_base_overrides[] = {
+    // DC/DC regulator: In Tx, use DCDCCTL5[3:0]=0x3 (DITHER_EN=0 and IPEAK=3).
+    0x00F388D3,
+    // Rx: Set LNA bias current offset to +15 to saturate trim to max (default: 0)
+    0x000F8883,
+};
+#define IEEE_BASE_OVERRIDES (sizeof(_ieee_base_overrides) / sizeof(_ieee_base_overrides[0]))
+// Base + HPOSC + extra + end marker
+static uint32_t _ieee_overrides[IEEE_BASE_OVERRIDES + 2 + RADIO_EXTRA_OVERRIDES];
+static rfc_CMD_RADIO_SETUP_t _ieee_setup;
+
 static rfc_CMD_PROP_RADIO_DIV_SETUP_t _setup;
 static rfc_CMD_BLE5_RADIO_SETUP_t _ble_setup;
 
@@ -131,10 +145,20 @@ void rf_chip_patch(bool ble)
   // with two of them, load the whole image every time
   cleanBt5Patch();
   cleanPropPatch();
+  cleanIeee802154Patch();
   if (ble) rf_patch_cpe_bt5();
   else rf_patch_cpe_prop();
 
   // Allow the RF core to access the system bus (RX queue in RAM)
+  RFCDoorbellSendTo(CMDR_DIR_CMD_1BYTE(CMD_BUS_REQUEST, 1));
+}
+
+void rf_chip_patch_ieee()
+{
+  cleanBt5Patch();
+  cleanPropPatch();
+  cleanIeee802154Patch();
+  rf_patch_cpe_ieee_802_15_4();
   RFCDoorbellSendTo(CMDR_DIR_CMD_1BYTE(CMD_BUS_REQUEST, 1));
 }
 
@@ -262,4 +286,28 @@ rfc_radioOp_t* rf_chip_setup(const radio_phy_t* phy, bool ble, const uint32_t* e
   }
   _init_setup(phy, extra, n_extra);
   return (rfc_radioOp_t*)&_setup;
+}
+
+rfc_radioOp_t* rf_chip_setup_ieee(const radio_phy_t* phy, const uint32_t* extra,
+                                  uint8_t n_extra)
+{
+  memset(&_ieee_setup, 0, sizeof(_ieee_setup));
+  _ieee_setup.commandNo = CMD_RADIO_SETUP;
+  _ieee_setup.startTrigger.triggerType = TRIG_NOW;
+  _ieee_setup.condition.rule = COND_NEVER;
+  _ieee_setup.mode = 1;                 // IEEE 802.15.4
+  _ieee_setup.config.frontEndMode = 0;  // differential
+  _ieee_setup.config.biasMode = 0;      // internal bias
+  _ieee_setup.txPower = phy->tx_power;
+
+  uint32_t n = IEEE_BASE_OVERRIDES;
+  memcpy(_ieee_overrides, _ieee_base_overrides, sizeof(_ieee_base_overrides));
+  if (_hposc) {
+    _hposc_offset = _hposc_get_offset();
+    _ieee_overrides[n++] = HPOSC_OVERRIDE((uint32_t)(uint16_t)_hposc_offset);
+  }
+  for (uint8_t i = 0; i < n_extra; i++) _ieee_overrides[n++] = extra[i];
+  _ieee_overrides[n] = 0xFFFFFFFF;
+  _ieee_setup.pRegOverride = _ieee_overrides;
+  return (rfc_radioOp_t*)&_ieee_setup;
 }
