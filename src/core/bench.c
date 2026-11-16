@@ -7,6 +7,7 @@
 #include "bench_fasst.h"
 #include "bench_jeti.h"
 #include "fasst_frame.h"
+#include "jeti_frame.h"
 #include "tfhss.h"
 #include "bench_port.h"
 #include "board.h"
@@ -2036,6 +2037,52 @@ static void _cmd_jetirx(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// Energy scan on the Jeti channels (2405 + 5 n MHz, the Jeti PHY's RX):
+// per channel for ms, 128 us windows (802.15.4 CCA), the RSSI's maximum
+// per window; printed as "@ed <n> <MHz> busy=<windows at dbm and above>/
+// <windows> max=<dBm>"
+static void _cmd_edscan(char* args)
+{
+  uint32_t ms = _number_or(&args, 500);
+  int dbm = -(int)_number_or(&args, 70);
+  if (ms == 0 || ms > 10000) {
+    _print("@err usage: edscan [ms per channel] [-dBm threshold, e.g. 70]\r\n");
+    return;
+  }
+  _job_stop();
+  radio_phy_t phy;
+  jeti_phy(&phy, 0);
+  if (radio_init(&phy) != RADIO_OK) {
+    _report_radio_error("radio init");
+    return;
+  }
+  radio_set_sync_word(JETI_SYNC, JETI_SYNC);
+  _printf("@ok edscan ms=%lu dbm=%d\r\n", ms, dbm);
+  for (uint8_t n = 0; n < JETI_CHANNELS && !_host_stop(); n++) {
+    radio_set_frequency(jeti_freq_khz(n));
+    radio_rx_start(JETI_PSDU_MAX);
+    uint32_t t0 = micros(), windows = 0, busy = 0;
+    int8_t top = RADIO_RSSI_NONE;
+    while (micros() - t0 < ms * 1000) {
+      uint32_t w0 = micros();
+      int8_t max = RADIO_RSSI_NONE;
+      while (micros() - w0 < 128) {
+        int8_t r = radio_rssi();
+        if (r > max) max = r;
+      }
+      if (max == RADIO_RSSI_NONE) continue;
+      windows++;
+      busy += max >= dbm;
+      if (max > top) top = max;
+      if (!radio_rx_active()) radio_rx_start(JETI_PSDU_MAX);  // ended by a packet
+    }
+    radio_rx_stop();
+    _printf("@ed %u %lu busy=%lu/%lu max=%d\r\n", n, jeti_freq_khz(n) / 1000, busy, windows, top);
+  }
+  _print("@end edscan\r\n");
+  if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
+}
+
 // FASSTest receiver emulator (bench_fasst.c), blocking
 static void _cmd_ftrx(char* args)
 {
@@ -2423,6 +2470,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "tfhssrx")) _cmd_tfhssrx(args);
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else if (!strcmp(cmd, "jetirx")) _cmd_jetirx(args);
+  else if (!strcmp(cmd, "edscan")) _cmd_edscan(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);
   else _printf("@err unknown command %s\r\n", cmd);
