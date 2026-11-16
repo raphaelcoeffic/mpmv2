@@ -59,7 +59,15 @@
 //   The sensor's simple text and buttons don't travel (Duplex R6).
 //
 // Channels: +-100% (MPM_CHANNEL_MIN..MAX) = 1000..2000 us; slot value
-// 8 x (us - 1500) - 1, 14 bits.
+// 8 x (us - 1500) - 1, 14 bits. The channel block: tag 0x30 | (n - 1), n
+// slots (0x37 the old PPM module's 8, 0x3f the DS-14's 16). The Duplex R6
+// takes 16 input channels, but the longer the block the later its reply
+// (2.8 ms for 8 slots, 3.7 for 16), and replies with relayed sensor data
+// or a JETIBOX screen it drops above ~12 slots (16: 76 % answered, no EX;
+// doc/jeti.md). Its masked blocks (DS-14 `30 <mask>`) it ignores. So:
+// 8ch every frame 8 slots; 12ch every frame 12 (all answered); 16ch 8 and
+// 16 slots in turn (ch9-16 every 40 ms; the 8-slot frames all answered,
+// the receiver holds ch9-16 in between). Bind frames: 8 channels.
 #include "protocols.h"
 
 #ifdef JETI_INO
@@ -101,7 +109,7 @@
 #define JETI_BOX_EVERY 3     // the module: every 3rd frame (~67 ms)
 #define JETI_BOX_FRAMES 10   // the terminal closed after this many frames without its byte
 #define JETI_BOX_PRESS 2     // a press in this many JETIBOX frames
-#define JETI_BOX_PAYLOAD (JETI_DATA_PAYLOAD + 2)
+#define JETI_BOX_PAYLOAD (JETI_DATA_PAYLOAD(JETI_CH_MAX) + 2)
 #define JETI_SCREEN_LEN 32
 #define JETI_EX_MAX 29          // an EX packet with its separators
 #define JETI_ID_BYTE 0x58       // after the short address, as the module's
@@ -110,10 +118,12 @@
 #define P_TYPE 0
 #define P_SUB 1
 #define JETI_TYPE_TX 0xB1
-#define JETI_DATA_PAYLOAD 28   // 8 channels
+#define JETI_DATA_PAYLOAD(n) (12 + 2 * (n))
 #define JETI_BOOT_PAYLOAD 12   // 0x23
 #define JETI_BIND_PAYLOAD 30   // 0x22, 8 channels
-#define JETI_CH 8
+#define JETI_CH_BIND 8
+#define JETI_CH_MAX 16
+enum { SUB_8CH, SUB_12CH, SUB_16CH };
 
 #define JETI_EEPROM_OFFSET 1792  // mpm-v2's own: RX PAN, short (LE), 4 bytes per model
 
@@ -145,7 +155,7 @@ static struct {
 } _j;
 
 static uint8_t _frame[JETI_HDR + JETI_BOX_PAYLOAD];
-static uint8_t _air[JETI_TX_LEN(JETI_HDR + JETI_BIND_PAYLOAD + JETI_FCS)];
+static uint8_t _air[JETI_TX_LEN(JETI_HDR + JETI_BOX_PAYLOAD + JETI_FCS)];
 static uint8_t _psdu[JETI_PSDU_MAX], _plain[JETI_PSDU_MAX];
 static radio_packet_t _pkt;
 
@@ -170,9 +180,11 @@ static uint16_t _slot(uint16_t ch)
   return v & 0x3FFF;
 }
 
-static uint8_t* _slots(uint8_t* p)
+// The channel block: its tag and n slots
+static uint8_t* _slots(uint8_t* p, uint8_t n)
 {
-  for (int i = 0; i < JETI_CH; i++) {
+  *p++ = 0x30 | (n - 1);
+  for (int i = 0; i < n; i++) {
     uint16_t v = _slot(mpm.channels[i]);
     *p++ = v;
     *p++ = v >> 8;
@@ -332,8 +344,7 @@ static uint16_t _bind_tx()
     *p++ = 0x11;
     *p++ = 0x80;
     *p++ = 0x00;
-    *p++ = 0x37;
-    p = _slots(p);
+    p = _slots(p, JETI_CH_BIND);
   }
   uint8_t pl = p - (_frame + JETI_HDR);
   _send(pl);
@@ -510,8 +521,8 @@ static uint16_t _data_tx()
   *p++ = 0x11;
   *p++ = (_j.n & 3) << 6;  // a 2-bit frame counter, as the module's
   *p++ = 0xB6;             // unknown, the module's 0xa7..0xc9
-  *p++ = 0x37;
-  p = _slots(p);
+  uint8_t n = mpm.sub_protocol == SUB_12CH ? 12 : mpm.sub_protocol == SUB_16CH && (_j.n & 1) ? 16 : 8;
+  p = _slots(p, n);
   if (_box_frame()) {
     *p++ = 0x44;
     uint8_t b = 0xFF;

@@ -86,7 +86,7 @@ const mpm_protocol_t mpm_protocols[] = {
    FASST_init, FASST_callback, 0},
 #endif
 #ifdef JETI_INO
-  {PROTO_JETI, "Jeti", 0, 0, MPM_OPTION_NONE, false, false, JETI_init, JETI_callback, 0},
+  {PROTO_JETI, "Jeti", "\x04" "8ch " "12ch" "16ch", 3, MPM_OPTION_NONE, false, false, JETI_init, JETI_callback, 0},
 #endif
   {PROTO_TEST, "Test", "\x04" "1M  250k", 2, MPM_OPTION_RFCHAN, false, false, TEST_init, TEST_callback, 0},
 };
