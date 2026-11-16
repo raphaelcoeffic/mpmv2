@@ -15,6 +15,10 @@ sends them, telemetry decoded. LaunchPad: XDS110 back channel ($CC_PORT).
                      [--failsafe 1=1844,7=204]
                      [--run-options -60:60:5,60:-60:-5 [--step 4] [--settle 1.5] [--run-wait 120]] [--range] [--low-power]
                                          a real receiver: CH1-4 sweep (--sweep-ch, --sweep-from), status and telemetry each second
+  radio_sim.py jetibox --proto 111 [--wait 1.5] [d r u l ...]
+                                         the Jeti receiver's JETIBOX menus through the module (a
+                                         radio script's part): the JETIBOX byte in every frame, one
+                                         press per key given, each screen printed once
   radio_sim.py sport --proto 64 --sub 0 [--push 17:30:0c30:80 ...]
                                          S.Port to a bound FrSky X receiver, as a Lua script on EdgeTX
                                          (sportTelemetryPush/Pop): the UNI firmware's setup fields
@@ -139,6 +143,15 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
             elif sid == 0xFF:
                 break
         return out
+    elif ty == 0x14 and len(d) >= 8 and d[0] == 0:
+        # Jeti reply (proto_jeti.c): RSSI here, A, B (bits 15-14 01: voltage
+        # 10 mV), flags, signal level
+        b = d[4] | d[5] << 8
+        out = {"tx_rssi": struct.unpack("b", d[1:2])[0], "frames": d[2] | d[3] << 8,
+               "flags": d[6], "signal": d[7]}
+        if b >> 14 == 1:
+            out["rx_v100"] = b & 0x3FFF
+        return out
     elif ty == 0x13 and len(d) >= 4:
         # Futaba FASSTest (proto_fasst.c): page (12CH 0x80), the reply's RSSI at
         # the module, then the slots' data bytes (12CH: voltage, link quality %)
@@ -183,6 +196,9 @@ class Radio:
         # in place of every FAILSAFE_EVERY-th frame, from the first. None: never
         self.failsafe: list[int] | None = None
         self._push: bytes = b""
+        # Jeti JETIBOX byte (buttons LDUR in bits 7-4, press counter in 3-0)
+        # in every frame while not None, as a radio script would
+        self.jetibox: int | None = None
         self._stop = False
         self._threads = [threading.Thread(target=f, daemon=True) for f in (self._tx_loop, self._rx_loop)]
         for t in self._threads:
@@ -205,6 +221,8 @@ class Radio:
         while not self._stop:
             if self.sending:
                 data, self._push = self._push, b""
+                if not data and self.jetibox is not None:
+                    data = bytes([self.jetibox])
                 if not data and self.bind_opt is not None and self.frame.get("bind") and not self.buf_low:
                     data = bytes([self.bind_opt])
                 if self.failsafe and self.frames_sent % FAILSAFE_EVERY == 0:
@@ -494,6 +512,51 @@ def cmd_drive(r: Radio, a):
     return 0
 
 
+def jeti_screen(d: bytes) -> str:
+    t = "".join(chr(c) if 32 <= c < 127 else " " for c in d[1:33])
+    return f"|{t[:16]}|{t[16:]}|"
+
+
+def cmd_jetibox(r: Radio, a):
+    """The remote JETIBOX of a bound Jeti receiver: the JETIBOX byte in every
+    frame, the screens (MPM_TELEM_JETI kind 1) printed when they change; one
+    press per key in a.keys (l d u r, combinations as 'lr'), a.wait seconds
+    apart, then a.wait more"""
+    r.set(protocol=a.proto, sub=a.sub, option=a.option, rx_num=a.rx_num)
+    count = 0
+    r.jetibox = 0
+    last = None
+    t0 = time.monotonic()
+
+    def watch(secs: float, key: str = ""):
+        nonlocal last
+        end = time.monotonic() + secs
+        shown = False
+        while time.monotonic() < end:
+            got = r.wait(0x14, end - time.monotonic())
+            if got and got[1][0] == 1:
+                s = jeti_screen(got[1])
+                if s != last:
+                    print(f"{got[0] - t0:6.2f} {key:3s} {s}" if not shown else f"{got[0] - t0:6.2f}     {s}",
+                          flush=True)
+                    last, shown = s, True
+        if key and not shown:
+            print(f"{time.monotonic() - t0:6.2f} {key:3s} (no change)", flush=True)
+
+    watch(a.wait)
+    if last is None:
+        print("no JETIBOX screen (receiver bound and on?)")
+        return 1
+    for key in a.keys:
+        m = 0
+        for c in key:
+            m |= {"l": 0x80, "d": 0x40, "u": 0x20, "r": 0x10}[c]
+        count = (count + 1) & 0x0F
+        r.jetibox = m | count
+        watch(a.wait, key)
+    return 0
+
+
 def option_list(spec: str) -> list[int]:
     """lo:hi:step[,lo:hi:step...], each range with both ends (step < 0: down)"""
     out = []
@@ -631,7 +694,9 @@ def cmd_sport(r: Radio, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=["status", "scan", "bind", "link", "drive", "sport"])
+    ap.add_argument("command", choices=["status", "scan", "bind", "link", "drive", "sport", "jetibox"])
+    ap.add_argument("keys", nargs="*", help="jetibox: buttons to press in turn (l d u r)")
+    ap.add_argument("--wait", type=float, default=1.5, help="jetibox: seconds after each press")
     ap.add_argument("-p", "--port", default="cc", help="serial port (default: the LaunchPad)")
     ap.add_argument("--proto", type=int, default=PROTO_TEST)
     ap.add_argument("--sub", type=int, default=0)
@@ -668,7 +733,7 @@ def main():
     try:
         with Radio(port) as r:
             rc = {"status": cmd_status, "scan": cmd_scan, "bind": cmd_bind, "link": cmd_link,
-                  "drive": cmd_drive, "sport": cmd_sport}[a.command](r, a)
+                  "drive": cmd_drive, "sport": cmd_sport, "jetibox": cmd_jetibox}[a.command](r, a)
             print(f"frames sent {r.frames_sent}")
     finally:
         if a.save_eeprom:

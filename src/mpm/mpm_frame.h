@@ -63,6 +63,18 @@ uint8_t mpm_frame_encode(const mpm_frame_t* f, uint8_t* buf);
 // each as the sensor sent them (slot 0: the receiver's voltage, see
 // fasst_frame.h); 12CH 8 bytes (voltage, link quality %)
 #define MPM_TELEM_FUTABA 0x13
+// Jeti Duplex receiver replies (proto_jeti.c): mpm-v2's own. Byte 0, the
+// kind: MPM_JETI_REPLY: byte 1 the reply's RSSI at the module (dBm,
+// signed), bytes 2-7 the reply's bytes 2-7 (A: frames received, LE16; B,
+// LE16: bits 15-14 01 = the receiver's voltage in 10 mV, 00 = a counter;
+// flags: bits 1-0 antenna, bit 2 bind plug, bit 7 link new; the active
+// antenna's signal level); MPM_JETI_SCREEN: bytes 1-32 the receiver's
+// JETIBOX screen (2 lines of 16, 0 = space), while the radio's frames
+// carry the JETIBOX byte: buttons L D U R in bits 7-4 (1 = pressed), a
+// counter in bits 3-0 (a new value: one press)
+#define MPM_TELEM_JETI 0x14
+#define MPM_JETI_REPLY 0
+#define MPM_JETI_SCREEN 1
 // MPM v2 only, on the USB link: file_server.h replies (not an MPM type)
 #define MPM_TELEM_FILE 0x40
 // MPM v2 only, on the USB link: debug log text (log.h)

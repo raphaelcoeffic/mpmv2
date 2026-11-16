@@ -26,7 +26,15 @@
 //   mV), the active antenna, a signal level. To the radio as the FrSky
 //   link frame: A1 = the voltage (255 = 13.2 V), RX RSSI = the signal
 //   level byte, TX RSSI = the reply's RSSI here + 120 dBm, RX LQI = replies
-//   in % of frames (last JETI_LQI_FRAMES).
+//   in % of frames (last JETI_LQI_FRAMES). And each reply as it came
+//   (MPM_TELEM_JETI, kind 0).
+// - Remote JETIBOX (the receiver's own menus, as the module relays them):
+//   while the radio's frames carry a byte (MPM_TELEM_JETI: buttons LDUR in
+//   bits 7-4, 1 = pressed, a press counter in bits 3-0), every
+//   JETI_BOX_EVERY-th data frame gets `44 <JETIBOX byte>` (0xFF: none; a
+//   new counter value: its buttons in the next 2 of them, as the module),
+//   and the receiver answers it with its screen: to the radio
+//   (MPM_TELEM_JETI, kind 1, 32 characters).
 //
 // Channels: +-100% (MPM_CHANNEL_MIN..MAX) = 1000..2000 us; slot value
 // 8 x (us - 1500) - 1, 14 bits.
@@ -60,6 +68,11 @@
 #define JETI_BIND_DWELL 15      // steps per channel at bind
 #define JETI_BIND_BOOT 5        // 0x23 frames first on each channel
 #define JETI_LQI_FRAMES 50
+#define JETI_BOX_EVERY 3     // the module: every 3rd frame (~67 ms)
+#define JETI_BOX_FRAMES 10   // the terminal closed after this many frames without its byte
+#define JETI_BOX_PRESS 2     // a press in this many JETIBOX frames
+#define JETI_BOX_PAYLOAD (JETI_DATA_PAYLOAD + 2)
+#define JETI_SCREEN_LEN 32
 #define JETI_ID_BYTE 0x58       // after the short address, as the module's
 
 // Payload bytes (after the MAC header)
@@ -87,9 +100,13 @@ static struct {
   uint16_t power;
   uint8_t lqi_frames, lqi_replies;
   uint16_t rx_on;                  // from the step's start: RX on
+  // Remote JETIBOX: open (frames with its byte lately), the last press
+  // counter, the press being sent and its frames left
+  bool box;
+  uint8_t box_idle, box_count, box_press, box_press_n;
 } _j;
 
-static uint8_t _frame[JETI_HDR + JETI_BIND_PAYLOAD];
+static uint8_t _frame[JETI_HDR + JETI_BOX_PAYLOAD];
 static uint8_t _air[JETI_TX_LEN(JETI_HDR + JETI_BIND_PAYLOAD + JETI_FCS)];
 static uint8_t _psdu[JETI_PSDU_MAX], _plain[JETI_PSDU_MAX];
 static radio_packet_t _pkt;
@@ -284,6 +301,44 @@ static uint16_t _bind_read()
   return JETI_STEP_US - elapsed;
 }
 
+// The radio's JETIBOX byte (the last frame's data): the terminal open, a
+// new press. Whether this data frame carries the JETIBOX byte
+static bool _box_frame()
+{
+  if (mpm.data_len >= 1) {
+    uint8_t d = mpm.data[0];
+    if (!_j.box) {
+      _j.box = true;
+      _j.box_count = d & 0x0F;  // a press before: not sent
+    } else if ((d & 0x0F) != _j.box_count) {
+      _j.box_count = d & 0x0F;
+      _j.box_press = d & 0xF0;
+      _j.box_press_n = JETI_BOX_PRESS;
+    }
+    _j.box_idle = 0;
+  } else if (_j.box && ++_j.box_idle >= JETI_BOX_FRAMES) {
+    _j.box = false;
+    _j.box_press_n = 0;
+  }
+  return _j.box && _j.n % JETI_BOX_EVERY == 0;
+}
+
+// A reply to the radio (MPM_TELEM_JETI): kind 0, the reply's RSSI here
+// and its bytes 2..7; with a screen, kind 1 and its 32 characters
+static void _telem_jeti(uint8_t n, int8_t rssi)
+{
+  uint8_t d[1 + JETI_SCREEN_LEN];
+  d[0] = MPM_JETI_REPLY;
+  d[1] = (uint8_t)rssi;
+  memcpy(d + 2, _plain + 2, 6);
+  mpm_telem_send(MPM_TELEM_JETI, d, 8);
+  if (n >= 9 + JETI_SCREEN_LEN && _plain[8] == 0x43) {
+    d[0] = MPM_JETI_SCREEN;
+    memcpy(d + 1, _plain + 9, JETI_SCREEN_LEN);
+    mpm_telem_send(MPM_TELEM_JETI, d, sizeof(d));
+  }
+}
+
 // Data: a frame every 2 steps on the current step's channel
 static uint16_t _data_tx()
 {
@@ -306,21 +361,33 @@ static uint16_t _data_tx()
   *p++ = (_j.n & 3) << 6;  // a 2-bit frame counter, as the module's
   *p++ = 0xB6;             // unknown, the module's 0xa7..0xc9
   *p++ = 0x37;
-  _slots(p);
-  _send(JETI_DATA_PAYLOAD);
+  p = _slots(p);
+  if (_box_frame()) {
+    *p++ = 0x44;
+    uint8_t b = 0xFF;
+    if (_j.box_press_n) {
+      b ^= _j.box_press;
+      _j.box_press_n--;
+    }
+    *p++ = b;
+  }
+  uint8_t pl = p - (_frame + JETI_HDR);
+  _send(pl);
   _j.si = (_j.si + JETI_FRAME_STEPS) % JETI_RING;
   if (mpm.disable_telem) return JETI_FRAME_STEPS * JETI_STEP_US;
   _j.st = ST_RX;
-  return _rx_on_us(JETI_DATA_PAYLOAD);
+  return _rx_on_us(pl);
 }
 
 static uint16_t _data_read()
 {
   bool got = false;
+  uint8_t n;
   while (radio_receive(&_pkt))
-    if (_reply()) {
+    if ((n = _reply())) {
       got = true;
       _telemetry(_pkt.rssi);
+      _telem_jeti(n, _pkt.rssi);
     }
   radio_rx_stop();
   _lqi(got);
