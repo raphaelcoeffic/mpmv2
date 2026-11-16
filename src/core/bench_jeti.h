@@ -35,6 +35,13 @@ typedef struct {
   uint16_t burst_at;    // 0: none
   uint16_t burst_len;
   uint8_t burst_every;
+  // Before instead of after (pre_at != 0, follow): the next module frame's
+  // SFD predicted (a frame's a PPM / step clock cycle earlier; its channel
+  // from the hop clock), every burst_every-th the burst sent pre_at us from
+  // it (negative: before) on that channel, RX back after; every prediction
+  // printed (status 99: no burst) as
+  //   @jp <t_burst> <ch> <t_pred> <seq_pred> <status>
+  int16_t pre_at;
   bool (*stop)();       // true: end the run now (the host asked), or NULL
 } jeti_rx_cfg_t;
 

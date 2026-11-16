@@ -27,6 +27,10 @@ static const int16_t _bits_offset_us[4] = {0, 2600, 500, -1200};
 
 static radio_packet_t _pkt;
 static uint8_t _burst[JETI_BURST_MAX];
+// pre_at: frames predicted from the one a cycle earlier (baysim's 22.5 ms
+// PPM against the 10 ms step clock: 4 frames, 9 steps, in module time)
+#define JETI_PRE_CYCLE_US 90003
+#define JETI_PRE_HIST 8
 static uint8_t _psdu[JETI_PSDU_MAX];
 
 static uint32_t _ch_khz(uint8_t ch) { return jeti_freq_khz(ch - 11); }
@@ -83,6 +87,12 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
   uint32_t m_ref = 0, t_bound = 0, t_reply_end = 0, t_frame = 0, t_park = micros();
   uint32_t frames = 0, module = 0, replies = 0, bad = 0, locks = 0, lost = 0, resyncs = 0;
   uint32_t restarts = 0;
+  // pre_at: the last module frames' times, the pending prediction
+  uint32_t hist[JETI_PRE_HIST] = {0};
+  uint8_t hn = 0;
+  bool pb = false, pb_tx = false;
+  uint32_t pb_t = 0, pb_pred = 0;
+  uint8_t pb_ch = 0, pb_seq = 0;
   uint32_t t_end = micros() + cfg->secs * 1000000;
   while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
     radio_poll();
@@ -148,6 +158,31 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
         t_reply_end = t_sfd + JETI_REPLY_END_US;
         reply = true;
         radio_rx_stop();
+        // The next frame: the earliest of the last ones a cycle on, 12 ms
+        // from now at least (the frames repeat with PPM and the step clock)
+        if (cfg->pre_at) {
+          uint32_t best = 0;
+          bool found = false;
+          for (int j = 0; j < JETI_PRE_HIST && j < hn; j++) {
+            uint32_t t = hist[j] + JETI_PRE_CYCLE_US;
+            int32_t ahead = (int32_t)(t - t_sfd);
+            if (ahead > 12000 && ahead < 32000 && (!found || (int32_t)(t - best) < 0)) {
+              best = t;
+              found = true;
+            }
+          }
+          if (found && locked) {
+            uint32_t k = (best - m_ref + JETI_STEP_US / 2) / JETI_STEP_US;
+            pb_ch = ring[(4 + k) % 5];
+            pb_pred = best;
+            pb_t = best + cfg->pre_at;
+            pb_seq = _psdu[2] + 1;
+            pb_tx = module % cfg->burst_every == 0;
+            pb = true;
+          }
+          hist[hn % JETI_PRE_HIST] = t_sfd;
+          hn++;
+        }
         if (cfg->burst_at && module % cfg->burst_every == 0) {
           radio_status_t st = radio_tx_start_at(_burst, cfg->burst_len, t_sfd + cfg->burst_at);
           if (st == RADIO_OK) st = radio_tx_wait();
@@ -156,6 +191,20 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
         radio_rx_start(JETI_REPLY_LEN);
       }
       _print_frame(print, t_sfd, c, got, len, dmax, off);
+    } else if (pb && !micros_before(pb_t - 400)) {
+      // The burst before the predicted frame (every burst_every-th; the
+      // others: the prediction only, status 99), then RX on its channel
+      pb = false;
+      radio_status_t st = 99;
+      if (pb_tx) {
+        radio_rx_stop();
+        radio_set_frequency(_ch_khz(pb_ch));
+        st = radio_tx_start_at(_burst, cfg->burst_len, pb_t);
+        if (st == RADIO_OK) st = radio_tx_wait();
+        c = pb_ch;
+        _rx_on(c, reply ? JETI_REPLY_LEN : cfg->frame_len);
+      }
+      print("@jp %lu %u %lu %u %d\r\n", pb_t, pb_ch, pb_pred, pb_seq, st);
     } else if (locked && !micros_before(t_bound)) {
       // Next step: its channel, unless on a frame's channel for the reply
       si = (si + 1) % 5;

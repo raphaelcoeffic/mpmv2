@@ -2026,11 +2026,13 @@ static void _cmd_jetirx(char* args)
   cfg.burst_at = _number_or(&args, 0);
   cfg.burst_len = _number_or(&args, 150);
   cfg.burst_every = _number_or(&args, 2);
+  cfg.pre_at = -(int16_t)_number_or(&args, 0);
   if (cfg.secs > 3600 || cfg.ch < 11 || cfg.ch > 26 || cfg.frame_len < 64 || follow > 3 ||
       (cfg.hw && !RADIO_IEEE) ||
-      cfg.frame_len > RADIO_MAX_PKT_LEN || cfg.burst_len > 400 || cfg.burst_every == 0) {
+      cfg.frame_len > RADIO_MAX_PKT_LEN || cfg.burst_len > 400 || cfg.burst_every == 0 ||
+      (cfg.hw && (cfg.burst_at || cfg.pre_at) && cfg.burst_len > 125)) {
     _print("@err usage: jetirx [secs] [ch 11..26] [follow: 1 follow, 2 IEEE hardware] [len] "
-           "[burst_at_us burst_len burst_every]\r\n");
+           "[burst_at_us burst_len burst_every [pre_us]]\r\n");
     return;
   }
   _job_stop();
