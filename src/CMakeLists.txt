@@ -24,6 +24,7 @@ set(mpm_sources
     mpm/protocols.c
     mpm/proto_test.c
     mpm/proto_fasst.c
+    mpm/proto_jeti.c
     mpm/multi/mpm_compat.c
     mpm/multi/telemetry.c
 )

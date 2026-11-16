@@ -58,7 +58,7 @@ target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 # protocols of the MPM v2 build, the EEPROM in RAM (eeprom_ram.c) and the host's
 # file "eeprom" (file_server_ram.c)
 add_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c core/eeprom_ram.c
-    core/file_server_ram.c ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/fasst_frame.c core/frame.c core/log.c ${mpm_sources} ${mpm_chip_sources})
+    core/file_server_ram.c ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/fasst_frame.c core/jeti_frame.c core/frame.c core/log.c ${mpm_sources} ${mpm_chip_sources})
 target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
 target_mpm(cc27-mpm_elf)
 # Another module's ID (e.g. 0x2bf3be8e, an MPM v2's): its bound receivers

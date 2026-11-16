@@ -30,6 +30,7 @@ set(firmware_sources
     core/eeprom.c
     core/file_server.c
     core/fasst_frame.c
+    core/jeti_frame.c
     core/frame.c
     drivers/led_rgb.c
     core/lfs_driver.c

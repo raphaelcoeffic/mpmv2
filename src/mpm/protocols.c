@@ -85,6 +85,9 @@ const mpm_protocol_t mpm_protocols[] = {
   {PROTO_FASST, "FASST", "\x04" "10ch" "MULT" "7ch " "FT18" "FT12", 5, MPM_OPTION_NONE, true, false,
    FASST_init, FASST_callback, 0},
 #endif
+#ifdef JETI_INO
+  {PROTO_JETI, "Jeti", 0, 0, MPM_OPTION_NONE, false, false, JETI_init, JETI_callback, 0},
+#endif
   {PROTO_TEST, "Test", "\x04" "1M  250k", 2, MPM_OPTION_RFCHAN, false, false, TEST_init, TEST_callback, 0},
 };
 // clang-format on

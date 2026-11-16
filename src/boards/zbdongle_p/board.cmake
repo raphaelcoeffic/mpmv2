@@ -46,7 +46,7 @@ add_application(bench core/main_bench.c core/bench.c core/bench_fasst.c core/ben
 # the EEPROM in RAM (eeprom_ram.c) and the host's file "eeprom"
 # (file_server_ram.c)
 add_application(firmware core/main_mpm.c ${board_dir}/mpm_port.c core/eeprom_ram.c
-    core/file_server_ram.c core/fasst_frame.c core/frame.c core/log.c core/syscalls.c
+    core/file_server_ram.c core/fasst_frame.c core/jeti_frame.c core/frame.c core/log.c core/syscalls.c
     ${mpm_sources} ${mpm_chip_sources})
 target_mpm(firmware_elf)
 
