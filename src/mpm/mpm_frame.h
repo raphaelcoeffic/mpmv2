@@ -71,10 +71,14 @@ uint8_t mpm_frame_encode(const mpm_frame_t* f, uint8_t* buf);
 // antenna's signal level); MPM_JETI_SCREEN: bytes 1-32 the receiver's
 // JETIBOX screen (2 lines of 16, 0 = space), while the radio's frames
 // carry the JETIBOX byte: buttons L D U R in bits 7-4 (1 = pressed), a
-// counter in bits 3-0 (a new value: one press)
+// counter in bits 3-0 (a new value: one press); MPM_JETI_EX: from byte 1
+// one message of a sensor on the receiver's Ext as it sent it (bit 8
+// dropped), 0x7E first: an EX packet (byte 2 0xNF, its CRC8 checked; JETI
+// Telemetry protocol 1.06) or an alarm (0x7E 0xN2 0x22|0x23 letter)
 #define MPM_TELEM_JETI 0x14
 #define MPM_JETI_REPLY 0
 #define MPM_JETI_SCREEN 1
+#define MPM_JETI_EX 2
 // MPM v2 only, on the USB link: file_server.h replies (not an MPM type)
 #define MPM_TELEM_FILE 0x40
 // MPM v2 only, on the USB link: debug log text (log.h)

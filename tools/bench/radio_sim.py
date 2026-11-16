@@ -143,6 +143,8 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
             elif sid == 0xFF:
                 break
         return out
+    elif ty == 0x14 and len(d) >= 4 and d[0] == 2:
+        return jeti_ex(d[1:])
     elif ty == 0x14 and len(d) >= 8 and d[0] == 0:
         # Jeti reply (proto_jeti.c): RSSI here, A, B (bits 15-14 01: voltage
         # 10 mV), flags, signal level
@@ -510,6 +512,50 @@ def cmd_drive(r: Radio, a):
     if run_stats or run_options:
         print_option_table(run_options, run_stats)
     return 0
+
+
+# Jeti EX (MPM_TELEM_JETI kind 2): labels and units from the text packets,
+# per (serial, id)
+JETI_EX_LABELS: dict[tuple[int, int], tuple[str, str]] = {}
+JETI_EX_SIZES = {0: 1, 1: 2, 4: 3, 5: 3, 8: 4, 9: 4}
+
+
+def jeti_ex(m: bytes) -> dict:
+    """One Ext message (0x7E first): EX data values as {label: value unit},
+    text packets remembered; alarms as {"jeti_alarm": letter}"""
+    if len(m) >= 4 and m[1] & 0x0F != 0x0F:
+        return {"jeti_alarm": chr(m[3])} if m[2] in (0x22, 0x23) else {}
+    if len(m) < 9:
+        return {}
+    kind, end = m[2] >> 6, len(m) - 1  # CRC last
+    serial = int.from_bytes(m[3:7], "little")
+    i = 8
+    if kind == 0:
+        sid, dl, ul = m[i], m[i + 1] >> 3, m[i + 1] & 7
+        text = m[i + 2:i + 2 + dl + ul].decode("latin-1")
+        JETI_EX_LABELS[(serial, sid)] = (text[:dl], text[dl:].replace("\xb0", "°"))
+        return {}
+    out = {}
+    while i < end:
+        sid, ty = m[i] >> 4, m[i] & 0x0F
+        i += 1
+        if sid == 0:  # extended identifier: the next byte
+            sid = m[i]
+            i += 1
+        n = JETI_EX_SIZES.get(ty)
+        if n is None or i + n > end:
+            break
+        raw = int.from_bytes(m[i:i + n], "little")
+        i += n
+        top = raw >> (8 * n - 8)
+        v = raw & ((1 << (8 * n - 3)) - 1)
+        if ty in (0, 1, 4, 8):
+            v = -v if top & 0x80 else v
+            dec = top >> 5 & 3
+            v = v / 10 ** dec if dec else v
+        label, unit = JETI_EX_LABELS.get((serial, sid), (f"ex{sid}", ""))
+        out[label] = f"{v}{unit}"
+    return out
 
 
 def jeti_screen(d: bytes) -> str:

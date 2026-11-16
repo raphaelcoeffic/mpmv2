@@ -52,6 +52,11 @@
 //   new counter value: its buttons in the next 2 of them, as the module),
 //   and the receiver answers it with its screen: to the radio
 //   (MPM_TELEM_JETI, kind 1, 32 characters).
+// - Sensors on the receiver's Ext: the receiver relays their bus bytes in
+//   its replies (`8x` + 2x bytes: the messages from 0x7E, the simple text's
+//   0xFE, 0 padded; one reply in 5 with a sensor sending); each EX packet
+//   (CRC8 good) or alarm to the radio as it came (MPM_TELEM_JETI, kind 2).
+//   The sensor's simple text and buttons don't travel (Duplex R6).
 //
 // Channels: +-100% (MPM_CHANNEL_MIN..MAX) = 1000..2000 us; slot value
 // 8 x (us - 1500) - 1, 14 bits.
@@ -98,6 +103,7 @@
 #define JETI_BOX_PRESS 2     // a press in this many JETIBOX frames
 #define JETI_BOX_PAYLOAD (JETI_DATA_PAYLOAD + 2)
 #define JETI_SCREEN_LEN 32
+#define JETI_EX_MAX 29          // an EX packet with its separators
 #define JETI_ID_BYTE 0x58       // after the short address, as the module's
 
 // Payload bytes (after the MAC header)
@@ -421,6 +427,40 @@ static bool _box_frame()
 
 // A reply to the radio (MPM_TELEM_JETI): kind 0, the reply's RSSI here
 // and its bytes 2..7; with a screen, kind 1 and its 32 characters
+// EX CRC8 (x^8 + x^2 + x + 1)
+static uint8_t _ex_crc(const uint8_t* p, uint8_t n)
+{
+  uint8_t c = 0;
+  while (n--) {
+    c ^= *p++;
+    for (int b = 0; b < 8; b++) c = c & 0x80 ? (uint8_t)(c << 1) ^ 0x07 : (uint8_t)(c << 1);
+  }
+  return c;
+}
+
+// Relayed Ext bus bytes: each message from 0x7E to the radio
+static void _ext(const uint8_t* p, uint8_t n)
+{
+  uint8_t d[1 + JETI_EX_MAX];
+  d[0] = MPM_JETI_EX;
+  for (uint8_t i = 0; i + 2 <= n;) {
+    if (p[i] != 0x7E) {
+      i++;
+      continue;
+    }
+    // EX: 0x7E 0xNF, length (bytes after it, the CRC's included); else
+    // 0x7E 0xNL, L bytes (alarm, expander)
+    bool ex = (p[i + 1] & 0x0F) == 0x0F;
+    uint8_t len = ex ? (i + 2 < n ? 3 + (p[i + 2] & 0x3F) : 0) : 2 + (p[i + 1] & 0x0F);
+    if (len < 3 || len > JETI_EX_MAX || i + len > n) break;
+    if (!ex || _ex_crc(p + i + 2, len - 3) == p[i + len - 1]) {
+      memcpy(d + 1, p + i, len);
+      mpm_telem_send(MPM_TELEM_JETI, d, 1 + len);
+    }
+    i += len;
+  }
+}
+
 static void _telem_jeti(uint8_t n, int8_t rssi)
 {
   uint8_t d[1 + JETI_SCREEN_LEN];
@@ -428,10 +468,22 @@ static void _telem_jeti(uint8_t n, int8_t rssi)
   d[1] = (uint8_t)rssi;
   memcpy(d + 2, _plain + 2, 6);
   mpm_telem_send(MPM_TELEM_JETI, d, 8);
-  if (n >= 9 + JETI_SCREEN_LEN && _plain[8] == 0x43) {
-    d[0] = MPM_JETI_SCREEN;
-    memcpy(d + 1, _plain + 9, JETI_SCREEN_LEN);
-    mpm_telem_send(MPM_TELEM_JETI, d, sizeof(d));
+  // The optional parts after the 8 bytes, each a tag and its bytes
+  for (uint8_t i = 8; i < n;) {
+    uint8_t tag = _plain[i++], len;
+    if (tag == 0x43) len = JETI_SCREEN_LEN;
+    else if (tag == 0x22) len = 4;
+    else if ((tag & 0xF0) == 0x80) len = 2 * (tag & 0x0F);
+    else break;
+    if (i + len > n) break;
+    if (tag == 0x43) {
+      d[0] = MPM_JETI_SCREEN;
+      memcpy(d + 1, _plain + i, JETI_SCREEN_LEN);
+      mpm_telem_send(MPM_TELEM_JETI, d, sizeof(d));
+    } else if (tag != 0x22) {
+      _ext(_plain + i, len);
+    }
+    i += len;
   }
 }
 
