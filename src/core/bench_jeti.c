@@ -18,9 +18,11 @@
 #define JETI_RESYNC_US 2500
 #define JETI_LOST_US 300000
 #define JETI_PARK_US 600000
+#define JETI_BURST_MAX 400
 static const int16_t _bits_offset_us[4] = {0, 2600, 500, -1200};
 
 static radio_packet_t _pkt;
+static uint8_t _burst[JETI_BURST_MAX];
 static uint8_t _psdu[JETI_PSDU_MAX];
 
 static uint32_t _ch_khz(uint8_t ch) { return jeti_freq_khz(ch - 11); }
@@ -53,6 +55,9 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
 {
   radio_phy_t phy;
   jeti_phy(&phy, 0);
+  // Noise: an LCG's bytes
+  uint32_t r = 12345;
+  for (int i = 0; i < JETI_BURST_MAX; i++) _burst[i] = (r = r * 1103515245u + 12345) >> 24;
   uint8_t c = cfg->ch;
   bool ok = radio_init(&phy) == RADIO_OK;
   radio_set_sync_word(JETI_SYNC, JETI_SYNC);
@@ -121,6 +126,11 @@ void jeti_rx_run(const jeti_rx_cfg_t* cfg, jeti_print_t print)
         t_reply_end = t_sfd + JETI_REPLY_END_US;
         reply = true;
         radio_rx_stop();
+        if (cfg->burst_at && module % cfg->burst_every == 0) {
+          radio_status_t st = radio_tx_start_at(_burst, cfg->burst_len, t_sfd + cfg->burst_at);
+          if (st == RADIO_OK) st = radio_tx_wait();
+          print("@jb %lu %d\r\n", t_sfd, st);
+        }
         radio_rx_start(JETI_REPLY_LEN);
       }
       _print_frame(print, t_sfd, c, got, len, dmax, off);

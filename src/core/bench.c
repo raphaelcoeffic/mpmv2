@@ -2020,9 +2020,13 @@ static void _cmd_jetirx(char* args)
   cfg.ch = _number_or(&args, 16);
   cfg.follow = _number_or(&args, 1);
   cfg.frame_len = _number_or(&args, 384);
+  cfg.burst_at = _number_or(&args, 0);
+  cfg.burst_len = _number_or(&args, 150);
+  cfg.burst_every = _number_or(&args, 2);
   if (cfg.secs > 3600 || cfg.ch < 11 || cfg.ch > 26 || cfg.frame_len < 64 ||
-      cfg.frame_len > RADIO_MAX_PKT_LEN) {
-    _print("@err usage: jetirx [secs] [ch 11..26] [follow] [len]\r\n");
+      cfg.frame_len > RADIO_MAX_PKT_LEN || cfg.burst_len > 400 || cfg.burst_every == 0) {
+    _print("@err usage: jetirx [secs] [ch 11..26] [follow] [len] [burst_at_us burst_len "
+           "burst_every]\r\n");
     return;
   }
   _job_stop();

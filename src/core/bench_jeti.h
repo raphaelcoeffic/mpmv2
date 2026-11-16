@@ -25,6 +25,12 @@ typedef struct {
   uint8_t ch;           // IEEE channel to start on (11..26)
   uint16_t frame_len;   // air bytes per module frame capture (after the sync)
   bool follow;
+  // Burst test (carrier sense): after every burst_every-th module frame, a
+  // burst_len byte burst of noise on its channel burst_at us after its SFD
+  // (then the reply listened to as usual), printed as "@jb <t_sfd> <status>"
+  uint16_t burst_at;    // 0: none
+  uint16_t burst_len;
+  uint8_t burst_every;
   bool (*stop)();       // true: end the run now (the host asked), or NULL
 } jeti_rx_cfg_t;
 
