@@ -22,9 +22,10 @@ static const uint32_t _msk[16] = {
 #define JETI_TYPE JETI_HDR  // payload byte 0, plain
 #define JETI_LIST (JETI_HDR + 5)
 #define JETI_DATA_LEN 37    // module frame with channel data (42 unbound)
-#define JETI_REPLY_LEN 200  // air bytes for a reply (17 B PSDU)
-// The receiver's reply comes 2.8 to 3.4 ms after the module frame
-#define JETI_REPLY_END_US 4000
+#define JETI_REPLY_LEN 480  // air bytes for a reply (up to ~54 B PSDU: JETIBOX text)
+// The receiver's reply comes 2.8 to 3.4 ms after the module frame, up to
+// 1.9 ms long
+#define JETI_REPLY_END_US 6000
 // The hop clock: one ring step per 10 ms; frames within -3.5..+4.7 ms of a
 // step's mean frame time, the bits of byte 5 telling where (mean offsets
 // below: bits 1 late, 3 early). Step boundaries 5.6 ms after the mean
