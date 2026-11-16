@@ -6,11 +6,18 @@
 //   id + rx_num (one receiver binding per model); the receiver's, learned
 //   at bind, saved per model (JETI_EEPROM_OFFSET). Data frames go to the
 //   receiver's address (802.15.4 broadcast if none saved).
-// - Hopping: a ring of 5 channels (IEEE 11..26; from the id, fixed), one
+// - Hopping: a ring of 5 channels (IEEE 11..26; first from the id), one
 //   step per 10 ms; the frames carry the ring rotated so the current
 //   step's channel is last, the next step's first, and byte 5 bits 5-6 the
 //   frame's place in its step (2: the middle, where ours are). One frame
 //   every 2 steps: all 5 channels in turn.
+// - Channel sweep, adaptive as the module's (doc/jeti.md, jam test): every
+//   JETI_SWEEP_FRAMES frames one slot moves to the next channel above its
+//   own not in the ring (wrapping): the one with the most frames
+//   unanswered since it moved, else the one unmoved longest (with a clean
+//   link: all 16 channels in turn). Never the current frame's slot nor the
+//   next frame's: the next frame is on a channel of both rings, for a
+//   receiver that missed the change.
 // - Bind (the receiver in pairing: bind plug in Ext at power-up, or the
 //   JETIBOX's Pairing): the receiver hops on its last transmitter's
 //   channels, which we don't know: we stay JETI_BIND_DWELL steps on each
@@ -68,6 +75,7 @@
 #define JETI_BIND_DWELL 15      // steps per channel at bind
 #define JETI_BIND_BOOT 5        // 0x23 frames first on each channel
 #define JETI_LQI_FRAMES 50
+#define JETI_SWEEP_FRAMES 12  // 240 ms (the module: a 250 ms tick)
 #define JETI_BOX_EVERY 3     // the module: every 3rd frame (~67 ms)
 #define JETI_BOX_FRAMES 10   // the terminal closed after this many frames without its byte
 #define JETI_BOX_PRESS 2     // a press in this many JETIBOX frames
@@ -94,6 +102,11 @@ static struct {
   uint16_t rx_pan, rx_short;       // the receiver's (0xFFFF: broadcast)
   uint8_t ring[JETI_RING];
   uint8_t si;                      // current step's ring slot
+  // Sweep: per slot the frames unanswered and the frame count when it
+  // moved; the slot of the last data frame
+  uint8_t miss[JETI_RING];
+  uint32_t moved[JETI_RING];
+  uint8_t tx_slot;
   uint8_t seq;
   uint32_t n;                      // frames
   uint8_t bind_ch, dwell;
@@ -301,6 +314,28 @@ static uint16_t _bind_read()
   return JETI_STEP_US - elapsed;
 }
 
+// One slot to the next free channel above its own
+static void _sweep()
+{
+  uint8_t next = (_j.si + JETI_FRAME_STEPS) % JETI_RING, best = 0xFF;
+  for (uint8_t j = 0; j < JETI_RING; j++) {
+    if (j == _j.si || j == next) continue;
+    if (best == 0xFF || _j.miss[j] > _j.miss[best] ||
+        (_j.miss[j] == _j.miss[best] && _j.moved[j] < _j.moved[best]))
+      best = j;
+  }
+  uint8_t c = _j.ring[best];
+  for (;;) {
+    c = (c + 1) % JETI_CHANNELS;
+    uint8_t j;
+    for (j = 0; j < JETI_RING && _j.ring[j] != c; j++) {}
+    if (j == JETI_RING) break;
+  }
+  _j.ring[best] = c;
+  _j.miss[best] = 0;
+  _j.moved[best] = _j.n;
+}
+
 // The radio's JETIBOX byte (the last frame's data): the terminal open, a
 // new press. Whether this data frame carries the JETIBOX byte
 static bool _box_frame()
@@ -348,6 +383,8 @@ static uint16_t _data_tx()
     return JETI_STEP_US;
   }
   _update_power();
+  if (_j.n % JETI_SWEEP_FRAMES == 0) _sweep();
+  _j.tx_slot = _j.si;
   radio_set_frequency_start(jeti_freq_khz(_j.ring[_j.si]));
   jeti_header(_frame, _j.seq++, _j.rx_pan, _j.rx_short);
   uint8_t* p = _frame + JETI_HDR;
@@ -391,6 +428,7 @@ static uint16_t _data_read()
     }
   radio_rx_stop();
   _lqi(got);
+  if (!got && _j.miss[_j.tx_slot] < 0xFF) _j.miss[_j.tx_slot]++;
   _j.st = ST_TX;
   return JETI_FRAME_STEPS * JETI_STEP_US - JETI_READ_US;
 }
