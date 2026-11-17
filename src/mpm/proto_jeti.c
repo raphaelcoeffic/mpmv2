@@ -397,6 +397,12 @@ static void _save_rx()
   eeprom_write_byte(a + 3, _j.rx_short >> 8);
 }
 
+// The bind frames' PAN / destination: 802.15.4 broadcast; the DS-14 uses
+// PAN 0 / dst 0
+#ifndef JETI_BIND_DST
+#define JETI_BIND_DST 0xFFFF
+#endif
+
 // Bind: a frame every step on the bind channel, all 5 steps there
 static uint16_t _bind_tx()
 {
@@ -408,7 +414,7 @@ static uint16_t _bind_tx()
   radio_set_frequency_start(jeti_freq_khz(_j.bind_ch));
   uint8_t ring[JETI_RING];
   memset(ring, _j.bind_ch, sizeof(ring));
-  jeti_header(_frame, _j.seq++, 0xFFFF, 0xFFFF);
+  jeti_header(_frame, _j.seq++, JETI_BIND_DST, JETI_BIND_DST);
   uint8_t* p = _frame + JETI_HDR;
   bool boot = _j.dwell < JETI_BIND_BOOT;
   *p++ = JETI_TYPE_TX;
