@@ -179,7 +179,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "4";
+const PAGE_VERSION = "5";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -639,8 +639,11 @@ async function afterConnect() {
 }
 
 // fasstrx and tfhssrx that stop on request (the page's needs; the sfhss and
-// kyosho presets are older)
+// kyosho presets are older), and the bench's "sniffer=" at least
+// SNIFFER_VERSION (2: tfhssrx keeps up with SR's 1.2 ms frames)
+const SNIFFER_VERSION = 2;
 async function sniffingWorks() {
+  if (Number((bench.info.match(/sniffer=(\d+)/) || [])[1] || 0) < SNIFFER_VERSION) return false;
   try {
     await benchCmd("fasstrx 0 0 1");
     await link.writeText("\n");
