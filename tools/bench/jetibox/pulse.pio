@@ -1,0 +1,17 @@
+; Servo pulse meter: counts the high time of each pulse on the pin, 2 PIO
+; cycles per count (the clock divider sets 8 counts per us), pushes the count
+; at the falling edge
+.program pulse
+.wrap_target
+    wait 0 pin 0
+    wait 1 pin 0
+    mov x, ~null
+high:
+    jmp pin still
+    jmp done
+still:
+    jmp x-- high
+done:
+    mov isr, ~x
+    push noblock
+.wrap

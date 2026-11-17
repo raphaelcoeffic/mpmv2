@@ -1,0 +1,14 @@
+; EX Bus RX on the pulse pin: UART 8N1, 8 PIO cycles per bit; pushes the
+; byte in bits 24..31; a low stop bit waits for the line to go idle again
+.program exbus_rx
+start:
+    wait 0 pin 0
+    set x, 7 [10]           ; to the middle of data bit 0 (1.5 bits)
+bitloop:
+    in pins, 1
+    jmp x-- bitloop [6]
+    jmp pin good
+    wait 1 pin 0
+    jmp start
+good:
+    push noblock

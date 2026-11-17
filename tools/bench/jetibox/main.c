@@ -20,6 +20,26 @@
  *   idle on|off          answer 0xF0 (nothing pressed) or stay silent
  *                        when no button is set (default on)
  *   screen               the last screen again
+ *   pulse                pulses on PULSE_PIN (a servo output) each
+ *                        second: "@p <t_us> <n> <avg> <min> <max>" in us
+ *                        (1/8 us counts), nothing while there are none
+ *   exbus                the same pin as Jeti EX Bus (UART 8N1, EXBUS_BAUD):
+ *                        channel packets (3E/3B 01 len id 31 ..., CRC16)
+ *                        each second: "@x <t_us> <ok> <bad> <ch1> .. <chN>"
+ *                        in us, the last packet's values; "exbus all":
+ *                        every packet, "exbus sec": back to once a second;
+ *                        "exbus sensor on|off": answer the receiver's
+ *                        requests as an EX Bus sensor (the EX packets of
+ *                        "sensor ex", the JETIBOX screen of "sensor"), each
+ *                        second "@r <t_us> <ex req> <jetibox req> <last
+ *                        button>"
+ *                        and once a second "@a <bytes>" (an answer sent)
+ *                        and "@e <bytes>" (a 3B packet read back with a
+ *                        bad CRC: our own answer, garbled on the bus)
+ *                        The answer goes out "exbus delay <us>" (500)
+ *                        after the request; the pin is pulled up while
+ *                        the sensor is on (the receiver releases the bus
+ *                        after its request and has no pull-up of its own)
  *   sensor off|text|ex   be a sensor (the bus master) instead: every
  *                        SENSOR_GAP_US after its packet, a simple text
  *                        packet (text), preceded by an EX packet (ex: data,
@@ -38,6 +58,9 @@
 #include "hardware/pio.h"
 #include "jbox_rx.pio.h"
 #include "jbox_tx.pio.h"
+#include "pulse.pio.h"
+#include "exbus_rx.pio.h"
+#include "exbus_tx.pio.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "pico/util/queue.h"
@@ -125,23 +148,25 @@ static uint8_t _crc8(const uint8_t* p, int n)
 
 // One EX packet after 0x7E 0x9F into p (from the length byte, CRC
 // included): its length. k: the packet count
-static int _ex(uint8_t* p, uint32_t k)
+// bus: the EX Bus sensor, its own serial number and name
+static int _ex(uint8_t* p, uint32_t k, bool bus)
 {
   static const char* desc[3] = {"MPM test", "Volt", "Temp"};
   static const char* unit[3] = {"", "V", "\xB0" "C"};
+  uint16_t serial = SENSOR_SERIAL + bus;
   int n = 1;
-  p[n++] = SENSOR_SERIAL & 0xFF;
-  p[n++] = SENSOR_SERIAL >> 8;
+  p[n++] = serial & 0xFF;
+  p[n++] = serial >> 8;
   p[n++] = SENSOR_DEVICE & 0xFF;
   p[n++] = SENSOR_DEVICE >> 8;
   p[n++] = 0;
   uint8_t type;
   if (k % 4 == 0) {
-    uint8_t id = k / 4 % 3, dl = strlen(desc[id]), ul = strlen(unit[id]);
+    uint8_t id = k / 4 % 3, dl = bus && !id ? 9 : strlen(desc[id]), ul = strlen(unit[id]);
     type = 0;
     p[n++] = id;
     p[n++] = dl << 3 | ul;
-    memcpy(p + n, desc[id], dl);
+    memcpy(p + n, bus && !id ? "MPM exbus" : desc[id], dl);
     n += dl;
     memcpy(p + n, unit[id], ul);
     n += ul;
@@ -173,7 +198,7 @@ static void _sensor_packet(uint32_t k)
 {
   if (_sensor == 2) {
     uint8_t ex[32];
-    int n = _ex(ex, k);
+    int n = _ex(ex, k, false);
     _tx_word_blocking(0x07E);
     _tx_word_blocking(0x19F);
     for (int i = 0; i < n; i++) _tx_word_blocking(0x100 | ex[i]);
@@ -261,6 +286,202 @@ static void _core1(void)
   }
 }
 
+// Servo pulse meter on PULSE_PIN (pio1): 8 counts per us
+static PIO _ppio = pio1;
+static uint _sm_p;
+
+static void _pulse_init(void)
+{
+  uint offset = pio_add_program(_ppio, &pulse_program);
+  _sm_p = pio_claim_unused_sm(_ppio, true);
+  pio_sm_config c = pulse_program_get_default_config(offset);
+  sm_config_set_in_pins(&c, PULSE_PIN);
+  sm_config_set_jmp_pin(&c, PULSE_PIN);
+  sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / 16e6f);
+  pio_gpio_init(_ppio, PULSE_PIN);
+  gpio_pull_down(PULSE_PIN);
+  pio_sm_set_consecutive_pindirs(_ppio, _sm_p, PULSE_PIN, 1, false);
+  pio_sm_init(_ppio, _sm_p, offset, &c);
+  pio_sm_set_enabled(_ppio, _sm_p, true);
+}
+
+#define EXBUS_BAUD 125000
+static uint _sm_x, _sm_xt;
+static bool _exbus_all, _exbus_sensor;
+static uint32_t _exbus_delay = 500;  // us from the request's end to our answer
+static int _ex(uint8_t* p, uint32_t k, bool bus);
+
+static void _exbus_init(void)
+{
+  uint offset = pio_add_program(_ppio, &exbus_rx_program);
+  _sm_x = pio_claim_unused_sm(_ppio, true);
+  pio_sm_config c = exbus_rx_program_get_default_config(offset);
+  sm_config_set_in_pins(&c, PULSE_PIN);
+  sm_config_set_jmp_pin(&c, PULSE_PIN);
+  sm_config_set_in_shift(&c, true, false, 32);
+  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+  sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (8.0f * EXBUS_BAUD));
+  pio_sm_init(_ppio, _sm_x, offset, &c);
+  pio_sm_set_enabled(_ppio, _sm_x, true);
+
+  offset = pio_add_program(_ppio, &exbus_tx_program);
+  _sm_xt = pio_claim_unused_sm(_ppio, true);
+  c = exbus_tx_program_get_default_config(offset);
+  sm_config_set_out_pins(&c, PULSE_PIN, 1);
+  sm_config_set_set_pins(&c, PULSE_PIN, 1);
+  sm_config_set_sideset_pins(&c, PULSE_PIN);
+  sm_config_set_out_shift(&c, true, false, 32);
+  sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+  sm_config_set_clkdiv(&c, (float)clock_get_hz(clk_sys) / (8.0f * EXBUS_BAUD));
+  pio_sm_set_pins_with_mask(_ppio, _sm_xt, 1u << PULSE_PIN, 1u << PULSE_PIN);
+  pio_sm_set_pindirs_with_mask(_ppio, _sm_xt, 0, 1u << PULSE_PIN);
+  pio_sm_init(_ppio, _sm_xt, offset, &c);
+  pio_sm_set_enabled(_ppio, _sm_xt, true);
+}
+
+static uint16_t _crc16(const uint8_t* d, int n)
+{
+  uint16_t c = 0;
+  while (n--) {
+    c ^= *d++;
+    for (int k = 0; k < 8; k++) c = c & 1 ? (c >> 1) ^ 0x8408 : c >> 1;
+  }
+  return c;
+}
+
+static uint32_t _x_ex, _x_jb, _x_btn, _x_k;
+
+// The answer to a request: 3B 01 len id <data id> <data len> data CRC16
+static void _exbus_answer(const uint8_t* req)
+{
+  uint8_t a[64];
+  int n = 6;
+  if (req[4] == 0x3A) {
+    a[n++] = 0x9F;
+    n += _ex(a + n, _x_k++, true);
+    _x_ex++;
+  } else if (req[4] == 0x3B) {
+    _x_btn = req[5] ? req[6] : 0x1FF;
+    _x_jb++;
+    char text[TEXT_LEN + 1];
+    snprintf(text, sizeof(text), "MPM EXBus sens  btn %02lx  %4.1fV ",
+             (unsigned long)(_x_btn & 0xFF), (120 + _x_k % 16) / 10.0);
+    memcpy(a + n, text, TEXT_LEN);
+    n += TEXT_LEN;
+  } else {
+    return;
+  }
+  a[0] = 0x3B;
+  a[1] = 0x01;
+  a[2] = n + 2;
+  a[3] = req[3];
+  a[4] = req[4];
+  a[5] = n - 6;
+  uint16_t c = _crc16(a, n);
+  a[n++] = c & 0xFF;
+  a[n++] = c >> 8;
+  if (_exbus_delay) busy_wait_us_32(_exbus_delay);
+  for (int i = 0; i < n; i++) pio_sm_put_blocking(_ppio, _sm_xt, a[i]);
+  static uint32_t t_dump;
+  if (time_us_32() - t_dump > 1000000) {
+    t_dump = time_us_32();
+    char out[8 + 3 * 64], *q = out;
+    q += sprintf(q, "@a");
+    for (int i = 0; i < n; i++) q += sprintf(q, " %02x", a[i]);
+    puts(out);
+  }
+}
+
+static void _exbus_poll(void)
+{
+  static uint8_t b[128];
+  static int n;
+  static uint32_t ok, bad, t0;
+  static uint16_t ch[24];
+  static int nch;
+  while (!pio_sm_is_rx_fifo_empty(_ppio, _sm_x)) {
+    uint8_t v = pio_sm_get(_ppio, _sm_x) >> 24;
+    if (n < (int)sizeof(b)) b[n++] = v;
+    // Scan: a header with a whole packet, else drop a byte
+    while (n >= 3) {
+      int len = b[2];
+      if ((b[0] != 0x3E && b[0] != 0x3B && b[0] != 0x3D) || (b[1] != 0x01 && b[1] != 0x03) || len < 8 ||
+          len > 64) {
+        memmove(b, b + 1, --n);
+        continue;
+      }
+      if (n < len) break;
+      if (_crc16(b, len - 2) == (b[len - 2] | b[len - 1] << 8)) {
+        if (b[0] == 0x3D && b[1] == 0x01 && _exbus_sensor) _exbus_answer(b);
+        if (b[0] == 0x3D && !_exbus_sensor) b[4] == 0x3A ? _x_ex++ : _x_jb++;
+        if (b[0] != 0x3D && b[4] == 0x31) {
+          ok++;
+          nch = b[5] / 2;
+          if (nch > 24) nch = 24;
+          for (int k = 0; k < nch; k++) ch[k] = b[6 + 2 * k] | b[7 + 2 * k] << 8;
+          if (_exbus_all) {
+            char out[32 + 24 * 10], *p = out;
+            p += sprintf(p, "@x %lu 1 0", (unsigned long)time_us_32());
+            for (int k = 0; k < nch; k++) p += sprintf(p, " %.3f", ch[k] / 8.0);
+            puts(out);
+          }
+        }
+        n -= len;
+        memmove(b, b + len, n);
+      } else {
+        bad++;
+        static uint32_t t_dump;
+        if (b[0] == 0x3B && time_us_32() - t_dump > 1000000) {
+          t_dump = time_us_32();
+          char out[8 + 3 * 64], *q = out;
+          q += sprintf(q, "@e");
+          for (int i = 0; i < len; i++) q += sprintf(q, " %02x", b[i]);
+          puts(out);
+        }
+        memmove(b, b + 1, --n);
+      }
+    }
+  }
+  uint32_t t = time_us_32();
+  if (t - t0 < 1000000) return;
+  t0 = t;
+  if (_x_ex || _x_jb)
+    printf("@r %lu %lu %lu %03lx\n", (unsigned long)t, (unsigned long)_x_ex, (unsigned long)_x_jb,
+           (unsigned long)_x_btn);
+  _x_ex = _x_jb = 0;
+  if (!ok && !bad) return;
+  if (_exbus_all) {
+    if (bad) printf("@x %lu 0 %lu\n", (unsigned long)t, (unsigned long)bad);
+    ok = bad = 0;
+    return;
+  }
+  char out[32 + 24 * 10], *p = out;
+  p += sprintf(p, "@x %lu %lu %lu", (unsigned long)t, (unsigned long)ok, (unsigned long)bad);
+  for (int k = 0; k < nch; k++) p += sprintf(p, " %.3f", ch[k] / 8.0);
+  puts(out);
+  ok = bad = 0;
+}
+
+static void _pulse_poll(void)
+{
+  static uint32_t n, sum, mn = UINT32_MAX, mx, t0;
+  while (!pio_sm_is_rx_fifo_empty(_ppio, _sm_p)) {
+    uint32_t v = pio_sm_get(_ppio, _sm_p);
+    n++;
+    sum += v;
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+  }
+  uint32_t t = time_us_32();
+  if (t - t0 < 1000000) return;
+  t0 = t;
+  if (n)
+    printf("@p %lu %lu %.3f %.3f %.3f\n", (unsigned long)t, (unsigned long)n,
+           sum / 8.0 / n, mn / 8.0, mx / 8.0);
+  n = sum = mx = 0;
+  mn = UINT32_MAX;
+}
+
 static void _command(char* line)
 {
   char* arg = strtok(line, " ");
@@ -292,6 +513,25 @@ static void _command(char* line)
     printf("@ok sensor %s\n", _sensor == 2 ? "ex" : _sensor ? "text" : "off");
   } else if (!strcmp(arg, "screen")) {
     puts("@ok screen");
+  } else if (!strcmp(arg, "exbus")) {
+    char* v = strtok(NULL, " ");
+    if (v && !strcmp(v, "delay")) {
+      char* w = strtok(NULL, " ");
+      if (w) _exbus_delay = atoi(w);
+    } else if (v && !strcmp(v, "sensor")) {
+      char* w = strtok(NULL, " ");
+      _exbus_sensor = !w || strcmp(w, "off");
+      // The receiver releases the bus after its request: idle high (no
+      // pull-up of its own), else our start bit has no edge
+      if (_exbus_sensor) gpio_pull_up(PULSE_PIN);
+      else gpio_pull_down(PULSE_PIN);
+    } else if (v) {
+      _exbus_all = !strcmp(v, "all");
+    }
+    printf("@ok exbus GP%u %u %s sensor %s delay %lu\n", PULSE_PIN, EXBUS_BAUD,
+           _exbus_all ? "all" : "sec", _exbus_sensor ? "on" : "off", (unsigned long)_exbus_delay);
+  } else if (!strcmp(arg, "pulse")) {
+    printf("@ok pulse GP%u\n", PULSE_PIN);
   } else {
     puts("@err commands: k <l|d|u|r...> [n], idle on|off, screen, sensor off|text|ex");
   }
@@ -317,6 +557,8 @@ int main(void)
   queue_init(&_screens, sizeof(screen_t), 64);
   _line_init();
   multicore_launch_core1(_core1);
+  _pulse_init();
+  _exbus_init();
   char cmd[64];
   int len = 0;
   screen_t last = {0};
@@ -339,6 +581,8 @@ int main(void)
       }
       last = s;
     }
+    _pulse_poll();
+    _exbus_poll();
     int c = getchar_timeout_us(0);
     if (c == '\r' || c == '\n') {
       cmd[len] = 0;

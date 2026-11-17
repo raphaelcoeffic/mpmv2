@@ -1,0 +1,15 @@
+; EX Bus TX on the pulse pin: UART 8N1, 8 PIO cycles per bit. The pin is
+; driven (side-set pindirs) from the start bit to the end of the stop bit,
+; released while waiting for the next byte: the line is the receiver's
+; outside our answers
+.program exbus_tx
+.side_set 1 opt pindirs
+.wrap_target
+    pull block          side 0
+    set pins, 0 [6]     side 1  ; start bit (with the next instruction: 8 cycles)
+    set x, 7
+bitloop:
+    out pins, 1
+    jmp x-- bitloop [6]
+    set pins, 1 [7]             ; stop bit
+.wrap
