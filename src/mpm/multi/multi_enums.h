@@ -129,6 +129,13 @@ enum Flysky
 	V912	= 3,
 	CX20	= 4,
 };
+enum FUTABA
+{
+	SFHSS		= 0,
+	TFHSS		= 1,	// T-FHSS Surface
+	TFHSS_SR	= 2,	// T-FHSS SR (Super Response)
+	TFHSS_AIR	= 3,	// T-FHSS Air
+};
 enum Height
 {
 	FZ410	= 0,

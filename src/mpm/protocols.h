@@ -50,8 +50,8 @@ void PROPEL_init();
 uint16_t PROPEL_callback();
 #endif
 #ifdef FUTABA_CC2500_INO
-void SFHSS_init();
-uint16_t SFHSS_callback();
+void FUTABA_init();
+uint16_t FUTABA_callback();
 #endif
 #ifdef DSM_CYRF6936_INO
 void DSM_init();

@@ -37,8 +37,8 @@ const mpm_protocol_t mpm_protocols[] = {
    MPM_OPTION_NONE, false, false, MJXQ_init, MJXQ_callback, end_bind_counter},
 #endif
 #ifdef FUTABA_CC2500_INO
-  {PROTO_FUTABA, "Futaba", "\x05" "SFHSS", 1, MPM_OPTION_RFTUNE, true, true, SFHSS_init, SFHSS_callback,
-   0},
+  {PROTO_FUTABA, "Futaba", "\x06" "SFHSS\0" "TFHSS\0" "TFH-SR" "TF-Air", 4, MPM_OPTION_RFTUNE, true, true,
+   FUTABA_init, FUTABA_callback, 0},
 #endif
 #ifdef FRSKYV_CC2500_INO
   {PROTO_FRSKYV, "FrSky V", 0, 0, MPM_OPTION_RFTUNE, false, false, FRSKYV_init, FRSKYV_callback, 0},

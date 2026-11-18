@@ -290,6 +290,7 @@ enum MultiPacketTypes {
   MULTI_TELEMETRY_CONFIG = 16,
   MULTI_TELEMETRY_PROTO = 17,
   MULTI_TELEMETRY_RLINK = 18,
+  MULTI_TELEMETRY_FUTABA = 19,  // mpm-v2: not upstream yet (MPM_TELEM_FUTABA)
 };
 #define boolean bool
 
