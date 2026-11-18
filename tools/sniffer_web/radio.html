@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Futaba Test Radio</title>
+<meta name="description" content="Drive Futaba FASST, FASSTest and S-FHSS receivers from the browser with a Sonoff ZBDongle-P, with receiver telemetry">
+<!--
+  A test radio for Futaba receivers: flashes the MPM port (build-zbp
+  zbdongle-p-firmware.bin, published next to this page as FIRMWARE) on a
+  Sonoff ZBDongle-P through the CC2652P's ROM boot loader, then plays the
+  radio's side of the MULTI-Module serial link (100000 baud 8E2, a frame every
+  7 ms, as tools/bench/radio_sim.py): protocol FASST (110: 10ch, MULT, 7ch,
+  FT18, FT12) or Futaba (21: S-FHSS), bind, power, failsafe, channels from
+  sliders. Telemetry: the module's status frames (type 0x01) and the FASSTest
+  replies (type 0x13, proto_fasst.c): receiver voltage, link quality, S.BUS2
+  sensor slots decoded as the sensor type picked per slot.
+
+  Stop = no more frames: the MPM stops its protocol 70 ms after the last
+  frame (MPM_INPUT_TIMEOUT_MS), the receiver goes to its failsafe. Frames
+  are clocked by a Web Worker timer (not throttled in a background tab as
+  page timers are).
+-->
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+  --accent: #1f6feb; --accent-text: #ffffff; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+  --code: #eef1f5; --track: #e3e7ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b; --card: #1b2029; --text: #e4e8ef; --muted: #98a2b3; --line: #2c3340;
+    --accent: #4c8dff; --accent-text: #0b0e13; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --code: #232a35; --track: #2c3340;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b; --card: #1b2029; --text: #e4e8ef; --muted: #98a2b3; --line: #2c3340;
+  --accent: #4c8dff; --accent-text: #0b0e13; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+  --code: #232a35; --track: #2c3340;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+h2 { font-size: 1.15rem; margin: 0 0 8px; }
+p { margin: 8px 0; }
+.sub { color: var(--muted); margin-bottom: 20px; }
+section {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; margin: 16px 0;
+}
+section.off { opacity: .5; pointer-events: none; }
+.num {
+  display: inline-grid; place-items: center; width: 1.6em; height: 1.6em; border-radius: 50%;
+  background: var(--accent); color: var(--accent-text); font-size: .85em; margin-right: 6px;
+}
+button {
+  font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent);
+  background: var(--accent); color: var(--accent-text); cursor: pointer;
+}
+button.plain { background: transparent; color: var(--accent); }
+button.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+input, select {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 8px;
+}
+select { width: 100%; }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: .95em; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+@media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.status { margin-top: 10px; font-size: .95em; color: var(--muted); white-space: pre-wrap; }
+.status.ok { color: var(--ok); } .status.bad { color: var(--bad); } .status.warn { color: var(--warn); }
+.hint { color: var(--muted); font-size: .95em; }
+.warnbox { border-left: 3px solid var(--warn); padding: 4px 10px; margin: 10px 0; font-size: .95em; }
+progress { width: 100%; height: 10px; margin-top: 10px; }
+details { margin-top: 12px; color: var(--muted); font-size: .95em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+a { color: var(--accent); }
+
+.chans { display: grid; gap: 6px; margin-top: 8px; }
+.ch { display: grid; grid-template-columns: 3.2em 1fr 7.5em; gap: 8px; align-items: center;
+      font-variant-numeric: tabular-nums; }
+.ch b { font-size: .9em; }
+.ch input[type=range] { width: 100%; padding: 0; accent-color: var(--accent); }
+.ch .val { font-size: .9em; color: var(--muted); text-align: right; }
+.check { display: flex; gap: 6px; align-items: center; font-weight: normal; margin: 0; }
+.check input { width: auto; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; }
+@media (max-width: 520px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.tile .k { color: var(--muted); font-size: .8em; }
+.tile .v { font-size: 1.3em; font-variant-numeric: tabular-nums; }
+.bars { display: inline-flex; gap: 3px; align-items: flex-end; height: 1em; }
+.bars i { width: 6px; background: var(--track); border-radius: 1px; }
+.bars i.on { background: var(--ok); }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 6px; border-top: 1px solid var(--line); font-size: .95em; }
+th { color: var(--muted); font-weight: 600; border-top: 0; }
+td select { padding: 2px 4px; }
+.flags { font-size: .95em; }
+</style>
+</head>
+<body>
+<main>
+<h1>Futaba Test Radio</h1>
+<p class="sub">Drives a Futaba receiver (FASST, FASSTest, S-FHSS) from this page, with a Sonoff
+ZBDongle-P USB stick, and shows its telemetry. For bench tests: servos and sensors, no
+model to fly. Recording a transmitter instead? Use the <a href="index.html">sniffer page</a>.</p>
+
+<section id="unsupported" hidden>
+<h2>This browser can't talk to USB serial ports</h2>
+<p>Open this page in <b>Chrome</b>, <b>Edge</b> or <b>Firefox 151 or newer</b> on a computer
+(Windows, macOS or Linux). Phones and Safari don't work.</p>
+</section>
+
+<section id="s-connect">
+<h2><span class="num">1</span>Plug in the stick</h2>
+<p>Plug the Sonoff <b>ZBDongle-P</b> (CC2652P) into a USB port, then pick it in the list
+(<i>CP2102N USB to UART</i>, or a COM port on Windows).</p>
+<div class="row"><button id="b-connect">Choose the stick</button></div>
+<div class="status" id="st-connect"></div>
+</section>
+
+<section id="s-flash" class="off">
+<h2><span class="num">2</span>Load the radio firmware</h2>
+<p>Replaces what is on the stick (Zigbee, or the sniffer) with the test radio, about 20
+seconds. Skip it if the page says the radio is already there. The sniffer page loads the
+sniffer back; Sonoff's <a href="https://dongle.sonoff.tech/sonoff-dongle-flasher/" target="_blank" rel="noopener">web flasher</a>
+puts Zigbee back.</p>
+<div class="row"><button id="b-flash">Load the radio</button></div>
+<progress id="pr-flash" value="0" max="1" hidden></progress>
+<div class="status" id="st-flash"></div>
+</section>
+
+<section id="s-model" class="off">
+<h2><span class="num">3</span>System and receiver</h2>
+<div class="grid2">
+  <div>
+    <label for="f-system">System</label>
+    <select id="f-system"></select>
+  </div>
+  <div>
+    <label for="f-rx">Receiver number (another ID per number)</label>
+    <select id="f-rx"></select>
+  </div>
+  <div>
+    <label for="f-power">Power</label>
+    <select id="f-power">
+      <option value="low" selected>Low (bench, ~1 m)</option>
+      <option value="full">Full</option>
+      <option value="range">Range check (very low)</option>
+    </select>
+  </div>
+  <div>
+    <label>&nbsp;</label>
+    <div class="row" style="margin-top:0">
+      <button id="b-run">Start</button>
+      <button id="b-bind" class="plain">Bind</button>
+    </div>
+  </div>
+</div>
+<p class="hint" id="bind-hint"></p>
+<div class="warnbox"><b>Props off, motors unplugged.</b> The stick sends as long as this page
+runs and the tab is open. Stop (or closing the page) cuts the signal: the receiver goes to its
+failsafe, so set one (step 5) if an ESC is connected.</div>
+<div class="status" id="st-run"></div>
+</section>
+
+<section id="s-sticks" class="off">
+<h2><span class="num">4</span>Channels</h2>
+<p class="hint">±100 % = 1020..2020 µs, centre 1520 µs (Futaba). Double-click a slider to centre it.
+Channels 9-16 stay centred.</p>
+<div class="chans" id="chans"></div>
+<div class="row">
+  <button class="plain" id="b-centre">Centre all (CH3 low)</button>
+  <label class="check"><input type="checkbox" id="f-sweep"> Move CH1, CH2, CH4 slowly</label>
+</div>
+</section>
+
+<section id="s-fs" class="off">
+<h2><span class="num">5</span>Failsafe</h2>
+<p class="hint">What the receiver does when the signal is lost. Sent to the receiver every
+second while running (FASST 7ch: CH3 only). A FASST receiver forgets it when switched off.</p>
+<div class="row">
+  <button class="plain" id="b-fs-hold">All channels: hold</button>
+  <button class="plain" id="b-fs-set">Failsafe = current positions</button>
+</div>
+<div class="status" id="st-fs">All channels hold their last position.</div>
+</section>
+
+<section id="s-telem" class="off">
+<h2><span class="num">6</span>Telemetry</h2>
+<div class="flags" id="t-flags">Not running.</div>
+<div class="tiles">
+  <div class="tile"><div class="k">Receiver battery</div><div class="v" id="t-volt">–</div></div>
+  <div class="tile"><div class="k">Link quality</div><div class="v" id="t-lq">–</div></div>
+  <div class="tile"><div class="k">Receiver signal at the stick</div><div class="v" id="t-rssi">–</div></div>
+  <div class="tile"><div class="k">Replies per second</div><div class="v" id="t-rate">–</div></div>
+</div>
+<p class="hint" id="t-none"></p>
+<table id="t-sensors" hidden>
+  <thead><tr><th>Slot</th><th>Sensor</th><th>Value</th><th>Raw</th></tr></thead>
+  <tbody></tbody>
+</table>
+<p class="hint" id="t-sensor-hint" hidden>S.BUS2 sensors show up by slot as the receiver
+reports them. Pick the sensor type per slot as in a Futaba radio's sensor menu (a voltage
+or current sensor uses several slots in a row: pick it on the first one).</p>
+</section>
+</main>
+
+<script>
+"use strict";
+
+const FIRMWARE = "futaba-radio-zbdongle-p.bin";
+const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
+const MPM_BAUD = 100000;
+const FRAME_MS = 7;
+const FS_EVERY = 143;            // frames between failsafe frames: about 1 s
+const PROTO_IDLE = 2;            // not in the MPM v2 build: status frames, no RF
+const CH_CENTER = 1024, CH_STEP = 8.2;  // MPM: 204..1844 = ±100 %
+const STATUS_FLAGS = ["input", "serial", "valid", "binding", "wait_bind", "failsafe", "ch_map", "buf_low"];
+
+const SYSTEMS = {
+  ft18:  { name: "FASSTest 18CH (\"14CH\" on a T14SG)", proto: 110, sub: 3, telem: "ft18", chans: 16,
+           bind: "Press Bind, then switch the receiver on (within a few seconds) close to the stick. " +
+                 "It links by itself; if not, hold its Link button while switching it on. Bind ends when the receiver answers." },
+  ft12:  { name: "FASSTest 12CH", proto: 110, sub: 4, telem: "ft12", chans: 10,
+           bind: "Press Bind, then switch the receiver on close to the stick (its Link button held if it " +
+                 "doesn't link by itself). The receiver must be set to 12CH mode." },
+  fasst: { name: "FASST 10ch (multi-channel receivers)", proto: 110, sub: 0, telem: null, chans: 10,
+           bind: "No bind on the stick's side: Start, then hold the receiver's Link (ID SET) button for 2 s " +
+                 "with the receiver on, until its LED turns green." },
+  mult:  { name: "FASST MULT (16 channels)", proto: 110, sub: 1, telem: null, chans: 16,
+           bind: "No bind on the stick's side: Start, then hold the receiver's Link (ID SET) button for 2 s " +
+                 "with the receiver on, until its LED turns green." },
+  fasst7: { name: "FASST 7CH (R6106HF, R617FS...)", proto: 110, sub: 2, telem: null, chans: 7,
+           bind: "No bind on the stick's side: Start, then hold the receiver's Link (ID SET) button for 2 s " +
+                 "with the receiver on, until its LED turns green." },
+  sfhss: { name: "S-FHSS", proto: 21, sub: 0, telem: null, chans: 8,
+           bind: "Press Bind, then hold the receiver's Link button with the receiver on until its LED stays on. " +
+                 "The stick binds for a few seconds." },
+};
+
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function status(id, text, kind = "") {
+  const el = $(id);
+  el.textContent = text;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+function enable(id, on) { $(id).classList.toggle("off", !on); }
+function load(key, def) { try { const v = localStorage.getItem(key); return v === null ? def : JSON.parse(v); } catch (e) { return def; } }
+function save(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {} }
+
+if (!("serial" in navigator)) {
+  $("unsupported").hidden = false;
+  enable("s-connect", false);
+}
+
+// ---------------------------------------------------------------------------
+// Serial link: bytes, or a byte handler (the MPM's telemetry)
+
+class Link {
+  constructor(port) { this.port = port; this.chunks = []; this.len = 0; this.wake = null; this.onBytes = null; this.isOpen = false; }
+
+  async open(opts) {
+    await this.port.open({ bufferSize: 1 << 16, ...opts });
+    this.isOpen = true;
+    this.reader = this.port.readable.getReader();
+    this.writer = this.port.writable.getWriter();
+    this.chunks = [];
+    this.len = 0;
+    this.loop = this._loop();
+  }
+
+  async close() {
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    try { await this.reader.cancel(); } catch (e) {}
+    await this.loop;
+    this.reader.releaseLock();
+    this.writer.releaseLock();
+    await this.port.close();
+  }
+
+  async _loop() {
+    try {
+      for (;;) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (this.onBytes) this.onBytes(value);
+        else { this.chunks.push(value); this.len += value.length; this._wake(); }
+      }
+    } catch (e) { this.error = e; }
+    this._wake();
+  }
+
+  _wake() { const w = this.wake; this.wake = null; if (w) w(); }
+  flush() { this.chunks = []; this.len = 0; }
+
+  async read(n, ms) {
+    const end = performance.now() + ms;
+    while (this.len < n) {
+      const left = end - performance.now();
+      if (left <= 0 || !this.isOpen) return null;
+      await new Promise((r) => { this.wake = r; setTimeout(r, left); });
+    }
+    const out = new Uint8Array(n);
+    let k = 0;
+    while (k < n) {
+      const c = this.chunks[0];
+      const take = Math.min(c.length, n - k);
+      out.set(c.subarray(0, take), k);
+      k += take;
+      if (take === c.length) this.chunks.shift();
+      else this.chunks[0] = c.subarray(take);
+    }
+    this.len -= n;
+    return out;
+  }
+
+  write(bytes) { return this.writer.write(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)); }
+  signals(s) { return this.port.setSignals(s); }
+}
+
+// ---------------------------------------------------------------------------
+// CC2652 ROM boot loader (TI SWCU185; as the sniffer page and tools/rom_flash.py)
+
+const DOWNLOAD = 0x21, GET_STATUS = 0x23, SEND_DATA = 0x24, RESET = 0x25;
+const SECTOR_ERASE = 0x26, CRC32 = 0x27, GET_CHIP_ID = 0x28, MEMORY_READ = 0x2a, BANK_ERASE = 0x2c;
+const BL_STATUS = { 0x40: "success", 0x41: "unknown command", 0x42: "invalid command",
+                    0x43: "invalid address", 0x44: "flash failure" };
+const SECTOR = 0x2000, FLASH_SIZE_REG = 0x4003002c, DATA_MAX = 252;
+const be32 = (x) => [x >>> 24, (x >>> 16) & 0xff, (x >>> 8) & 0xff, x & 0xff];
+
+class Bl {
+  constructor(link) { this.link = link; }
+
+  // ZBDongle-P: RTS resets, DTR holds BOOT (DIO15) low
+  async enter() {
+    const l = this.link;
+    await l.signals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(100);
+    await l.signals({ dataTerminalReady: true, requestToSend: false });
+    await sleep(500);
+    await l.signals({ dataTerminalReady: false });
+    await sleep(50);
+    l.flush();
+    await l.write([0x55, 0x55]);
+    const r = await l.read(2, 1000);
+    if (!r || r[0] !== 0x00 || r[1] !== 0xcc) throw new Error("no answer from the stick's boot loader");
+  }
+
+  async leave() {
+    await this.link.signals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(50);
+    await this.link.signals({ requestToSend: false });
+  }
+
+  async _ack(what) {
+    for (;;) {
+      const b = await this.link.read(1, 2000);
+      if (!b) throw new Error(`${what}: no answer`);
+      if (b[0] === 0x00) continue;
+      if (b[0] === 0xcc) return;
+      throw new Error(`${what}: ${b[0] === 0x33 ? "refused" : "bad answer"}`);
+    }
+  }
+
+  async cmd(c, payload = [], what = "") {
+    const data = [c, ...payload];
+    const sum = data.reduce((a, b) => a + b, 0) & 0xff;
+    await this.link.write([data.length + 2, sum, ...data]);
+    await this._ack(what || `command 0x${c.toString(16)}`);
+  }
+
+  async response() {
+    let n;
+    do {
+      n = await this.link.read(1, 2000);
+      if (!n) throw new Error("no response");
+    } while (n[0] === 0);
+    const head = await this.link.read(1, 1000);
+    const data = await this.link.read(n[0] - 2, 1000);
+    if (!head || !data || (data.reduce((a, b) => a + b, 0) & 0xff) !== head[0]) {
+      await this.link.write([0x00, 0x33]);
+      throw new Error("bad response");
+    }
+    await this.link.write([0x00, 0xcc]);
+    return data;
+  }
+
+  async status() { await this.cmd(GET_STATUS); return (await this.response())[0]; }
+  async check(what) {
+    const s = await this.status();
+    if (s !== 0x40) throw new Error(`${what}: ${BL_STATUS[s] || "status 0x" + s.toString(16)}`);
+  }
+  async chipId() { await this.cmd(GET_CHIP_ID); return await this.response(); }
+  async read32(addr) {
+    await this.cmd(MEMORY_READ, [...be32(addr), 1, 1]);
+    const r = await this.response();
+    return (r[0] | (r[1] << 8) | (r[2] << 16) | (r[3] << 24)) >>> 0;
+  }
+  async crc32(addr, size) {
+    await this.cmd(CRC32, [...be32(addr), ...be32(size), 0, 0, 0, 0]);
+    const r = await this.response();
+    return ((r[0] << 24) | (r[1] << 16) | (r[2] << 8) | r[3]) >>> 0;
+  }
+  async eraseAll(sectors) {
+    await this.cmd(BANK_ERASE, [], "erase");
+    if ((await this.status()) === 0x40) return;
+    for (let s = 0; s < sectors; s++) {
+      await this.cmd(SECTOR_ERASE, be32(s * SECTOR), "erase");
+      await this.check("erase");
+    }
+  }
+  async write(addr, data, progress) {
+    await this.cmd(DOWNLOAD, [...be32(addr), ...be32(data.length)], "write");
+    await this.check(`write 0x${addr.toString(16)}`);
+    for (let off = 0; off < data.length; off += DATA_MAX) {
+      const part = data.subarray(off, off + DATA_MAX);
+      await this.cmd(SEND_DATA, Array.from(part), "write");
+      await this.check(`write 0x${(addr + off).toString(16)}`);
+      progress(part.length);
+    }
+  }
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(data) {
+  let c = 0xffffffff;
+  for (const b of data) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// Per sector, the data without the erased words at both ends; CCFG last
+function ranges(img, flashSize) {
+  const out = [];
+  for (let s = 0; s < flashSize; s += SECTOR) {
+    let a = -1, b = -1;
+    for (let i = s; i < s + SECTOR; i += 4) {
+      if (img[i] !== 0xff || img[i + 1] !== 0xff || img[i + 2] !== 0xff || img[i + 3] !== 0xff) {
+        if (a < 0) a = i;
+        b = i + 4;
+      }
+    }
+    if (a >= 0) out.push([a, img.subarray(a, b)]);
+  }
+  const last = flashSize - SECTOR;
+  return [...out.filter((r) => r[0] < last), ...out.filter((r) => r[0] >= last)];
+}
+
+// ---------------------------------------------------------------------------
+// MULTI-Module serial frames (EdgeTX pulses/multi.cpp; radio_sim.py encode())
+
+function encodeFrame(f) {
+  const b = new Uint8Array(27);
+  const p = f.proto;
+  b[0] = 0x54 | (f.failsafe ? 0x02 : 0) | (p & 0x20 ? 0 : 0x01);
+  b[1] = (p & 0x1f) | (f.bind ? 0x80 : 0) | (f.range ? 0x20 : 0);
+  b[2] = (f.rx & 0x0f) | ((f.sub & 7) << 4) | (f.low ? 0x80 : 0);
+  b[3] = f.option & 0xff;
+  for (let i = 0; i < 16; i++) {
+    const v = f.ch[i] & 0x7ff;
+    for (let k = 0; k < 11; k++) {
+      if ((v >> k) & 1) {
+        const bit = 11 * i + k;
+        b[4 + (bit >> 3)] |= 1 << (bit & 7);
+      }
+    }
+  }
+  b[26] = (p & 0xc0) | (f.rx & 0x30) | 0x08;
+  return b;
+}
+
+// "MP" type len data
+let rxBuf = new Uint8Array(0);
+function onBytes(chunk) {
+  const nb = new Uint8Array(rxBuf.length + chunk.length);
+  nb.set(rxBuf);
+  nb.set(chunk, rxBuf.length);
+  rxBuf = nb;
+  for (;;) {
+    let i = 0;
+    while (i + 1 < rxBuf.length && !(rxBuf[i] === 0x4d && rxBuf[i + 1] === 0x50)) i++;
+    if (i) rxBuf = rxBuf.slice(i);
+    if (rxBuf.length < 4 || rxBuf.length < 4 + rxBuf[3]) break;
+    const type = rxBuf[2], data = rxBuf.slice(4, 4 + rxBuf[3]);
+    rxBuf = rxBuf.slice(4 + rxBuf[3]);
+    onTelemetry(type, data);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The port
+
+let port = null, link = null, mode = null;  // "bl" or "mpm"
+let lastStatus = null, statusWaiters = [];
+
+async function closeLink() {
+  stopFrames();
+  if (link) await link.close();
+  link = null;
+  mode = null;
+}
+
+// The MPM link: frames of the idle protocol until it reports its status
+async function openMpm() {
+  if (mode === "mpm") return true;
+  await closeLink();
+  link = new Link(port);
+  link.onBytes = onBytes;
+  await link.open({ baudRate: MPM_BAUD, parity: "even", stopBits: 2 });
+  mode = "mpm";
+  await link.signals({ dataTerminalReady: false, requestToSend: false });
+  await sleep(400);
+  lastStatus = null;
+  idleFrames = true;
+  startFrames();
+  const ok = await waitStatus(1500);
+  if (!ok) stopFrames();
+  return ok;
+}
+
+function waitStatus(ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), ms);
+    statusWaiters.push(() => { clearTimeout(t); resolve(true); });
+  });
+}
+
+$("b-connect").onclick = async () => {
+  try {
+    port = await navigator.serial.requestPort({ filters: [CP2102N] });
+  } catch (e) {
+    return;
+  }
+  enable("s-flash", true);
+  status("st-connect", "Checking the stick...");
+  try {
+    if (await openMpm()) {
+      const v = lastStatus ? lastStatus.version : "?";
+      status("st-connect", `Stick ready, the test radio is on it (MPM ${v}).`, "ok");
+      status("st-flash", "Already loaded, you can skip this.", "ok");
+      ready();
+    } else {
+      await closeLink();
+      status("st-connect", "Stick found. Next: load the radio firmware (step 2).", "ok");
+    }
+  } catch (e) {
+    status("st-connect", "Can't open the stick: " + e.message +
+      "\nClose other programs using it (or the sniffer page), unplug it, plug it in again and reload this page.", "bad");
+  }
+};
+
+$("b-flash").onclick = async () => {
+  const btn = $("b-flash"), pr = $("pr-flash");
+  btn.disabled = true;
+  pr.hidden = false;
+  pr.value = 0;
+  try {
+    status("st-flash", "Downloading the firmware...");
+    const resp = await fetch(FIRMWARE, { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`can't download ${FIRMWARE} (${resp.status})`);
+    const img = new Uint8Array(await resp.arrayBuffer());
+
+    status("st-flash", "Starting the stick's boot loader...");
+    await closeLink();
+    let bl;
+    for (const baud of [460800, 115200]) {
+      try {
+        await closeLink();
+        link = new Link(port);
+        await link.open({ baudRate: baud });
+        mode = "bl";
+        bl = new Bl(link);
+        await bl.enter();
+        break;
+      } catch (e) {
+        bl = null;
+        if (baud === 115200) throw e;
+      }
+    }
+    await bl.chipId();
+    const sectors = (await bl.read32(FLASH_SIZE_REG)) & 0xff;
+    const flashSize = sectors * SECTOR;
+    if (img.length !== flashSize)
+      throw new Error(`this stick has ${flashSize / 1024} KB of flash, the firmware is for the ` +
+                      `ZBDongle-P (${img.length / 1024} KB): is it a ZBDongle-P?`);
+    const todo = ranges(img, flashSize);
+    const total = todo.reduce((a, r) => a + r[1].length, 0);
+    status("st-flash", "Erasing...");
+    await bl.eraseAll(sectors);
+    let done = 0;
+    pr.max = total;
+    for (const [addr, data] of todo) {
+      await bl.write(addr, data, (n) => {
+        done += n;
+        pr.value = done;
+        status("st-flash", `Writing ${Math.round((100 * done) / total)} %`);
+      });
+    }
+    status("st-flash", "Checking...");
+    for (const [addr, data] of todo) {
+      if ((await bl.crc32(addr, data.length)) !== crc32(data))
+        throw new Error(`check failed at 0x${addr.toString(16)}: try again`);
+    }
+    await bl.cmd(RESET);
+    await bl.leave();
+    await sleep(500);
+    if (!(await openMpm())) throw new Error("written, but the radio doesn't answer: unplug the stick, plug it in and reload");
+    status("st-flash", "Test radio loaded and running.", "ok");
+    status("st-connect", "Stick ready.", "ok");
+    ready();
+  } catch (e) {
+    status("st-flash", "Failed: " + e.message, "bad");
+    try { await closeLink(); } catch (e2) {}
+  }
+  btn.disabled = false;
+};
+
+// ---------------------------------------------------------------------------
+// Frames: one every 7 ms from a worker's timer
+
+let ticker = null, idleFrames = true, running = false, binding = false, bindStart = 0;
+let frameCount = 0, writing = false, sweepT0 = 0;
+let fsValues = null;  // null: hold (2047 each); else the 16 failsafe values
+
+function startFrames() {
+  if (ticker) return;
+  const src = `let t = null; onmessage = (e) => { clearInterval(t); if (e.data) t = setInterval(() => postMessage(0), ${FRAME_MS}); };`;
+  ticker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  ticker.onmessage = tick;
+  ticker.postMessage(1);
+}
+
+function stopFrames() {
+  if (!ticker) return;
+  ticker.postMessage(0);
+  ticker.terminate();
+  ticker = null;
+}
+
+function frameNow() {
+  const sys = SYSTEMS[$("f-system").value];
+  const pw = $("f-power").value;
+  const base = {
+    proto: idleFrames ? PROTO_IDLE : sys.proto, sub: idleFrames ? 0 : sys.sub,
+    rx: +$("f-rx").value, option: 0, bind: !idleFrames && binding,
+    range: pw === "range", low: pw !== "full", ch: channelValues(),
+  };
+  if (!idleFrames && frameCount % FS_EVERY === 0 && !binding)
+    return { ...base, failsafe: true, ch: fsValues || new Array(16).fill(2047) };
+  return base;
+}
+
+function tick() {
+  if (!link || mode !== "mpm" || writing) return;
+  const f = encodeFrame(frameNow());
+  frameCount++;
+  writing = true;
+  link.write(f).catch(() => {}).finally(() => { writing = false; });
+  if (!idleFrames && $("f-sweep").checked && frameCount % 3 === 0) sweepStep();
+}
+
+// ---------------------------------------------------------------------------
+// Steps 3-5
+
+function ready() {
+  for (const id of ["s-model", "s-sticks", "s-fs", "s-telem"]) enable(id, true);
+  showRun();
+}
+
+for (const [k, s] of Object.entries(SYSTEMS)) {
+  const o = document.createElement("option");
+  o.value = k;
+  o.textContent = s.name;
+  $("f-system").append(o);
+}
+for (let i = 0; i < 16; i++) {
+  const o = document.createElement("option");
+  o.value = i;
+  o.textContent = i;
+  $("f-rx").append(o);
+}
+$("f-system").value = load("radio.system", "ft18");
+$("f-rx").value = load("radio.rx", 0);
+$("f-power").value = load("radio.power", "low");
+
+function showHint() {
+  const s = SYSTEMS[$("f-system").value];
+  $("bind-hint").textContent = "To bind: " + s.bind;
+  $("b-bind").hidden = s.proto === 110 && !s.telem;
+  $("t-none").textContent = s.telem ? "" : "This system has no telemetry: only the stick's status shows here.";
+  for (let i = 0; i < chanEls.length; i++) chanEls[i].row.style.opacity = i < s.chans ? 1 : 0.4;
+}
+
+$("f-system").onchange = () => {
+  save("radio.system", $("f-system").value);
+  resetTelemetry();
+  showHint();
+  if (running) restartProtocol();
+};
+$("f-rx").onchange = () => { save("radio.rx", +$("f-rx").value); if (running) restartProtocol(); };
+$("f-power").onchange = () => save("radio.power", $("f-power").value);
+
+// A new protocol or ID: a few idle frames, so the module starts it afresh
+async function restartProtocol() {
+  idleFrames = true;
+  binding = false;
+  await sleep(100);
+  if (running) idleFrames = false;
+  showRun();
+}
+
+$("b-run").onclick = async () => {
+  if (running) {
+    running = false;
+    binding = false;
+    idleFrames = true;
+    stopFrames();
+    status("st-run", "Stopped: the stick sends nothing, the receiver is in failsafe.", "");
+    resetTelemetry();
+  } else {
+    if (mode !== "mpm" && !(await openMpm())) {
+      status("st-run", "The stick doesn't answer: unplug it, plug it in and reload the page.", "bad");
+      return;
+    }
+    running = true;
+    idleFrames = false;
+    frameCount = 0;
+    startFrames();
+  }
+  showRun();
+};
+
+$("b-bind").onclick = async () => {
+  if (!running) $("b-run").onclick();
+  await sleep(50);
+  binding = true;
+  bindStart = performance.now();
+  showRun();
+};
+
+function showRun() {
+  $("b-run").textContent = running ? "Stop" : "Start";
+  $("b-run").className = running ? "stop" : "";
+  $("b-bind").disabled = binding;
+  $("b-bind").textContent = binding ? "Binding..." : "Bind";
+  if (running && !binding) {
+    const s = SYSTEMS[$("f-system").value];
+    status("st-run", `Sending ${s.name}, receiver number ${$("f-rx").value}.`, "ok");
+  } else if (binding) {
+    status("st-run", "Binding: switch the receiver on now (see above).", "warn");
+  }
+}
+
+// The bind flag stays set until the module says its bind is over (as EdgeTX)
+function checkBind(flags) {
+  if (!binding) return;
+  const t = performance.now() - bindStart;
+  if ((t > 1000 && !flags.includes("binding")) || t > 30000) {
+    binding = false;
+    showRun();
+    status("st-run", t > 30000 ? "Bind stopped after 30 s: no receiver answered." :
+      "Bind over" + (SYSTEMS[$("f-system").value].telem ? ": the receiver answered." : "."), t > 30000 ? "warn" : "ok");
+  }
+}
+
+// Channels
+const chanEls = [];
+const NAMES = ["Aileron", "Elevator", "Throttle", "Rudder"];
+for (let i = 0; i < 8; i++) {
+  const row = document.createElement("div");
+  row.className = "ch";
+  row.innerHTML = `<b title="${NAMES[i] || ""}">CH${i + 1}</b><input type="range" min="-125" max="125" step="1" aria-label="Channel ${i + 1}"><span class="val"></span>`;
+  const input = row.querySelector("input"), val = row.querySelector(".val");
+  input.value = i === 2 ? -100 : 0;
+  input.oninput = () => showChan(i);
+  input.ondblclick = () => { input.value = 0; showChan(i); };
+  $("chans").append(row);
+  chanEls.push({ row, input, val });
+  showChan(i);
+}
+function showChan(i) {
+  const p = +chanEls[i].input.value;
+  chanEls[i].val.textContent = `${p > 0 ? "+" : ""}${p} % ${Math.round(1520 + 5 * p)} µs`;
+}
+function channelValues() {
+  const ch = new Array(16).fill(CH_CENTER);
+  // Clamped to the 11 bits as EdgeTX does (±125 % is ±1025: one past each end)
+  chanEls.forEach((c, i) => { ch[i] = Math.min(2047, Math.max(0, Math.round(CH_CENTER + CH_STEP * +c.input.value))); });
+  return ch;
+}
+$("b-centre").onclick = () => chanEls.forEach((c, i) => { c.input.value = i === 2 ? -100 : 0; showChan(i); });
+$("f-sweep").onchange = () => { sweepT0 = performance.now(); };
+function sweepStep() {
+  const t = (performance.now() - sweepT0) / 1000;
+  [0, 1, 3].forEach((i, k) => {
+    chanEls[i].input.value = Math.round(100 * Math.sin(2 * Math.PI * (t / 6 - k / 3)));
+    showChan(i);
+  });
+}
+
+// Failsafe
+$("b-fs-hold").onclick = () => {
+  fsValues = null;
+  status("st-fs", "All channels hold their last position.");
+};
+$("b-fs-set").onclick = () => {
+  fsValues = channelValues();
+  const desc = chanEls.map((c, i) => `CH${i + 1} ${c.input.value} %`).join(", ");
+  status("st-fs", "Failsafe set to: " + desc + ". Sent within a second; check it by pressing Stop.", "ok");
+};
+
+// ---------------------------------------------------------------------------
+// Telemetry
+
+// S.BUS2 sensor types: how many slots, value from the slots' data bytes
+// (as received: tools/bench/sbus2mon/sbus2.py)
+const SENSORS = {
+  raw:     { name: "–", slots: 1 },
+  temp:    { name: "Temperature (SBS-01T)", slots: 1, dec: (s) => `${((s[0][0] | s[0][1] << 8) & 0x7fff) - 100} °C` },
+  temp125: { name: "Temperature (SBS-01TE)", slots: 1, dec: (s) => `${((s[0][0] << 8 | s[0][1]) & 0x3fff)} °C` },
+  rpm:     { name: "RPM (SBS-01RM)", slots: 1, dec: (s) => `${(s[0][0] | s[0][1] << 8) * 6} rpm` },
+  volt:    { name: "Voltage (SBS-01V)", slots: 2,
+             dec: (s) => `${(((s[0][0] << 8 | s[0][1]) & 0x1fff) / 10).toFixed(1)} V, ` +
+                         `${(((s[1][0] << 8 | s[1][1]) & 0x1fff) / 10).toFixed(1)} V` },
+  curr:    { name: "Current (SBS-01C)", slots: 3,
+             dec: (s) => `${(((s[0][0] << 8 | s[0][1]) & 0x3fff) / 100).toFixed(2)} A, ` +
+                         `${((s[1][0] << 8 | s[1][1]) / 100).toFixed(2)} V, ${s[2][0] << 8 | s[2][1]} mAh` },
+};
+let slotTypes = load("radio.slots", {});
+let slots = {};        // slot -> [b0, b1]
+let replies = [], telem = {};
+
+function resetTelemetry() {
+  slots = {};
+  replies = [];
+  telem = {};
+  $("t-volt").textContent = $("t-lq").textContent = $("t-rssi").textContent = $("t-rate").textContent = "–";
+  renderSensors();
+}
+
+function onTelemetry(type, d) {
+  if (type === 0x01 && d.length >= 5) {
+    const flags = STATUS_FLAGS.filter((n, i) => (d[0] >> i) & 1);
+    lastStatus = { flags, version: `${d[1]}.${d[2]}.${d[3]}.${d[4]}` };
+    statusWaiters.splice(0).forEach((w) => w());
+    showFlags(flags);
+    checkBind(flags);
+  } else if (type === 0x13 && d.length >= 4) {
+    futaba(d);
+  }
+}
+
+function showFlags(flags) {
+  let t;
+  if (!running) t = "Not running.";
+  else if (!flags.includes("input")) t = "The stick isn't getting the page's frames (tab in the background?).";
+  else if (!flags.includes("valid")) t = "The stick doesn't know this system.";
+  else if (flags.includes("binding")) t = "Stick: binding.";
+  else t = "Stick: sending." + (flags.includes("failsafe") ? " Failsafe supported." : "");
+  $("t-flags").textContent = t;
+}
+
+// FASSTest replies (proto_fasst.c): page (12CH: 0x80), RSSI here (signed
+// dBm), the data bytes: 18CH 8 slots x 2 (page p = slots 8p..8p+7, slot 0
+// the receiver's voltage and link quality), 12CH voltage + link quality %
+function futaba(d) {
+  const now = performance.now();
+  replies.push(now);
+  while (replies.length && now - replies[0] > 1000) replies.shift();
+  $("t-rate").textContent = replies.length;
+  const rssi = d[1] > 127 ? d[1] - 256 : d[1];
+  $("t-rssi").textContent = `${rssi} dBm`;
+  if (d[0] & 0x80) {
+    if (!(d[2] & 4)) $("t-volt").textContent = `${(d[3] / 10).toFixed(1)} V`;
+    $("t-lq").textContent = `${d[4]} %`;
+    return;
+  }
+  const page = d[0] & 3;
+  for (let i = 0; i < 8 && 3 + 2 * i < d.length; i++) {
+    const s = 8 * page + i, b = [d[2 + 2 * i], d[3 + 2 * i]];
+    if (s === 0) {
+      const q = b[0] >> 6;
+      $("t-lq").innerHTML = `<span class="bars">${[1, 2, 3].map((k) =>
+        `<i class="${q >= k ? "on" : ""}" style="height:${30 + 23 * k}%"></i>`).join("")}</span> ${q}/3`;
+      if (!(b[0] & 4)) $("t-volt").textContent = `${(b[1] / 10).toFixed(1)} V`;
+      continue;
+    }
+    if (b[0] || b[1] || slots[s]) slots[s] = b;
+  }
+  renderSensors();
+}
+
+let renderPending = false;
+function renderSensors() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => {
+    renderPending = false;
+    const tbody = $("t-sensors").querySelector("tbody");
+    const keys = Object.keys(slots).map(Number).sort((a, b) => a - b);
+    $("t-sensors").hidden = $("t-sensor-hint").hidden = !keys.length;
+    // Rows by slot; a multi-slot sensor covers the next ones
+    const rows = [];
+    for (let k = 0, skip = -1; k < keys.length; k++) {
+      const s = keys[k];
+      if (s <= skip) continue;
+      const ty = SENSORS[slotTypes[s]] ? slotTypes[s] : "raw";
+      const n = SENSORS[ty].slots;
+      skip = s + n - 1;
+      const parts = [];
+      for (let j = 0; j < n; j++) parts.push(slots[s + j] || [0, 0]);
+      rows.push({ s, ty, n, parts });
+    }
+    // Keep the selects alive (one row element per slot)
+    const have = new Map([...tbody.children].map((tr) => [+tr.dataset.slot, tr]));
+    for (const tr of have.values()) if (!rows.find((r) => r.s === +tr.dataset.slot)) tr.remove();
+    for (const r of rows) {
+      let tr = have.get(r.s);
+      if (!tr) {
+        tr = document.createElement("tr");
+        tr.dataset.slot = r.s;
+        const opts = Object.entries(SENSORS).map(([k, v]) => `<option value="${k}">${v.name}</option>`).join("");
+        tr.innerHTML = `<td></td><td><select aria-label="Sensor in slot ${r.s}">${opts}</select></td><td></td><td></td>`;
+        const sel = tr.querySelector("select");
+        sel.onchange = () => {
+          slotTypes[r.s] = sel.value;
+          save("radio.slots", slotTypes);
+          renderSensors();
+        };
+        const before = [...tbody.children].find((x) => +x.dataset.slot > r.s);
+        tbody.insertBefore(tr, before || null);
+      }
+      tr.cells[0].textContent = r.n > 1 ? `${r.s}-${r.s + r.n - 1}` : r.s;
+      tr.querySelector("select").value = r.ty;
+      const dec = SENSORS[r.ty].dec;
+      tr.cells[2].textContent = dec ? dec(r.parts) : "";
+      tr.cells[3].textContent = r.parts.map((p) => p.map((x) => x.toString(16).padStart(2, "0")).join(" ")).join(" | ");
+    }
+  });
+}
+
+addEventListener("pagehide", () => { stopFrames(); });
+showHint();
+</script>
+</body>
+</html>

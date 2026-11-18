@@ -65,7 +65,10 @@ if (EXISTS ${CMAKE_SOURCE_DIR}/tools/sniffer_web/index.html)
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tools/sniffer_web/index.html ${web_dir}/
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/zbdongle-p-bench.bin
                 ${web_dir}/fasst-sniffer-zbdongle-p.bin
-        DEPENDS bench
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/tools/sniffer_web/radio.html ${web_dir}/
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/zbdongle-p-firmware.bin
+                ${web_dir}/futaba-radio-zbdongle-p.bin
+        DEPENDS bench firmware
         VERBATIM
     )
 endif()
