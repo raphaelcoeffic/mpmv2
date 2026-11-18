@@ -1818,15 +1818,25 @@ static radio_status_t _tfhss_channel(uint8_t n)
 // Futaba T-FHSS test TX for tfhssrx (tfhss.h): our guess of the timing, not
 // the real thing. One servo packet (type) per hop on channel n, reps packets
 // 700 us apart, hops period_us apart along a row (255: the 16-channel
-// list); ID 12345678, x 5A, b5..b8 01..04 as the loopback reference
+// list); ID 12345678, x 5A, b5..b8 01..04 as the loopback reference.
+// air = 1: T-FHSS Air frames instead (tfhss.h; type ignored): servo frames
+// (ch1 sweeping, the channel halves in turn), plain link frames on the list
+// (row 255); TX ID 123456789, x 5A
+static void _cmd_tfhss_air(uint32_t secs, uint32_t row, uint32_t period, uint32_t reps);
+
 static void _cmd_tfhss(char* args)
 {
   uint32_t secs = _number_or(&args, 10), row = _number_or(&args, 8);
   uint32_t period = _number_or(&args, 4000), type = _number_or(&args, 0);
-  uint32_t reps = _number_or(&args, 1);
+  uint32_t reps = _number_or(&args, 1), is_air = _number_or(&args, 0);
   if (secs == 0 || secs > 600 || (row >= TFHSS_ROWS && row != TFHSS_ROW_LIST) || period < 1000 ||
-      period > 100000 || type >= TFHSS_TYPE_REPLY || reps == 0 || reps > 2 || reps * 700 > period) {
-    _print("@err usage: tfhss [secs] [row] [period_us] [type] [reps]\r\n");
+      period > 100000 || type >= TFHSS_TYPE_REPLY || reps == 0 || reps > 2 ||
+      reps * (is_air ? 1600 : 700) > period || is_air > 1) {
+    _print("@err usage: tfhss [secs] [row] [period_us] [type] [reps] [air]\r\n");
+    return;
+  }
+  if (is_air) {
+    _cmd_tfhss_air(secs, row, period, reps);
     return;
   }
   if (!_load_preset("tfhss")) return;
@@ -1857,6 +1867,63 @@ static void _cmd_tfhss(char* args)
       uint16_t len = frame_tx_data(&_frame, pkt, sizeof(pkt), air[r]);
       if (!micros_before(t - 200)) late++;
       if (!len || radio_tx_start_at(air[r], len, t + 700 * r) != RADIO_OK) errors++;
+    }
+    t += period;
+  }
+  if (radio_tx_wait() != RADIO_OK) errors++;
+  _printf("@ok tfhss hops=%lu late=%lu errors=%lu\r\n", h, late, errors);
+  if (!_apply_phy()) _report_radio_error("radio init");
+}
+
+static void _cmd_tfhss_air(uint32_t secs, uint32_t row, uint32_t period, uint32_t reps)
+{
+  if (!_load_preset("tfhssair")) return;
+  _printf("@ok tfhss secs=%lu row=%lu period=%lu air=1 reps=%lu\r\n", secs, row, period, reps);
+  // TX ID 123456789 = 075BCD15, little-endian on air
+  const uint8_t id[4] = {0x15, 0xCD, 0x5B, 0x07}, x = 0x5A;
+  uint8_t key[TFHSS_AIR_DATA_LEN] = {0}, plain[TFHSS_AIR_DATA_LEN];
+  for (int i = 1; i < TFHSS_AIR_DATA_LEN; i++) {
+    int m = (i - 1) % 6;
+    key[i] = m < 4 ? id[m] : x;  // n at 6 and 12 per packet
+  }
+  bool link = row == TFHSS_ROW_LIST;
+  uint8_t pkt[TFHSS_AIR_LEN], air[2][RADIO_MAX_PKT_LEN];
+  int16_t ch1 = 640, sweep = 8;
+  uint32_t hops = secs * 1000000 / period, late = 0, errors = 0, h = 0;
+  uint32_t t = micros() + 2000;
+  for (; h < hops && !_host_stop(); h++) {
+    uint8_t n = tfhss_channel(row, h % (link ? 16 : TFHSS_CHANNELS));
+    _channel = 5 * (n - 1);
+    if (radio_set_frequency_start(_ch_khz(_channel) + _trim_khz) != RADIO_OK) errors++;
+    memset(plain, 0, sizeof(plain));
+    if (link) {
+      plain[0] = 0xF8;
+      memcpy(plain + 1, id, 4);
+      plain[5] = x;
+      plain[6] = n;
+      tfhss_air_packet(pkt, plain, (const uint8_t[TFHSS_AIR_DATA_LEN]){0});
+    } else {
+      // 9 slots of 11 bits (us - 880), LSB first: ch1..6 / ch11..16, ch7, ch8, ch9 / ch10
+      bool half = h & 1;
+      if (ch1 + sweep > 1140 || ch1 + sweep < 140) sweep = -sweep;
+      ch1 += sweep;
+      for (int i = 0, bit = 0; i < 9; i++) {
+        uint16_t v = i == 0 && !half ? ch1 : 640;
+        for (int j = 0; j < 11; j++, bit++)
+          if (v >> j & 1) plain[1 + bit / 8] |= 1 << (bit % 8);
+      }
+      plain[0] = row << 3 | ((h & 7) == 0 ? 0x04 : 0);
+      if (half) {
+        plain[13] |= 0x08;
+        plain[14] = 0x3F;
+      }
+      key[6] = key[12] = n;
+      tfhss_air_packet(pkt, plain, key);
+    }
+    for (uint32_t r = 0; r < reps; r++) {
+      uint16_t len = frame_tx_data(&_frame, pkt, sizeof(pkt), air[r]);
+      if (!micros_before(t - 200)) late++;
+      if (!len || radio_tx_start_at(air[r], len, t + 1600 * r) != RADIO_OK) errors++;
     }
     t += period;
   }
