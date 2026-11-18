@@ -7,11 +7,14 @@
 loader (STM32duino, "Maple 003", 1eaf:0003), nothing written.
 
 The boot loader stays there at every power up when it sees a USB host (D-,
-PA11, low), external 5V or not. Its DFU code (STM32duino-bootloader dfu.c)
-sets the "just uploaded" boot flag at the first DFU_DNLOAD with data and
-copies that data to flash only at the next DFU_GETSTATUS. So: DNLOAD of one
-byte on alt 2 (0x8002000), then a USB reset: the chip resets and the boot
-loader starts the firmware at once. The bench firmware then shows up as
+PA11, low), external 5V or not. Boot loaders with DFU_DETACH (~/Src/StmDualBoot
+dfu-detach, on the bench 4-in-1 since 2026-11-18) start the firmware on that
+request. The others stall it when idle (then DFU_CLRSTATUS) or take it
+without doing anything after a download; their DFU code
+(STM32duino-bootloader dfu.c) sets the "just uploaded" boot flag at the first
+DFU_DNLOAD with data and copies that data to flash only at the next
+DFU_GETSTATUS. So for them: DNLOAD of one byte on alt 2 (0x8002000), then a
+USB reset: the chip resets and the boot loader starts the firmware at once. The bench firmware then shows up as
 "Maple" (1eaf:0004). Same as multi_flash.py --method start in the MULTI
 repository (cmake/), kept here so the bench does not need it.
 
@@ -26,7 +29,7 @@ import sys
 import time
 
 VID, PID_DFU = 0x1EAF, 0x0003
-DFU_DNLOAD = 1
+DFU_DETACH, DFU_DNLOAD, DFU_CLRSTATUS = 0, 1, 4
 
 
 def libusb():
@@ -60,6 +63,12 @@ def main() -> int:
     ctx = ctypes.c_void_p()
     if lib.libusb_init(ctypes.byref(ctx)) < 0:
         sys.exit("libusb_init failed")
+    def present():
+        h = lib.libusb_open_device_with_vid_pid(ctx, VID, PID_DFU)
+        if h:
+            lib.libusb_close(h)
+        return bool(h)
+
     try:
         h = lib.libusb_open_device_with_vid_pid(ctx, VID, PID_DFU)
         if not h:
@@ -68,21 +77,33 @@ def main() -> int:
         r = lib.libusb_claim_interface(h, 0)
         if r >= 0:
             r = lib.libusb_set_interface_alt_setting(h, 0, 2)
-        if r >= 0:
-            lib.libusb_control_transfer(h, 0x21, DFU_DNLOAD, 0, 0, b"\xff", 1, 1000)
         if r < 0:
             lib.libusb_close(h)
             print(f"cannot open the boot loader: {lib.libusb_error_name(r).decode()}")
             return 1
-        lib.libusb_reset_device(h)  # the device goes away: an error is expected
-        lib.libusb_close(h)
-        time.sleep(2.5)  # a boot loader that stayed is back by then
-        h = lib.libusb_open_device_with_vid_pid(ctx, VID, PID_DFU)
-        if h:
+        detached = lib.libusb_control_transfer(h, 0x21, DFU_DETACH, 1000, 0, None, 0, 1000) >= 0
+        if detached:
             lib.libusb_close(h)
+            h = None
+            end = time.time() + 2
+            while present() and time.time() < end:
+                time.sleep(0.1)
+            detached = not present()
+            if not detached:  # taken after a download, nothing done
+                h = lib.libusb_open_device_with_vid_pid(ctx, VID, PID_DFU)
+                if h and lib.libusb_claim_interface(h, 0) >= 0:
+                    lib.libusb_set_interface_alt_setting(h, 0, 2)
+        else:
+            lib.libusb_control_transfer(h, 0x21, DFU_CLRSTATUS, 0, 0, None, 0, 1000)
+        if not detached and h:
+            lib.libusb_control_transfer(h, 0x21, DFU_DNLOAD, 0, 0, b"\xff", 1, 1000)
+            lib.libusb_reset_device(h)  # the device goes away: an error is expected
+            lib.libusb_close(h)
+        time.sleep(2.5)  # a boot loader that stayed is back by then
+        if present():
             print("still in the boot loader")
             return 1
-        print("firmware started")
+        print(f"firmware started ({'DFU_DETACH' if detached else 'USB reset'})")
         return 0
     finally:
         lib.libusb_exit(ctx)
