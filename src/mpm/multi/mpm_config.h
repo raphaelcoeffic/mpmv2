@@ -75,7 +75,7 @@
 #define FRSKYV_CC2500_INO
 #define FRSKYX_CC2500_INO
 #define FUTABA_CC2500_INO
-#define FUTABA_TFHSS  // T-FHSS sub protocols (Validate.h: STM32 only upstream)
+#define FUTABA_TFHSS  // T-FHSS sub protocols (Validate.h: 128KB STM32 only upstream)
 #define FUTABA_FW_TELEMETRY
 // FrSky RX, its clone subtype: the TX ID and hop table of FrSky D / X / X2
 // for their "Cloned" subtypes
