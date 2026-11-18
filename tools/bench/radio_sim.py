@@ -154,24 +154,22 @@ def telem_decode(ty: int, d: bytes) -> dict[str, int]:
         if b >> 14 == 1:
             out["rx_v100"] = b & 0x3FFF
         return out
-    elif ty == 0x13 and len(d) >= 4:
-        # Futaba FASSTest (proto_fasst.c): page (12CH 0x80), the reply's RSSI at
-        # the module, then the slots' data bytes (12CH: voltage, link quality %)
+    elif ty == 0x13 and len(d) >= 3:
+        # Futaba, all systems (FASSTest, T-FHSS; mpm_frame.h): the first slot,
+        # the reply's RSSI at the module, the link quality % (0xFF: none),
+        # then 2 bytes per S.BUS2 slot as on the wire (slot 0: the receiver's
+        # link bars, voltage)
         out = {"tx_rssi": struct.unpack("b", d[1:2])[0]}
-        if d[0] & 0x80:
-            out["lq"] = d[4]
-            if not d[2] & 4:  # else the EXT voltage
-                out["rx_v10"] = d[3]
-            return out
-        page = d[0] & 3
-        if page == 0:
-            out["quality"] = d[2] >> 6
-            if not d[2] & 4:
-                out["rx_v10"] = d[3]
-        for i in range(8):
-            v = d[2 + 2 * i] << 8 | d[3 + 2 * i]
-            if v and 8 * page + i:
-                out[f"slot{8 * page + i}"] = v
+        if d[2] != 0xFF:
+            out["lq"] = d[2]
+        for i in range((len(d) - 3) // 2):
+            a, b, s = d[3 + 2 * i], d[4 + 2 * i], d[0] + i
+            if s == 0:
+                out["quality"] = a >> 6
+                if not a & 4:  # else the other half (FASSTest: EXT voltage)
+                    out["rx_v10"] = b
+            elif a or b:
+                out[f"slot{s}"] = a << 8 | b
         return out
     return {}
 

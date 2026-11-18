@@ -56,12 +56,19 @@ uint8_t mpm_frame_encode(const mpm_frame_t* f, uint8_t* buf);
 #define MPM_TELEM_HDR_LEN 4
 #define MPM_TELEM_STATUS 0x01
 #define MPM_TELEM_PROTO_LIST 0x11
-// Futaba FASSTest receiver replies (proto_fasst.c): mpm-v2's own, not
-// assigned upstream (the last there: RLink, 18). Byte 0: the page (0..3; 12CH:
-// 0x80), byte 1: the reply's RSSI at the module (dBm, signed), then the
-// reply's data: 18CH 16 bytes, S.BUS2 slots 8 page .. 8 page + 7, 2 bytes
-// each as the sensor sent them (slot 0: the receiver's voltage, see
-// fasst_frame.h); 12CH 8 bytes (voltage, link quality %)
+// Futaba receiver telemetry, all systems (FASSTest: proto_fasst.c;
+// T-FHSS Surface and Air: TFHSS_cc2500.c): their replies carry S.BUS2 slot
+// data as the sensors put it on the wire. Not assigned upstream yet (the
+// last there: RLink, 18; this would be MULTI_TELEMETRY_FUTABA, 19).
+// Byte 0: the first slot (0..31), byte 1: the reply's RSSI at the module
+// (dBm, signed), byte 2: the link quality % the receiver reports (0xFF:
+// none in this reply), then 2 bytes per slot from the first, as the sensor
+// sent them. Slot 0 = the receiver's own: byte A bits 7..6 link bars
+// (0..3), bit 5 low voltage alarm, bit 2 the half (1: byte B is something
+// else, e.g. FASSTest's EXT voltage); byte B the receiver's voltage in 0.1 V.
+// FASSTest 18CH: 8 slots from 8 x page; 12CH: slot 0 and the link quality;
+// T-FHSS Surface: 4 slots from 4 x group, the link quality in every other
+// reply; Air: 8 slots from 8 x group
 #define MPM_TELEM_FUTABA 0x13
 // Jeti Duplex receiver replies (proto_jeti.c): mpm-v2's own. Byte 0, the
 // kind: MPM_JETI_REPLY: byte 1 the reply's RSSI at the module (dBm,

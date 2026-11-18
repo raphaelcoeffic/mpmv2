@@ -41,11 +41,11 @@
 //   (12CH: _12CH), the next hop left out and listened to. 18CH asks for the
 //   pages holding something (0: the receiver's voltage, always; another
 //   page once a reply of it had a slot not 0), every FASSTEST_PROBE_EVERY-th
-//   request one of the others in turn (a new sensor). Each reply goes to
-//   the radio as it came (MPM_TELEM_FUTABA). The replies are whitened with
-//   the receiver's serial: from the bind's reply, or else found in the
-//   replies (fasstest_reply_serial()), forgotten after
-//   FASSTEST_SERIAL_MISSES replies in a row with a bad CRC.
+//   request one of the others in turn (a new sensor). Each reply's slots go
+//   to the radio (MPM_TELEM_FUTABA, the format all Futaba systems share).
+//   The replies are whitened with the receiver's serial: from the bind's
+//   reply, or else found in the replies (fasstest_reply_serial()),
+//   forgotten after FASSTEST_SERIAL_MISSES replies in a row with a bad CRC.
 //
 // Channels: +-100% (MPM_CHANNEL_MIN..MAX) = 1020..2020 us as SFHSS (values
 // 224..1824, 1024 = 1520 us, the same in FASST and FASSTest); +-125% fits
@@ -281,15 +281,18 @@ static void _reply(uint8_t c, int8_t rssi)
     fasstest_reply_unpack(_rx_bytes, false, plain, _ft.serial, _ft.id, c);
   }
 
-  // To the radio: the page (12CH: 0x80), the reply's RSSI here, the data
-  uint8_t n = _ft.len - 4, d[2 + FASSTEST_PACKET_LEN - 4];
+  // To the radio (MPM_TELEM_FUTABA, as T-FHSS): the first slot, the reply's
+  // RSSI here, the link quality (12CH: its byte 4), the slots (12CH: slot 0)
+  uint8_t d[3 + 16];
   uint8_t page = _ft.ch12 ? 0 : plain[1] >> 4 & 3;
-  d[0] = _ft.ch12 ? 0x80 : page;
+  uint8_t n = _ft.ch12 ? 2 : 16;
+  d[0] = 8 * page;
   d[1] = (uint8_t)rssi;
-  memcpy(d + 2, plain + 2, n);
+  d[2] = _ft.ch12 ? plain[4] : 0xFF;
+  memcpy(d + 3, plain + 2, n);
   for (int i = 0; i < n; i++)
     if (plain[2 + i]) _ft.pages |= 1 << page;
-  mpm_telem_send(MPM_TELEM_FUTABA, d, 2 + n);
+  mpm_telem_send(MPM_TELEM_FUTABA, d, 3 + n);
 }
 
 static void _ft_init(bool ch12)
