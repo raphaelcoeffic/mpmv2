@@ -88,18 +88,6 @@ static void multi_send_header(uint8_t type, uint8_t len)
 	mpm_port_write(buf, mpm_telem_header(buf, type, len));
 }
 
-#ifdef FUTABA_CC2500_INO
-	// mpm-v2: T-FHSS's S.BUS2 slots (TFHSS_cc2500.c), the format of
-	// MPM_TELEM_FUTABA (mpm_frame.h)
-	uint8_t futaba_telem[3 + 16], futaba_telem_len;
-	static void FUTABA_frame()
-	{
-		multi_send_header(MULTI_TELEMETRY_FUTABA, futaba_telem_len);
-		for (uint8_t i = 0; i < futaba_telem_len; i++)
-			Serial_write(futaba_telem[i]);
-	}
-#endif
-
 #ifdef DSM_TELEMETRY
 	void DSM_frame()
 	{
@@ -176,6 +164,16 @@ static void multi_send_header(uint8_t type, uint8_t len)
 		multi_send_header(MULTI_TELEMETRY_RLINK, packet_in[0]);
 		for (uint8_t i = 1; i <= packet_in[0]; i++)	// raw DumboRC reply payload
 			Serial_write(packet_in[i]);
+	}
+#endif
+
+#ifdef FUTABA_FW_TELEMETRY
+	uint8_t futaba_telem[3 + 16], futaba_telem_len;	// Multiprotocol.ino's
+	void FUTABA_frame()
+	{
+		multi_send_header(MULTI_TELEMETRY_FUTABA, futaba_telem_len);
+		for (uint8_t i = 0; i < futaba_telem_len; i++)	// first slot, RSSI, LQ, S.BUS2 slots (TFHSS_cc2500)
+			Serial_write(futaba_telem[i]);
 	}
 #endif
 
@@ -761,14 +759,6 @@ void TelemetryUpdate()
 	#endif // SPORT_TELEMETRY
 
 	#ifdef MULTI_TELEMETRY
-		#if defined FUTABA_CC2500_INO
-			if((telemetry_link & 4) && protocol == PROTO_FUTABA)
-			{	// mpm-v2: T-FHSS, before its link frame (bit 0)
-				FUTABA_frame();
-				telemetry_link &= ~4;
-				return;
-			}
-		#endif
 		#if defined MULTI_CONFIG_INO
 			if(telemetry_link && protocol == PROTO_CONFIG)
 			{
@@ -821,6 +811,14 @@ void TelemetryUpdate()
 			if(telemetry_link == 2 && protocol == PROTO_RLINK)
 			{
 				RLINK_raw_frame();
+				telemetry_link=0;
+				return;
+			}
+		#endif
+		#if defined FUTABA_FW_TELEMETRY
+			if(telemetry_link == 2 && protocol == PROTO_FUTABA)
+			{
+				FUTABA_frame();
 				telemetry_link=0;
 				return;
 			}

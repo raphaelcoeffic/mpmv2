@@ -312,23 +312,4 @@ void SFHSS_init()
 	phase = SFHSS_START;
 }
 
-// T-FHSS (TFHSS_cc2500): the other sub protocols. mpm-v2: declared here
-void TFHSS_init();
-uint16_t TFHSS_callback();
-
-uint16_t FUTABA_callback()
-{
-	return sub_protocol == SFHSS ? SFHSS_callback() : TFHSS_callback();
-}
-
-void FUTABA_init()
-{
-	if(sub_protocol != SFHSS)
-	{
-		TFHSS_init();
-		return;
-	}
-	SFHSS_init();
-}
-
 #endif

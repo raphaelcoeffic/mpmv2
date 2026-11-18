@@ -262,6 +262,9 @@ extern uint8_t telemetry_in_buffer[TELEMETRY_BUFFER_SIZE];
 extern uint8_t v_lipo1, v_lipo2;
 extern uint8_t RX_RSSI, TX_RSSI, RX_LQI, TX_LQI;
 extern uint8_t telemetry_link;
+#ifdef FUTABA_FW_TELEMETRY
+extern uint8_t futaba_telem[3 + 16], futaba_telem_len;
+#endif
 extern uint8_t telemetry_counter;
 extern uint8_t telemetry_lost;
 #ifdef SPORT_SEND
@@ -290,7 +293,7 @@ enum MultiPacketTypes {
   MULTI_TELEMETRY_CONFIG = 16,
   MULTI_TELEMETRY_PROTO = 17,
   MULTI_TELEMETRY_RLINK = 18,
-  MULTI_TELEMETRY_FUTABA = 19,  // mpm-v2: not upstream yet (MPM_TELEM_FUTABA)
+  MULTI_TELEMETRY_FUTABA = 19,  // MPM_TELEM_FUTABA
 };
 #define boolean bool
 

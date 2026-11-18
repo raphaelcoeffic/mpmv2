@@ -45,9 +45,11 @@
 // replies. No failsafe frames yet (the T6K's not fully decoded): the
 // receiver's own failsafe applies.
 //
-// Telemetry: the link frame (A1 = the receiver's voltage at the 13.2 V
-// ratio, RSSI = its link quality (Surface), TX_RSSI = its replies here)
-// and the S.BUS2 slots (MULTI_TELEMETRY_FUTABA, as FASSTest).
+// Telemetry (FUTABA_FW_TELEMETRY): the link frame (A1 = the receiver's
+// voltage at the 13.2 V ratio, RSSI = its link quality (Surface), TX_RSSI
+// = its replies here), then the S.BUS2 slots as the sensors send them
+// (MULTI_TELEMETRY_FUTABA: the first slot, the reply's RSSI in dBm, the
+// link quality % or 0xFF, 2 bytes per slot).
 
 #if defined(FUTABA_CC2500_INO)
 
@@ -120,9 +122,6 @@ static uint8_t TFHSS_ch;		// the channel of the next TX packet
 static uint16_t TFHSS_frame;
 static uint16_t TFHSS_link;		// Air: link frames left (after the reply) or sent
 static uint8_t TFHSS_replies;
-
-// mpm-v2: telemetry.c sends these (MULTI_TELEMETRY_FUTABA)
-extern uint8_t futaba_telem[3 + 16], futaba_telem_len;
 
 static uint16_t __attribute__((unused)) TFHSS_crc(const uint8_t *p, uint8_t len)
 {
@@ -226,22 +225,29 @@ static bool __attribute__((unused)) TFHSS_rx_read(uint8_t len)
 // TFHSS_TELEM_EVERY-th reply (Surface's 333 a second would fill the link)
 static void __attribute__((unused)) TFHSS_telemetry(uint8_t first, const uint8_t *slots, uint8_t n, uint8_t lq, uint8_t rssi, uint8_t lqi)
 {
-	if(sub_protocol != TFHSS_AIR && ++TFHSS_replies < TFHSS_TELEM_EVERY)
-		return;
-	TFHSS_replies = 0;
-	futaba_telem[0] = first;
-	futaba_telem[1] = (uint8_t)(((int8_t)rssi) / 2 - 72);	// dBm
-	futaba_telem[2] = lq;
-	memcpy(futaba_telem + 3, slots, 2 * n);
-	futaba_telem_len = 3 + 2 * n;
-	// The link frame: slot 0 half 0 = the receiver's voltage (0.1 V)
-	if(first == 0 && !(slots[0] & 0x04))
-		v_lipo1 = (uint16_t)slots[1] * 255 / 132;
-	if(lq != 0xFF)
-		RX_RSSI = lq;
-	TX_RSSI = rssi >= 128 ? rssi - 128 : rssi + 128;
-	TX_LQI = lqi & 0x7F;
-	telemetry_link |= 1 | 4;
+	#ifdef FUTABA_FW_TELEMETRY
+		if(sub_protocol != TFHSS_AIR && ++TFHSS_replies < TFHSS_TELEM_EVERY)
+			return;
+		TFHSS_replies = 0;
+		// The link frame: slot 0 half 0 = the receiver's voltage (0.1 V)
+		if(first == 0 && !(slots[0] & 0x04))
+			v_lipo1 = (uint16_t)slots[1] * 255 / 132;
+		if(lq != 0xFF)
+			RX_RSSI = lq;
+		TX_RSSI = rssi >= 128 ? rssi - 128 : rssi + 128;
+		TX_LQI = lqi & 0x7F;
+		telemetry_link |= 1;
+		#ifdef MULTI_TELEMETRY
+			futaba_telem[0] = first;
+			futaba_telem[1] = (uint8_t)(((int8_t)rssi) / 2 - 72);	// dBm
+			futaba_telem[2] = lq;
+			memcpy(futaba_telem + 3, slots, 2 * n);
+			futaba_telem_len = 3 + 2 * n;
+			telemetry_link |= 2;		// after the link frame
+		#endif
+	#else
+		(void)first; (void)slots; (void)n; (void)lq; (void)rssi; (void)lqi;
+	#endif
 }
 
 // Surface: the 12-bit value of a channel, 1020..2020 us at +-100 %
@@ -452,7 +458,7 @@ static uint16_t __attribute__((unused)) TFHSS_air_callback()
 	return TFHSS_AIR_PERIOD;
 }
 
-uint16_t TFHSS_callback()
+static uint16_t __attribute__((unused)) TFHSS_callback()
 {
 	if(phase == TFHSS_CAL)
 	{	// Calibration of the 31 channels, one per call
@@ -520,7 +526,7 @@ uint16_t TFHSS_callback()
 	return TFHSS_PERIOD;
 }
 
-void TFHSS_init()
+static void __attribute__((unused)) TFHSS_init()
 {
 	// The TX ID: 9 decimal digits (as Futaba's), little endian; the
 	// Surface key's other 4 bytes another such number
@@ -555,6 +561,23 @@ void TFHSS_init()
 
 	rf_ch_num = 0;
 	phase = TFHSS_CAL;
+}
+
+// Futaba (21): S-FHSS (Futaba_cc2500.ino) or T-FHSS
+void SFHSS_init();
+uint16_t SFHSS_callback();
+
+uint16_t FUTABA_callback()
+{
+	return sub_protocol == SFHSS ? SFHSS_callback() : TFHSS_callback();
+}
+
+void FUTABA_init()
+{
+	if(sub_protocol == SFHSS)
+		SFHSS_init();
+	else
+		TFHSS_init();
 }
 
 #endif
