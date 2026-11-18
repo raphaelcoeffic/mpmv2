@@ -197,7 +197,12 @@ reset to the application answering on USB.
 - `LEAVE_PROGMODE`: the boot loader starts the application when the image
   CRC matches (cache back on, `checked` cleared, no system reset), else
   keeps serving: an interrupted update leaves it in charge at every power
-  up, the user flashes again (tested with half an image).
+  up, the user flashes again (tested with half an image). A session that
+  wrote nothing (a sync, reads) starts an application already checked as at
+  power up, also a debugger's image without CRC: a host that only looked, or
+  a sync sent by mistake, gets the module back without a power cycle. The
+  first page written sets `checked` again, so a written image always needs
+  its CRC. The same at the end of an idle session (10 s).
 - `READ_PAGE` reads back (for host tools), `GET_SIGN_ON`, `GET_PARAMETER`,
   `SET_DEVICE`, `ENTER_PROGMODE` are answered for other STK500 hosts.
 - 57600 bauds: 56 KB in 11 s (21 s with read back), 336 KB would take about

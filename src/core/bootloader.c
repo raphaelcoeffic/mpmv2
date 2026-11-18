@@ -17,7 +17,11 @@
 //
 // The image CRC is checked once, at the first start after an update (it
 // takes about 0.3 ms per KB on the CC2652): the header's `checked` word is
-// then cleared.
+// then cleared. A session that ends (STK_LEAVE_PROGMODE, or idle) starts the
+// application as at power up: one already checked (a session that only
+// synced or read, a debugger's image), else one whose CRC matches. Writing
+// the first page sets `checked` again, so a written image always needs its
+// CRC.
 
 #include <stdbool.h>
 #include <string.h>
@@ -326,7 +330,11 @@ static bool args(uint8_t* buf, uint32_t n)
   return true;
 }
 
-// Returns when the application was written and EdgeTX left programming mode
+// The application can start at the end of a session: checked before (the
+// session wrote nothing), or written whole with its CRC
+static bool app_startable() { return app_checked() || app_valid(); }
+
+// Returns when the session ended with an application to start
 static void serve()
 {
   static uint8_t page[PAGE_MAX];
@@ -337,7 +345,7 @@ static void serve()
   while (true) {
     uint8_t cmd;
     if (!get(&cmd)) {
-      if (bl_millis() - last > BL_IDLE_MS && app_valid()) return;
+      if (bl_millis() - last > BL_IDLE_MS && app_startable()) return;
       continue;
     }
     last = bl_millis();
@@ -412,7 +420,7 @@ static void serve()
       case STK_LEAVE_PROGMODE:
         if (args(0, 0)) {
           reply(0, 0);
-          if (app_valid()) return;
+          if (app_startable()) return;
           session_reset();
         }
         break;
@@ -462,9 +470,9 @@ int main()
   reply(0, 0);  // the sync
   serve();
 
-  // New application written, its CRC matched: flash cache back on
-  // (invalidated), then marked and started as at power up. No system reset
-  // (see app_mark_checked())
+  // Session over (a new application written, its CRC matched, or nothing
+  // written): flash cache back on (invalidated), then marked and started as
+  // at power up. No system reset (see app_mark_checked())
   if (_flash_open) bl_flash_close();
   if (!app_checked()) app_mark_checked();
   app_start();
