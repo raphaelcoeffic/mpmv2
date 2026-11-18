@@ -50,7 +50,7 @@ static const uint8_t _reset_regs[] = {
 
 // RF core RX bandwidth codes (kHz). As suite_cc2500.py --phy, tested with
 // the MPM's CC2500 setups: the narrowest above 2 x deviation + rate + 70 kHz,
-// 89 for MSK
+// 89 for MSK up to 250 kbps
 static const struct {
   uint8_t code;
   uint16_t khz;
@@ -124,7 +124,9 @@ static bool _setup(radio_phy_t* phy, frame_t* f)
   uint8_t bw = _rx_bw[sizeof(_rx_bw) / sizeof(_rx_bw[0]) - 1].code;
   for (int i = sizeof(_rx_bw) / sizeof(_rx_bw[0]) - 1; i >= 0; i--)
     if (_rx_bw[i].khz >= need_khz) bw = _rx_bw[i].code;
-  if (mod == 7) bw = 89;
+  // MSK up to 250 kbps (Hitec, Redpine): 89. T-FHSS's 384 kbps: the rule
+  // (94); the bench's 91 receives nothing there, 92..95 do
+  if (mod == 7 && rate < 300000) bw = 89;
   static const uint8_t preamble[] = {2, 3, 4, 6, 8, 12, 16, 24};
   uint8_t pre = preamble[(mdmcfg1 >> 4) & 7];
 
