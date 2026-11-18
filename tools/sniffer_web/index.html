@@ -4,20 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Futaba Sniffer</title>
-<meta name="description" content="Record Futaba FASST, T-FHSS, S-FHSS and Mini-Z packets with a Sonoff ZBDongle-P, in the browser">
+<meta name="description" content="Record Futaba FASST, T-FHSS (Surface and Air), S-FHSS and Mini-Z packets with a Sonoff ZBDongle-P, in the browser">
 <!--
   FASST / T-FHSS sniffer for helpers: flashes the radio bench (build-zbp
   zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
   ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
   --sonoff), then records guided runs (docs/bench.md) into one text file:
-  FASST with fasstrx and T-FHSS with tfhssrx (both follow the hops; T-FHSS
-  links on channel 1, parked there), the others on one channel per
+  FASST with fasstrx and T-FHSS / T-FHSS Air with tfhssrx (all follow the
+  hops; T-FHSS links on channel 1, parked there; Air: tfhssrx ... 1, its link
+  hops over the 16-channel list), the others on one channel per
   recording: S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
   Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
   Capture file: "# " header lines (key: value), then per recording
-  "@step <n> <title>", "@system <FASST|T-FHSS|S-FHSS|Mini-Z> [ch=<n>]",
+  "@step <n> <title>", "@system <FASST|T-FHSS|T-FHSS Air|S-FHSS|Mini-Z> [ch=<n>]",
   "@note <text>", "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx
   ...", its "@fasst ..." lines and "@end fasstrx ...". T-FHSS: "@ok tfhssrx
   ...", its "@rx ...", "@lock ...", "@period ..." lines and "@end tfhssrx ...".
@@ -140,7 +141,8 @@ first:</p>
 <label for="f-system">System</label>
 <select id="f-system">
   <option value="fasst">FASST</option>
-  <option value="tfhss">T-FHSS</option>
+  <option value="tfhss">T-FHSS (Surface: cars, boats)</option>
+  <option value="tfhssair">T-FHSS Air</option>
   <option value="sfhss">S-FHSS (reference)</option>
   <option value="miniz">Mini-Z (4PM Plus)</option>
 </select>
@@ -179,7 +181,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "5";
+const PAGE_VERSION = "6";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -229,6 +231,21 @@ const SYSTEMS = {
       ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH, follow: true })),
       { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_BIND_CH,
         what: "Only if you have a T-FHSS receiver: put it in link (bind) mode as its manual says, close to the transmitter, and link it. Skip this step if you have none." },
+      { title: "One channel only", secs: 30, ch: TFHSS_CH2,
+        what: "Transmitter on, sticks centred, nothing to do: this one stays on one channel." },
+    ],
+  },
+  tfhssair: {
+    name: "T-FHSS Air", file: "tfhssair",
+    run: (step) => `tfhssrx 0 ${step.ch} ${step.follow ? 1 : 0} 1`, packet: "@rx ",
+    count: "airkey", good: "look like real packets",
+    modes: ["T-FHSS Air", "Don't know"],
+    steps: [
+      ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH, follow: true })),
+      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_BIND_CH, follow: true,
+        what: "Only if you have a T-FHSS Air receiver: start the link in the radio's System menu and on the receiver as their manuals say, close to the transmitter. Skip this step if you have none." },
+      { title: "Failsafe (optional)", secs: 30, ch: TFHSS_CH, follow: true,
+        what: "In the Fail Safe menu, set channel 3 to F/S (failsafe) with a position, wait 5 seconds, then set it back to Hold. Write what you set in the note." },
       { title: "One channel only", secs: 30, ch: TFHSS_CH2,
         what: "Transmitter on, sticks centred, nothing to do: this one stays on one channel." },
     ],
@@ -640,8 +657,9 @@ async function afterConnect() {
 
 // fasstrx and tfhssrx that stop on request (the page's needs; the sfhss and
 // kyosho presets are older), and the bench's "sniffer=" at least
-// SNIFFER_VERSION (2: tfhssrx keeps up with SR's 1.2 ms frames)
-const SNIFFER_VERSION = 2;
+// SNIFFER_VERSION (2: tfhssrx keeps up with SR's 1.2 ms frames, 3: tfhssrx
+// air for T-FHSS Air)
+const SNIFFER_VERSION = 3;
 async function sniffingWorks() {
   if (Number((bench.info.match(/sniffer=(\d+)/) || [])[1] || 0) < SNIFFER_VERSION) return false;
   try {
@@ -649,6 +667,9 @@ async function sniffingWorks() {
     await link.writeText("\n");
     await sleep(200);
     await benchCmd("tfhssrx 0 10 0");
+    await link.writeText("\n");
+    await sleep(200);
+    await benchCmd("tfhssrx 0 10 0 1");
     await link.writeText("\n");
     await sleep(200);
     return true;
@@ -767,6 +788,20 @@ function tfhssSyndrome(hex, n) {
   return crcMcrf(p.slice(0, 12)) ^ (p[12] | (p[13] << 8)) ^ crcMcrf(ch) ^ crcMcrf(new Array(12).fill(0));
 }
 
+// T-FHSS Air: 17 byte TX packets (20 read), byte 0 plain, bytes 1..14 XOR a
+// key with the channel n at 6 and 12, CRC of the 15 plain bytes; row 31 =
+// a plain link frame (syndrome 0)
+function airSyndrome(hex, n) {
+  if (hex.length < 34) return -1;
+  const p = [];
+  for (let i = 0; i < 17; i++) p.push(parseInt(hex.substr(2 * i, 2), 16));
+  const raw = crcMcrf(p.slice(0, 15)) ^ (p[15] | (p[16] << 8));
+  if (p[0] >> 3 === 31) return raw;
+  const ch = new Array(15).fill(0);
+  ch[6] = ch[12] = n;
+  return raw ^ crcMcrf(ch) ^ crcMcrf(new Array(15).fill(0));
+}
+
 function crc10ch(hex) {
   if (hex.length < 44) return false;
   const p = [];
@@ -861,8 +896,9 @@ async function record(step, index, li) {
       const parts = line.split(" ");
       if (sys.count === "crc") {
         if (parts.includes("crc=ok")) rec.good++;
-      } else if (sys.count === "key") {
-        const s = tfhssSyndrome(parts[3] || "", Math.floor(Number(parts[2]) / 5) + 1);
+      } else if (sys.count === "key" || sys.count === "airkey") {
+        const syn = sys.count === "key" ? tfhssSyndrome : airSyndrome;
+        const s = syn(parts[3] || "", Math.floor(Number(parts[2]) / 5) + 1);
         if (s >= 0) syndromes.set(s, (syndromes.get(s) || 0) + 1);
         const top = Math.max(0, ...syndromes.values());
         rec.good = top >= 3 ? top : 0;

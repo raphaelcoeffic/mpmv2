@@ -48,3 +48,24 @@ void tfhss_packet(uint8_t* out, const uint8_t* plain, const uint8_t* key);
 // (key[7] = n): the same for every packet of one key, whatever the channel
 uint16_t tfhss_syndrome(const uint8_t* p);
 uint16_t tfhss_key_syndrome(const uint8_t* p, uint8_t n);
+
+// T-FHSS Air (T18SZ transmitter firmware, doc/futaba*): CC2500 128 kbps
+// 2-FSK, 38 kHz deviation, sync D391, the same channels, rows and list.
+// TX: 17 bytes, a frame every 15.04 ms: byte 0 plain (row << 3 | flags;
+// row 31 = a link frame, sent plain on the list), bytes 1..14 XOR the key
+// 00 I3 I2 I1 I0 x n I3 I2 I1 I0 x n I3 I2 (I = TX ID, n = channel), then
+// the CRC-16/MCRF4XX of the 15 plain bytes. The receiver's reply: 20 bytes
+// on the next channel 5.2..9.2 ms after the TX packet, 18 XOR a key from
+// the receiver's ID (n at 6 and 12 as well), CRC of the 18 plain bytes
+#define TFHSS_AIR_LEN 17
+#define TFHSS_AIR_REPLY_LEN 20
+#define TFHSS_AIR_DATA_LEN 15
+#define TFHSS_AIR_ROW_LINK 31
+#define TFHSS_AIR_PERIOD_US 15040
+
+static inline uint8_t tfhss_air_row(const uint8_t* p) { return p[0] >> 3; }
+
+// Packet from the 15 plain bytes and the key (key[6] = key[12] = the channel)
+void tfhss_air_packet(uint8_t* out, const uint8_t* plain, const uint8_t* key);
+// As tfhss_key_syndrome(), over a len byte Air packet (CRC in the last two)
+uint16_t tfhss_air_key_syndrome(const uint8_t* p, uint8_t len, uint8_t n);

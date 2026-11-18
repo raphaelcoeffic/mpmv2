@@ -52,3 +52,19 @@ uint16_t tfhss_key_syndrome(const uint8_t* p, uint8_t n)
   ch[7] = n;
   return tfhss_syndrome(p) ^ tfhss_crc(ch, TFHSS_DATA_LEN, 0);
 }
+
+void tfhss_air_packet(uint8_t* out, const uint8_t* plain, const uint8_t* key)
+{
+  uint16_t crc = tfhss_crc(plain, TFHSS_AIR_DATA_LEN, 0xFFFF);
+  for (int i = 0; i < TFHSS_AIR_DATA_LEN; i++) out[i] = plain[i] ^ key[i];
+  out[15] = crc;
+  out[16] = crc >> 8;
+}
+
+uint16_t tfhss_air_key_syndrome(const uint8_t* p, uint8_t len, uint8_t n)
+{
+  uint8_t ch[TFHSS_AIR_REPLY_LEN] = {0};
+  uint8_t data = len - 2;
+  ch[6] = ch[12] = n;
+  return tfhss_crc(p, data, 0xFFFF) ^ (p[data] | p[data + 1] << 8) ^ tfhss_crc(ch, data, 0);
+}
