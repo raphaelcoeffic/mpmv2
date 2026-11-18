@@ -4,17 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Futaba Test Radio</title>
-<meta name="description" content="Drive Futaba FASST, FASSTest and S-FHSS receivers from the browser with a Sonoff ZBDongle-P, with receiver telemetry">
+<meta name="description" content="Drive Futaba FASST, FASSTest, T-FHSS and S-FHSS receivers from the browser with a Sonoff ZBDongle-P, with receiver telemetry">
 <!--
   A test radio for Futaba receivers: flashes the MPM port (build-zbp
   zbdongle-p-firmware.bin, published next to this page as FIRMWARE) on a
   Sonoff ZBDongle-P through the CC2652P's ROM boot loader, then plays the
   radio's side of the MULTI-Module serial link (100000 baud 8E2, a frame every
   7 ms, as tools/bench/radio_sim.py): protocol FASST (110: 10ch, MULT, 7ch,
-  FT18, FT12) or Futaba (21: S-FHSS), bind, power, failsafe, channels from
-  sliders. Telemetry: the module's status frames (type 0x01) and the FASSTest
-  replies (type 0x13, proto_fasst.c): receiver voltage, link quality, S.BUS2
-  sensor slots decoded as the sensor type picked per slot.
+  FT18, FT12) or Futaba (21: S-FHSS, T-FHSS Surface / SR / Air), bind, power, failsafe, channels from
+  sliders. Telemetry: the module's status frames (type 0x01) and the Futaba
+  replies (type 0x13, FASSTest and T-FHSS alike: mpm_frame.h): receiver
+  voltage, link quality, S.BUS2 sensor slots decoded as the type picked per slot.
 
   Stop = no more frames: the MPM stops its protocol 70 ms after the last
   frame (MPM_INPUT_TIMEOUT_MS), the receiver goes to its failsafe. Frames
@@ -110,7 +110,7 @@ td select { padding: 2px 4px; }
 <body>
 <main>
 <h1>Futaba Test Radio</h1>
-<p class="sub">Drives a Futaba receiver (FASST, FASSTest, S-FHSS) from this page, with a Sonoff
+<p class="sub">Drives a Futaba receiver (FASST, FASSTest, T-FHSS, S-FHSS) from this page, with a Sonoff
 ZBDongle-P USB stick, and shows its telemetry. For bench tests: servos and sensors, no
 model to fly. Recording a transmitter instead? Use the <a href="index.html">sniffer page</a>.</p>
 
@@ -243,6 +243,15 @@ const SYSTEMS = {
   fasst7: { name: "FASST 7CH (R6106HF, R617FS...)", proto: 110, sub: 2, telem: null, chans: 7,
            bind: "No bind on the stick's side: Start, then hold the receiver's Link (ID SET) button for 2 s " +
                  "with the receiver on, until its LED turns green." },
+  tfhss: { name: "T-FHSS (Surface: R334SBS, R304SB...)", proto: 21, sub: 1, telem: "tfhss", chans: 8,
+           bind: "Put the receiver in its link mode (see its manual), then press Bind: the stick sends its bind " +
+                 "packets for about 10 s at low power, close to the receiver." },
+  tfhsssr: { name: "T-FHSS SR (receiver linked in SR mode)", proto: 21, sub: 2, telem: null, chans: 8,
+           bind: "Put the receiver in its link mode (see its manual), then press Bind: the stick sends its SR bind " +
+                 "packets for about 10 s at low power, close to the receiver." },
+  tfhssair: { name: "T-FHSS Air (R3008SB, R3006SB...)", proto: 21, sub: 3, telem: "air", chans: 16,
+           bind: "Press Bind, then put the receiver in its link mode (see its manual) close to the stick. " +
+                 "Bind ends when the receiver answers (20 s at most)." },
   sfhss: { name: "S-FHSS", proto: 21, sub: 0, telem: null, chans: 8,
            bind: "Press Bind, then hold the receiver's Link button with the receiver on until its LED stays on. " +
                  "The stick binds for a few seconds." },
@@ -705,7 +714,7 @@ $("f-power").value = load("radio.power", "low");
 function showHint() {
   const s = SYSTEMS[$("f-system").value];
   $("bind-hint").textContent = "To bind: " + s.bind;
-  $("b-bind").hidden = s.proto === 110 && !s.telem;
+  $("b-bind").hidden = s.proto === 110 && !s.telem;  // FASST: the receiver's button only
   $("t-none").textContent = s.telem ? "" : "This system has no telemetry: only the stick's status shows here.";
   for (let i = 0; i < chanEls.length; i++) chanEls[i].row.style.opacity = i < s.chans ? 1 : 0.4;
 }
@@ -778,7 +787,8 @@ function checkBind(flags) {
     binding = false;
     showRun();
     status("st-run", t > 30000 ? "Bind stopped after 30 s: no receiver answered." :
-      "Bind over" + (SYSTEMS[$("f-system").value].telem ? ": the receiver answered." : "."), t > 30000 ? "warn" : "ok");
+      "Bind over" + (["ft18", "ft12", "air"].includes(SYSTEMS[$("f-system").value].telem) ? ": the receiver answered." : "."),
+      t > 30000 ? "warn" : "ok");
   }
 }
 
@@ -853,6 +863,7 @@ function resetTelemetry() {
   slots = {};
   replies = [];
   telem = {};
+  lastBars = lastLq = null;
   $("t-volt").textContent = $("t-lq").textContent = $("t-rssi").textContent = $("t-rate").textContent = "–";
   renderSensors();
 }
@@ -879,33 +890,31 @@ function showFlags(flags) {
   $("t-flags").textContent = t;
 }
 
-// FASSTest replies (proto_fasst.c): page (12CH: 0x80), RSSI here (signed
-// dBm), the data bytes: 18CH 8 slots x 2 (page p = slots 8p..8p+7, slot 0
-// the receiver's voltage and link quality), 12CH voltage + link quality %
+// Futaba telemetry, all systems (mpm_frame.h MPM_TELEM_FUTABA): the first
+// slot, the reply's RSSI here (signed dBm), the link quality % (0xFF: none),
+// then 2 bytes per S.BUS2 slot as on the wire. Slot 0 = the receiver's own:
+// byte A bits 7..6 link bars, bit 2 the half (1: byte B is something else),
+// byte B its voltage in 0.1 V
+let lastBars = null, lastLq = null;
 function futaba(d) {
   const now = performance.now();
   replies.push(now);
   while (replies.length && now - replies[0] > 1000) replies.shift();
   $("t-rate").textContent = replies.length;
-  const rssi = d[1] > 127 ? d[1] - 256 : d[1];
-  $("t-rssi").textContent = `${rssi} dBm`;
-  if (d[0] & 0x80) {
-    if (!(d[2] & 4)) $("t-volt").textContent = `${(d[3] / 10).toFixed(1)} V`;
-    $("t-lq").textContent = `${d[4]} %`;
-    return;
-  }
-  const page = d[0] & 3;
-  for (let i = 0; i < 8 && 3 + 2 * i < d.length; i++) {
-    const s = 8 * page + i, b = [d[2 + 2 * i], d[3 + 2 * i]];
+  $("t-rssi").textContent = `${d[1] > 127 ? d[1] - 256 : d[1]} dBm`;
+  if (d[2] !== 0xff) lastLq = d[2];
+  for (let i = 0; 4 + 2 * i < d.length; i++) {
+    const s = d[0] + i, b = [d[3 + 2 * i], d[4 + 2 * i]];
     if (s === 0) {
-      const q = b[0] >> 6;
-      $("t-lq").innerHTML = `<span class="bars">${[1, 2, 3].map((k) =>
-        `<i class="${q >= k ? "on" : ""}" style="height:${30 + 23 * k}%"></i>`).join("")}</span> ${q}/3`;
+      lastBars = b[0] >> 6;
       if (!(b[0] & 4)) $("t-volt").textContent = `${(b[1] / 10).toFixed(1)} V`;
       continue;
     }
     if (b[0] || b[1] || slots[s]) slots[s] = b;
   }
+  const bars = lastBars === null ? "" : `<span class="bars">${[1, 2, 3].map((k) =>
+    `<i class="${lastBars >= k ? "on" : ""}" style="height:${30 + 23 * k}%"></i>`).join("")}</span> `;
+  $("t-lq").innerHTML = bars + (lastLq !== null ? `${lastLq} %` : lastBars !== null ? `${lastBars}/3` : "–");
   renderSensors();
 }
 
