@@ -669,8 +669,9 @@ static void _print_chip()
 
 // Raised when the sniffer page needs the new behaviour of a command (its
 // "sniffer=" check): 2 = tfhssrx retunes before printing (SR's 1.2 ms frames),
-// 3 = tfhssrx air (T-FHSS Air), 4 = tfhssrx follows a Surface bind
-#define BENCH_SNIFFER_VERSION 4
+// 3 = tfhssrx air (T-FHSS Air), 4 = tfhssrx follows a Surface bind, 5 = and
+// hears its reply on the next list channel
+#define BENCH_SNIFFER_VERSION 5
 
 static void _cmd_info()
 {
@@ -1960,12 +1961,11 @@ static void _cmd_tfhss_air(uint32_t secs, uint32_t row, uint32_t period, uint32_
 // Air: 20 bytes at 128 kbps, 1.25 ms
 #define TFHSS_AIR_LATE_US 1600
 #define TFHSS_AIR_SETTLE_US 10500
-// Surface bind (plain type 8 / 9 packets, from the sync word): stay for the
-// receiver's reply (on the same channel, ~840 us after the packet by the
-// R334SBS firmware), then the next list channel, where the TX's next bind
-// packet is expected 3 ms after this one (4PM Plus: channel 1 every 48 ms =
-// 16 x 3 ms); none there 600 us late: parked again
-#define TFHSS_BIND_STAY_US 2000
+// Surface bind (plain type 8 / 9 packets, from the sync word): straight to
+// the next list channel, where the receiver replies (it hops first, then
+// ~840 us: R334SBS fffe96b8) and the TX's next bind packet comes 3 ms after
+// this one (4PM Plus: channel 1 every 48 ms = 16 x 3 ms); none there 600 us
+// late: parked again
 #define TFHSS_BIND_PERIOD_US 3000
 #define TFHSS_BIND_LATE_US 600
 
@@ -2018,9 +2018,8 @@ static void _cmd_tfhssrx(char* args)
   uint32_t t_hop = 0, t_deadline = 0, misses = 0, t_cand = 0;
   uint32_t period = 0, period_min = 0, samples = 0;
   uint32_t packets = 0, tx = 0, replies = 0, missed = 0, locks = 0, tries = 0, restarts = 0;
-  // Surface bind followed: the last bind packet's sync time, its channel
+  // Surface bind followed: the last bind packet's sync time
   bool bind = false;
-  uint8_t bind_c = 0;
   uint32_t t_bind = 0, binds = 0, bind_hops = 0, bind_lost = 0;
   radio_packet_t pkt;
   uint32_t t_end = micros() + secs * 1000000;
@@ -2037,14 +2036,18 @@ static void _cmd_tfhssrx(char* args)
           len >= _rx_len) {
         packets++;
         if (!air && follow && (tfhss_type(p) & 0x1E) == 8 && tfhss_syndrome(p) == 0) {
-          // A plain bind packet: stay for the reply, then the list
-          bind_hops += bind && c != bind_c;
+          // A plain bind packet: the next list channel at once (the reply,
+          // then the TX's next bind packet)
+          bind_hops += bind;
           binds++;
           tx++;
           bind = true;
-          bind_c = c;
           t_bind = pkt.timestamp_us;
           locked = cand = false;
+          c = tfhss_next(TFHSS_ROW_LIST, c);
+          _radio_rx_stop();
+          _tfhss_channel(c);
+          _radio_rx_start(rx_len);
           _report_packet_on(&pkt, rx_channel);
           continue;
         }
@@ -2099,13 +2102,7 @@ static void _cmd_tfhssrx(char* args)
         }
       }
       _report_packet_on(&pkt, rx_channel);
-    } else if (bind && c == bind_c && !micros_before(t_bind + TFHSS_BIND_STAY_US)) {
-      c = tfhss_next(TFHSS_ROW_LIST, c);
-      _radio_rx_stop();
-      _tfhss_channel(c);
-      _radio_rx_start(rx_len);
-    } else if (bind && c != bind_c &&
-               !micros_before(t_bind + TFHSS_BIND_PERIOD_US + TFHSS_BIND_LATE_US)) {
+    } else if (bind && !micros_before(t_bind + TFHSS_BIND_PERIOD_US + TFHSS_BIND_LATE_US)) {
       bind = false;
       bind_lost++;
       c = park;
