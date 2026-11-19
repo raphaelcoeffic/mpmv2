@@ -11,8 +11,9 @@
   ZBDongle-P through the CC2652P's ROM boot loader (as tools/rom_flash.py
   --sonoff), then records guided runs (docs/bench.md) into one text file:
   FASST with fasstrx and T-FHSS / T-FHSS Air with tfhssrx (all follow the
-  hops; T-FHSS links on channel 1, parked there; Air: tfhssrx ... 1, its link
-  hops over the 16-channel list), the others on one channel per
+  hops; T-FHSS links from channel 1, a bind followed over the 16-channel list
+  with each list channel's reply; Air: tfhssrx ... 1, its link hops over the
+  list too), the others on one channel per
   recording: S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
   Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
@@ -183,7 +184,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "6";
+const PAGE_VERSION = "7";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -231,7 +232,7 @@ const SYSTEMS = {
     modes: ["T-FHSS", "T-FHSS SR", "Don't know"],
     steps: [
       ...COMMON_STEPS.map((s) => ({ ...s, ch: TFHSS_CH, follow: true })),
-      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_BIND_CH,
+      { title: "Link a receiver (optional)", secs: 40, ch: TFHSS_BIND_CH, follow: true,
         what: "Only if you have a T-FHSS receiver: put it in link (bind) mode as its manual says, close to the transmitter, and link it. Skip this step if you have none." },
       { title: "One channel only", secs: 30, ch: TFHSS_CH2,
         what: "Transmitter on, sticks centred, nothing to do: this one stays on one channel." },
@@ -660,8 +661,8 @@ async function afterConnect() {
 // fasstrx and tfhssrx that stop on request (the page's needs; the sfhss and
 // kyosho presets are older), and the bench's "sniffer=" at least
 // SNIFFER_VERSION (2: tfhssrx keeps up with SR's 1.2 ms frames, 3: tfhssrx
-// air for T-FHSS Air)
-const SNIFFER_VERSION = 3;
+// air for T-FHSS Air, 4: tfhssrx follows a Surface bind over the list)
+const SNIFFER_VERSION = 4;
 async function sniffingWorks() {
   if (Number((bench.info.match(/sniffer=(\d+)/) || [])[1] || 0) < SNIFFER_VERSION) return false;
   try {
