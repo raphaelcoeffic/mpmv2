@@ -553,6 +553,17 @@ function waitStatus(ms) {
   });
 }
 
+// The image this page serves: its CRC-32, kept (localStorage) after loading
+// it, as the MPM version doesn't change between page updates
+async function firmwareId() {
+  try {
+    const resp = await fetch(FIRMWARE, { cache: "no-cache" });
+    return resp.ok ? crc32(new Uint8Array(await resp.arrayBuffer())) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 $("b-connect").onclick = async () => {
   try {
     port = await navigator.serial.requestPort({ filters: [CP2102N] });
@@ -565,7 +576,12 @@ $("b-connect").onclick = async () => {
     if (await openMpm()) {
       const v = lastStatus ? lastStatus.version : "?";
       status("st-connect", `Stick ready, the test radio is on it (MPM ${v}).`, "ok");
-      status("st-flash", "Already loaded, you can skip this.", "ok");
+      const id = await firmwareId();
+      if (id !== null && id === load("radioFw", null))
+        status("st-flash", "Already loaded, you can skip this.", "ok");
+      else
+        status("st-flash", "A test radio is on the stick, maybe an older one: load this page's " +
+          "(Load the radio) unless you just did.", "warn");
       ready();
     } else {
       await closeLink();
@@ -633,6 +649,7 @@ $("b-flash").onclick = async () => {
     await bl.leave();
     await sleep(500);
     if (!(await openMpm())) throw new Error("written, but the radio doesn't answer: unplug the stick, plug it in and reload");
+    save("radioFw", crc32(img));
     status("st-flash", "Test radio loaded and running.", "ok");
     status("st-connect", "Stick ready.", "ok");
     ready();
