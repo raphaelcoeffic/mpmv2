@@ -243,13 +243,13 @@ const SYSTEMS = {
   fasst7: { name: "FASST 7CH (R6106HF, R617FS...)", proto: 110, sub: 2, telem: null, chans: 7,
            bind: "No bind on the stick's side: Start, then hold the receiver's Link (ID SET) button for 2 s " +
                  "with the receiver on, until its LED turns green." },
-  tfhss: { name: "T-FHSS (Surface: R334SBS, R304SB...)", proto: 21, sub: 1, telem: "tfhss", chans: 8,
-           bind: "Put the receiver in its link mode (see its manual), then press Bind: the stick sends its bind " +
-                 "packets for about 10 s at low power, close to the receiver." },
-  tfhsssr: { name: "T-FHSS SR (receiver linked in SR mode)", proto: 21, sub: 2, telem: null, chans: 8,
-           bind: "Put the receiver in its link mode (see its manual), then press Bind: the stick sends its SR bind " +
-                 "packets for about 10 s at low power, close to the receiver." },
-  tfhssair: { name: "T-FHSS Air (R3008SB, R3006SB...)", proto: 21, sub: 3, telem: "air", chans: 16,
+  tfhss: { name: "T-FHSS (Surface: R334SBS, R304SB...)", proto: 21, sub: 1, telem: "tfhss", chans: 8, bindMax: 9600,
+           bind: "Press Bind, then put the receiver in its link mode (see its manual) close to the stick. " +
+                 "Bind ends when the receiver answers (10 s at most)." },
+  tfhsssr: { name: "T-FHSS SR (receiver linked in SR mode)", proto: 21, sub: 2, telem: null, chans: 8, bindMax: 9600,
+           bind: "Press Bind, then put the receiver in its link mode (see its manual) close to the stick. " +
+                 "Bind ends when the receiver answers (10 s at most)." },
+  tfhssair: { name: "T-FHSS Air (R3008SB, R3006SB...)", proto: 21, sub: 3, telem: "air", chans: 16, bindMax: 20000,
            bind: "Press Bind, then put the receiver in its link mode (see its manual) close to the stick. " +
                  "Bind ends when the receiver answers (20 s at most)." },
   sfhss: { name: "S-FHSS", proto: 21, sub: 0, telem: null, chans: 8,
@@ -786,9 +786,12 @@ function checkBind(flags) {
   if ((t > 1000 && !flags.includes("binding")) || t > 30000) {
     binding = false;
     showRun();
-    status("st-run", t > 30000 ? "Bind stopped after 30 s: no receiver answered." :
-      "Bind over" + (["ft18", "ft12", "air"].includes(SYSTEMS[$("f-system").value].telem) ? ": the receiver answered." : "."),
-      t > 30000 ? "warn" : "ok");
+    // bindMax: the module's bind ends early only when the receiver answers
+    const s = SYSTEMS[$("f-system").value];
+    const none = t > 30000 || (s.bindMax && t > s.bindMax - 500);
+    status("st-run", none ? "Bind over: no receiver answered." :
+      "Bind over" + (s.bindMax || ["ft18", "ft12"].includes(s.telem) ? ": the receiver answered." : "."),
+      none ? "warn" : "ok");
   }
 }
 
