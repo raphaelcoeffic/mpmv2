@@ -16,6 +16,12 @@
   replies (type 0x13, FASSTest and T-FHSS alike: mpm_frame.h): receiver
   voltage, link quality, S.BUS2 sensor slots decoded as the type picked per slot.
 
+  The stick's EEPROM (binds some systems keep: T-FHSS Surface stores the
+  receiver's ID per receiver number) lives in its RAM (file_server_ram.c),
+  lost when it is unplugged: the page keeps a copy in localStorage, uploads it
+  when the stick starts and reads it back after a bind and at Stop, through
+  the file requests of tools/mpm_fs.py on the link.
+
   Stop = no more frames: the MPM stops its protocol 70 ms after the last
   frame (MPM_INPUT_TIMEOUT_MS), the receiver goes to its failsafe. Frames
   are clocked by a Web Worker timer (not throttled in a background tab as
@@ -171,6 +177,10 @@ puts Zigbee back.</p>
 runs and the tab is open. Stop (or closing the page) cuts the signal: the receiver goes to its
 failsafe, so set one (step 5) if an ESC is connected.</div>
 <div class="status" id="st-run"></div>
+<div class="row">
+  <span class="hint" id="st-ee" style="flex:1"></span>
+  <button class="plain" id="b-ee-forget" hidden>Forget kept binds</button>
+</div>
 </section>
 
 <section id="s-sticks" class="off">
@@ -543,6 +553,7 @@ async function openMpm() {
   startFrames();
   const ok = await waitStatus(1500);
   if (!ok) stopFrames();
+  else await eeRestore();
   return ok;
 }
 
@@ -570,6 +581,12 @@ $("b-connect").onclick = async () => {
   } catch (e) {
     return;
   }
+  await afterConnect();
+};
+
+// A stick picked, or plugged in again: the radio on it started (the kept
+// binds restored, openMpm), or step 2
+async function afterConnect() {
   enable("s-flash", true);
   status("st-connect", "Checking the stick...");
   try {
@@ -591,7 +608,38 @@ $("b-connect").onclick = async () => {
     status("st-connect", "Can't open the stick: " + e.message +
       "\nClose other programs using it (or the sniffer page), unplug it, plug it in again and reload this page.", "bad");
   }
-};
+}
+
+// Unplugged: everything stops (the page would write to a port that is gone);
+// plugged in again (a port this page may use): connected again by itself
+function stickLost() {
+  stopFrames();
+  running = binding = false;
+  idleFrames = true;
+  const l = link;
+  link = null;
+  mode = null;
+  port = null;
+  if (l) l.close().catch(() => {});
+  for (const id of ["s-flash", "s-model", "s-sticks", "s-fs", "s-telem"]) enable(id, false);
+  showRun();
+  resetTelemetry();
+  status("st-run", "Stopped: the stick was unplugged.", "warn");
+  status("st-connect", "The stick was unplugged: plug it in again, the page connects to it by itself " +
+    "(or choose it again).", "warn");
+}
+
+if ("serial" in navigator) {
+  navigator.serial.addEventListener("disconnect", (e) => { if (e.target === port) stickLost(); });
+  navigator.serial.addEventListener("connect", async (e) => {
+    const info = e.target.getInfo();
+    if (port || info.usbVendorId !== CP2102N.usbVendorId || info.usbProductId !== CP2102N.usbProductId) return;
+    port = e.target;
+    status("st-connect", "Stick plugged in again: checking it...");
+    await sleep(500);
+    await afterConnect();
+  });
+}
 
 $("b-flash").onclick = async () => {
   const btn = $("b-flash"), pr = $("pr-flash");
@@ -680,6 +728,13 @@ function stopFrames() {
   ticker.postMessage(0);
   ticker.terminate();
   ticker = null;
+  holdTicks = 0;
+  if (rawOut) {  // a file request waiting for a slot: out now
+    const r = rawOut;
+    rawOut = null;
+    if (link) link.write(r.bytes).catch(() => {});
+    r.done();
+  }
 }
 
 function frameNow() {
@@ -697,12 +752,165 @@ function frameNow() {
 
 function tick() {
   if (!link || mode !== "mpm" || writing) return;
+  if (holdTicks > 0) { holdTicks--; return; }
+  if (rawOut && framesSinceRaw >= 2) {
+    // A file request instead of this frame, the next frames held until it is
+    // out (12 bits a byte at 100000 baud): the stick splits its input at idle
+    // gaps. Two frames at least between requests: the protocol keeps its input
+    const r = rawOut;
+    rawOut = null;
+    framesSinceRaw = 0;
+    writing = true;
+    link.write(r.bytes).catch(() => {}).finally(() => { writing = false; });
+    holdTicks = Math.ceil((r.bytes.length * 0.12) / FRAME_MS);
+    r.done();
+    return;
+  }
   const f = encodeFrame(frameNow());
   frameCount++;
+  framesSinceRaw++;
   writing = true;
   link.write(f).catch(() => {}).finally(() => { writing = false; });
   if (!idleFrames && $("f-sweep").checked && frameCount % 3 === 0) sweepStep();
 }
+
+// ---------------------------------------------------------------------------
+// The stick's EEPROM, kept in this browser (localStorage, base64): uploaded
+// when the stick starts (openMpm), read back after a bind and at Stop. File
+// requests: "FS" seq op payload CRC-32 (tools/mpm_fs.py, src/core/file_server.h),
+// replies in telemetry frames of type 0x40: seq op status data CRC-32. One at a
+// time, in a frame's slot while frames run.
+
+const TELEM_FILE = 0x40, FS_READ = 3, FS_OPEN = 4, FS_WRITE = 5, FS_CLOSE = 6;
+const FS_DATA = 128, EE_SIZE = 2048, EE_KEY = "radio.eeprom", EE_PATH = new TextEncoder().encode("eeprom");
+let rawOut = null, holdTicks = 0, framesSinceRaw = 2, fsSeq = Math.floor(Math.random() * 256), fsWait = null;
+let eeQueue = Promise.resolve();
+
+function u32(v) { return [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]; }
+function cat(...parts) {
+  const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
+  let k = 0;
+  for (const p of parts) { out.set(p, k); k += p.length; }
+  return out;
+}
+
+// Bytes out on their own: in the next frame slot, or at once without frames
+function sendRaw(bytes) {
+  if (!ticker) return link.write(bytes);
+  return new Promise((done) => { rawOut = { bytes, done }; });
+}
+
+function fsReply(d) {
+  if (!fsWait || d.length < 7) return;
+  const body = d.subarray(0, d.length - 4), c = d.subarray(d.length - 4);
+  if (crc32(body) !== ((c[0] | (c[1] << 8) | (c[2] << 16) | (c[3] << 24)) >>> 0)) return;
+  if (body[0] !== fsWait.seq || body[1] !== fsWait.op) return;
+  const w = fsWait;
+  fsWait = null;
+  w.resolve({ status: (body[2] << 24) >> 24, data: body.slice(3) });
+}
+
+// One request, sent again with the same seq when the reply doesn't come (the
+// stick answers a repeated seq from its cache)
+async function fsReq(op, payload) {
+  fsSeq = (fsSeq + 1) & 0xff;
+  const body = cat([fsSeq, op], payload);
+  const frame = cat([0x46, 0x53], body, u32(crc32(body)));
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (!link || mode !== "mpm") throw new Error("the stick isn't connected");
+    const reply = new Promise((resolve) => {
+      fsWait = { seq: fsSeq, op, resolve };
+      setTimeout(() => resolve(null), 400);
+    });
+    await sendRaw(frame);
+    const r = await reply;
+    fsWait = null;
+    if (r) {
+      if (r.status) throw new Error(`file request ${op}: error ${r.status}`);
+      return r.data;
+    }
+  }
+  throw new Error(`file request ${op}: no reply`);
+}
+
+async function eeRead() {
+  const img = new Uint8Array(EE_SIZE);
+  for (let off = 0; off < EE_SIZE; off += FS_DATA) {
+    const d = await fsReq(FS_READ, cat(u32(off), [FS_DATA], EE_PATH));
+    if (d.length !== Math.min(FS_DATA, EE_SIZE - off)) throw new Error("short EEPROM read");
+    img.set(d, off);
+  }
+  return img;
+}
+
+async function eeWrite(img) {
+  await fsReq(FS_OPEN, cat(u32(img.length), u32(crc32(img)), EE_PATH));
+  for (let off = 0; off < img.length; off += FS_DATA)
+    await fsReq(FS_WRITE, cat(u32(off), img.subarray(off, off + FS_DATA)));
+  await fsReq(FS_CLOSE, []);
+}
+
+function eeLoad() {
+  try {
+    const s = localStorage.getItem(EE_KEY);
+    if (!s) return null;
+    const img = Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    return img.length === EE_SIZE ? img : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function eeShow(text, kept) {
+  $("st-ee").textContent = text;
+  $("b-ee-forget").hidden = !kept;
+}
+
+function eeSerial(fn) {
+  const p = eeQueue.then(fn);
+  eeQueue = p.catch(() => {});
+  return p;
+}
+
+// Connected: the kept copy to the stick, unless it has the same already
+function eeRestore() {
+  return eeSerial(async () => {
+    const kept = eeLoad();
+    if (!kept) { eeShow("No binds kept in this browser yet.", false); return; }
+    try {
+      const now = await eeRead();
+      if (now.every((b, i) => b === kept[i])) { eeShow("Binds kept in this browser: on the stick.", true); return; }
+      await eeWrite(kept);
+      eeShow("Binds kept in this browser: restored to the stick.", true);
+    } catch (e) {
+      eeShow("Couldn't restore the kept binds: " + e.message, true);
+    }
+  });
+}
+
+// After a bind or at Stop: the stick's EEPROM into this browser, when it changed
+function eeKeep() {
+  return eeSerial(async () => {
+    if (!link || mode !== "mpm") return;
+    try {
+      const img = await eeRead();
+      const kept = eeLoad();
+      if (kept && img.every((b, i) => b === kept[i])) return;
+      if (img.every((b) => b === 0xff)) return;  // nothing stored: keep what we have
+      let bin = "";
+      for (const b of img) bin += String.fromCharCode(b);
+      localStorage.setItem(EE_KEY, btoa(bin));
+      eeShow("Binds kept in this browser (restored next time the stick is plugged in).", true);
+    } catch (e) {
+      eeShow("Couldn't keep the binds: " + e.message, !!eeLoad());
+    }
+  });
+}
+
+$("b-ee-forget").onclick = () => {
+  try { localStorage.removeItem(EE_KEY); } catch (e) {}
+  eeShow("Kept binds forgotten (the stick keeps them until it is unplugged).", false);
+};
 
 // ---------------------------------------------------------------------------
 // Steps 3-5
@@ -762,6 +970,7 @@ $("b-run").onclick = async () => {
     stopFrames();
     status("st-run", "Stopped: the stick sends nothing, the receiver is in failsafe.", "");
     resetTelemetry();
+    eeKeep();
   } else {
     if (mode !== "mpm" && !(await openMpm())) {
       status("st-run", "The stick doesn't answer: unplug it, plug it in and reload the page.", "bad");
@@ -809,6 +1018,7 @@ function checkBind(flags) {
     status("st-run", none ? "Bind over: no receiver answered." :
       "Bind over" + (s.bindMax || ["ft18", "ft12"].includes(s.telem) ? ": the receiver answered." : "."),
       none ? "warn" : "ok");
+    if (!none) setTimeout(eeKeep, 1000);
   }
 }
 
@@ -897,6 +1107,8 @@ function onTelemetry(type, d) {
     checkBind(flags);
   } else if (type === 0x13 && d.length >= 4) {
     futaba(d);
+  } else if (type === TELEM_FILE) {
+    fsReply(d);
   }
 }
 
