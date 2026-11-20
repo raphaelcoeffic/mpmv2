@@ -346,6 +346,7 @@ void eeprom_write_byte(EE_ADDR address, uint8_t value);
 #define FRSKYX2_CLONE_EEPROM_OFFSET 873
 #define DSM_RX_EEPROM_OFFSET 877     // TX ID (4), format
 #define DSM_CLONE_EEPROM_OFFSET 1074
+#define TFHSS_EEPROM_OFFSET 1527     // RX ID, 4 bytes per model, end is 1527+64*4=1783
 #define EEPROM_CID_INIT_OFFSET 0  // 1 byte flag that Cyrf ID is initialized
 #define EEPROM_CID_OFFSET 1       // 6 bytes Cyrf ID
 
