@@ -34,5 +34,10 @@ bool bench_port_timing_lna();
 // a logic analyzer instead of capturing them (CC2755 LaunchPad); else nothing
 void bench_port_timing_mark();
 
+// Commands of the board's own (cmd: the first word, args: the rest of the
+// line), before "unknown command". False if not the board's. Default
+// (bench.c, weak): none
+bool bench_port_command(const char* cmd, char* args);
+
 // bench.c: an edge, from the port's interrupt
 void bench_edge(uint32_t ticks, uint8_t signal, uint8_t level);

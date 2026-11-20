@@ -2650,7 +2650,14 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "edscan")) _cmd_edscan(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);
-  else _printf("@err unknown command %s\r\n", cmd);
+  else if (!bench_port_command(cmd, args)) _printf("@err unknown command %s\r\n", cmd);
+}
+
+__attribute__((weak)) bool bench_port_command(const char* cmd, char* args)
+{
+  (void)cmd;
+  (void)args;
+  return false;
 }
 
 static void _poll_uart()
