@@ -1,9 +1,10 @@
 // MULTI-Module core on the LP-EM-CC2755P10: the link with the radio on
 // UART0, 100000 baud 8E2, through the XDS110 back channel (a host plays the
-// radio: tools/bench/radio_sim.py), normal polarity. No PPM input, no file
-// system: the EEPROM in RAM (eeprom_ram.c), read and written from the host as
-// the file "eeprom" (file_server_ram.c: "FS" requests on the link, as on the
-// MPM v2's USB), and the debug log sent when a host asks (mpm_fs.py log).
+// radio: tools/bench/radio_sim.py), normal polarity. No PPM input. littlefs
+// on the LaunchPad's flash as on the MPM v2 (core/main_mpm.c): the EEPROM
+// file, the settings, the files from the host ("FS" requests on the link, as
+// on the MPM v2's USB: tools/mpm_fs.py), and the debug log sent when a host
+// asks (mpm_fs.py log).
 //
 // RX in the UART interrupt (platforms/cc27xx/uart.c): a frame ends at the
 // receive timeout (32 bit times of silence). Frames with UART errors are
@@ -80,7 +81,6 @@ void mpm_port_init()
   uart_enable_irqs(UART0, &cb);
   uart_enable_rx_irq(UART0, _rx_buf, sizeof(_rx_buf));
   uart_enable_tx_irq(UART0, _tx_buf, sizeof(_tx_buf));
-  file_server_init(0, 0);
 }
 
 bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
@@ -154,9 +154,15 @@ static void _log_send()
   }
 }
 
+// The EEPROM to the flash as soon as a protocol writes it (bind), the
+// callbacks run in the flash waits (core/main_mpm.c)
 void mpm_port_idle()
 {
   radio_poll();
+  if (eeprom_dirty()) {
+    file_server_sync();
+    eeprom_flush();
+  }
   if (_file_req_ready) _file_request();
   if (log_on) _log_send();
 }

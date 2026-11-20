@@ -1,3 +1,5 @@
+// flash_init() (hal/flash_driver.h): the board's NOR flash (board.h:
+// FLASH_SPI, FLASH_MISO / MOSI / SCLK / CS) at 12 MHz
 #include "nor_flash.h"
 #include "board.h"
 

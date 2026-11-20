@@ -1,5 +1,6 @@
 // LP-EM-CC2755P10 (CC27xx): LEDs, buttons, UART0 on the XDS110 back channel
-// (115200 8N1), HFXT (48 MHz crystal). The chip's base: cc27xx.h
+// (115200 8N1), HFXT (48 MHz crystal), the MX25R8035F flash on SPI0. The
+// chip's base: cc27xx.h
 
 #pragma once
 
@@ -21,6 +22,16 @@
 #define SERIAL_RX_IOD BOARD_UART_RX
 #define SERIAL_TX_IOD BOARD_UART_TX
 #define IOID_UNUSED 0xFFFFFFFF
+
+// MX25R8035F (U3, 1 MB, as on the MPM v2) on SPI0: CS through R89 (DIO19),
+// SO on DIO4 (also BoosterPack J2.14), SI DIO5, SCLK DIO3. littlefs on it
+// (core/main_mpm.c): the EEPROM file, the settings files, the file server
+#define FLASH_SPI  SPI0
+#define FLASH_MISO 4
+#define FLASH_MOSI 5
+#define FLASH_SCLK 3
+#define FLASH_CS   19
+#define BOARD_FILE_SYSTEM
 
 // Boot loader link to the radio: UART0, the XDS110 back channel, where the
 // MPM port talks to the radio (tools/bench/radio_sim.py): the MPM v2's

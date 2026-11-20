@@ -55,11 +55,13 @@ add_application(cc27-bench core/main_bench.c core/bench.c core/bench_fasst.c cor
 target_link_libraries(cc27-bench_elf lrf_cc27xxx10)
 
 # The MPM port: the radio's link on UART0 (100000 8E2, mpm_port.c), the
-# protocols of the MPM v2 build, the EEPROM in RAM (eeprom_ram.c) and the host's
-# file "eeprom" (file_server_ram.c)
-add_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c core/eeprom_ram.c
-    core/file_server_ram.c ${cc27xx_hal_sources} ${cc27xx_rf_sources} core/fasst_frame.c core/jeti_frame.c core/frame.c core/log.c ${mpm_sources} ${mpm_chip_sources})
-target_link_libraries(cc27-mpm_elf lrf_cc27xxx10)
+# protocols of the MPM v2 build, littlefs on the LaunchPad's flash as on the
+# MPM v2 (the EEPROM file, the settings, the file server)
+add_application(cc27-mpm core/main_mpm.c ${board_dir}/mpm_port.c ${cc27xx_hal_sources}
+    ${cc27xx_rf_sources} ${platform_dir}/spi.c core/fasst_frame.c core/jeti_frame.c core/frame.c core/log.c
+    core/eeprom.c core/file_server.c core/lfs_driver.c core/settings.c drivers/flash_driver.c drivers/nor_flash.c
+    ${mpm_sources} ${mpm_chip_sources})
+target_link_libraries(cc27-mpm_elf lrf_cc27xxx10 littlefs)
 target_mpm(cc27-mpm_elf)
 # Another module's ID (e.g. 0x2bf3be8e, an MPM v2's): its bound receivers
 set(CC27_MODULE_ID "" CACHE STRING "MPM module ID of the CC27 port (empty: the chip's)")

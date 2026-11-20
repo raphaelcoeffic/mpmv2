@@ -1,6 +1,7 @@
 // LP-EM-CC2755P10's pins: the LEDs, the buttons (the platform's board.c
-// sets up the chip and UART0)
+// sets up the chip and UART0). One antenna
 #include "board.h"
+#include "antenna.h"
 
 #include <driverlib/gpio.h>
 
@@ -19,6 +20,9 @@ void board_pins_init(void)
 }
 
 void board_led(uint32_t dio, bool on) { GPIOWriteDio(dio, on ? 1 : 0); }
+
+void board_set_antenna(uint8_t antenna) { (void)antenna; }
+uint8_t board_antenna() { return 1; }
 
 // The LEDs are set up with the pins
 void board_app_init(void) {}

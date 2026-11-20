@@ -534,15 +534,14 @@ the settings; a protocol started before keeps what it read, until it starts
 again), the [settings](#settings). `radio_sim.py --eeprom FILE` uploads it
 before its frames start, `--save-eeprom FILE` reads it back at the end.
 
-Boards without a file system (the CC2755P10 LaunchPad's `cc27-mpm`, the
-ZBDongle-P's `firmware`): the
-same requests on the radio's link serve the file `eeprom` alone, the RAM
+Boards without a file system (the ZBDongle-P's `firmware`): the same
+requests on the radio's link serve the file `eeprom` alone, the RAM
 copy (`src/core/file_server_ram.c`): `mpm_fs.py -p $CC_PORT get eeprom`,
 `put`, `eeprom`, `rm` (erased), `ls`, and `log` (the debug log); new files
 and directories get "no space left", `info` an I/O error. An upload
 replaces the copy at `CLOSE`, once its size and CRC-32 check (staged in
-2 KB of RAM). The CC2652 LaunchPad has the MPM v2's NOR flash and file
-system.
+2 KB of RAM). The CC2652 and CC2755P10 LaunchPads have the MPM v2's NOR
+flash (MX25R8035F) and file system.
 
 - Requests: frames starting with `FS` on the USB link (100000 8E2, the
   MULTI link: no MULTI frame starts so), seq, op, payload, CRC-32 (zlib's);
@@ -851,8 +850,7 @@ and out of order uploads (the old file kept), rename / remove / errors, an
 EEPROM write during an upload, a listing over 6 replies, a power cut at each
 program and erase of an upload (the old file, no `.upload` left), the
 EEPROM's RAM copy following an upload, removal and rename of `eeprom`.
-`tests/eeprom_ram/` runs `file_server_ram.c` on the LaunchPad's RAM
-EEPROM: listing, reads, whole and shorter uploads, bad, short, too large and
+`tests/eeprom_ram/` runs `file_server_ram.c` on the RAM EEPROM: listing, reads, whole and shorter uploads, bad, short, too large and
 abandoned ones (no change), other paths refused, removal, retries, `LOG`.
 
 On the LaunchPad (the `firmware` application, not the bench),

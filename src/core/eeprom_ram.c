@@ -1,5 +1,4 @@
-// eeprom.h for the boards without a file system (the CC2755P10 LaunchPad,
-// the ZBDongle-P): RAM only, erased (0xFF) at power up (the FrSky and DSM
+// eeprom.h for the boards without a file system (the ZBDongle-P): RAM only, erased (0xFF) at power up (the FrSky and DSM
 // bind data come again from a bind, or from the host: file_server_ram.c)
 #include "eeprom.h"
 
