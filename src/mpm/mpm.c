@@ -74,11 +74,9 @@ void mpm_telem_send(uint8_t type, const uint8_t* data, uint8_t len)
   mpm_port_write(buf, n + len);
 }
 
-void mpm_bind_done()
-{
-  if (mpm.bind_in_progress) debugln("bind done");
-  mpm.bind_in_progress = false;
-}
+// No log here: T-FHSS clears and sets the flag around CC2500_SetPower()
+// (BIND_DONE) at every packet of its bind. "bind done" after the callbacks
+void mpm_bind_done() { mpm.bind_in_progress = false; }
 
 void mpm_sub_invalid() { _sub_valid = false; }
 
@@ -443,6 +441,9 @@ static void _poll()
 
   _cb_deadline = _next_us;
   _next_us += _callback();
+  static bool binding;
+  if (binding && !mpm.bind_in_progress) debugln("bind done");
+  binding = mpm.bind_in_progress;
 
   // Late: the next callback right away. Else make sure the input gets
   // processed even if the protocol never leaves enough time for it
