@@ -18,6 +18,8 @@
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
   Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
+  Saved as a .zip holding the capture file (deflate with CompressionStream,
+  stored without it); "Clear the recordings" starts a new set.
   Capture file: "# " header lines (key: value), then per recording
   "@step <n> <title>", "@system <FASST|T-FHSS|T-FHSS Air|S-FHSS|Mini-Z> [ch=<n>]",
   "@note <text>", "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx
@@ -174,8 +176,10 @@ one. The counters should move while the transmitter is on.</p>
 
 <section id="s-save" class="off">
 <h2><span class="num">5</span>Save and send</h2>
-<p>Saves all recordings in one text file. Send it to whoever asked you for it.</p>
-<div class="row"><button id="b-save">Save the file</button></div>
+<p>Saves all recordings in one .zip file. Send it to whoever asked you for it. Before
+the next set of recordings, clear them so the next file holds only the new ones.</p>
+<div class="row"><button id="b-save">Save the file</button>
+<button class="plain" id="b-clear">Clear the recordings</button></div>
 <div class="status" id="st-save"></div>
 </section>
 </main>
@@ -184,7 +188,7 @@ one. The counters should move while the transmitter is on.</p>
 "use strict";
 
 const FIRMWARE = "fasst-sniffer-zbdongle-p.bin";
-const PAGE_VERSION = "8";
+const PAGE_VERSION = "9";
 const CP2102N = { usbVendorId: 0x10c4, usbProductId: 0xea60 };
 const XDS110 = { usbVendorId: 0x0451, usbProductId: 0xbef3 };  // CC2652 LaunchPad (bench tests)
 const BENCH_BAUD = 921600;
@@ -819,6 +823,7 @@ function crc10ch(hex) {
 }
 
 const recordings = [];  // { step, title, system, note, time, lines, packets, good }
+let unsaved = false;    // recordings since the last save
 let running = null;     // { rec, timer, ui, stop() }
 
 function stepUi(step, index) {
@@ -853,6 +858,7 @@ $("f-system").onchange = () => {
   }
   shownSystem = sel.value;
   recordings.length = 0;
+  unsaved = false;
   $("st-save").textContent = "";
   showModes();
   showSteps();
@@ -945,6 +951,7 @@ async function record(step, index, li) {
       if (old >= 0) recordings.splice(old, 1);
       recordings.push(rec);
       recordings.sort((a, b) => a.step - b.step);
+      unsaved = true;
       show();
       live.textContent += rec.packets ? "  ✓ saved"
         : step.maybeEmpty ? "  ✓ saved (nothing received, as expected)"
@@ -972,6 +979,48 @@ async function record(step, index, li) {
   if (!stopped) timer = setTimeout(() => running && running.stop(), step.secs * 1000);
 }
 
+// A .zip with one file: deflated where the browser has CompressionStream
+// (the capture text shrinks about 5x), stored otherwise
+async function zipOne(name, text) {
+  const data = new TextEncoder().encode(text);
+  let body = data, method = 0;
+  if (typeof CompressionStream === "function") {
+    try {
+      const stream = new Blob([data]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+      body = new Uint8Array(await new Response(stream).arrayBuffer());
+      method = 8;
+    } catch (e) {
+      body = data;
+      method = 0;
+    }
+  }
+  const fname = new TextEncoder().encode(name);
+  const d = new Date();
+  const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  const crc = crc32(data);
+  const header = (sig, central) => {
+    const h = new DataView(new ArrayBuffer(central ? 46 : 30));
+    let o = 0;
+    const u16 = (v) => { h.setUint16(o, v, true); o += 2; };
+    const u32 = (v) => { h.setUint32(o, v >>> 0, true); o += 4; };
+    u32(sig);
+    if (central) u16(20);           // made by
+    u16(20); u16(0x0800); u16(method); u16(time); u16(date);  // UTF-8 name
+    u32(crc); u32(body.length); u32(data.length); u16(fname.length); u16(0);
+    if (central) { u16(0); u16(0); u16(0); u32(0); u32(0); }  // local header at 0
+    return new Uint8Array(h.buffer);
+  };
+  const local = header(0x04034b50, false), cent = header(0x02014b50, true);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, 1, true);
+  end.setUint16(10, 1, true);
+  end.setUint32(12, cent.length + fname.length, true);
+  end.setUint32(16, local.length + fname.length + body.length, true);
+  return new Blob([local, fname, body, cent, fname, end], { type: "application/zip" });
+}
+
 function download(blob, name) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -982,7 +1031,7 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
-$("b-save").onclick = () => {
+$("b-save").onclick = async () => {
   if (!recordings.length) {
     status("st-save", "Nothing recorded yet.", "warn");
     return;
@@ -1006,8 +1055,21 @@ $("b-save").onclick = () => {
   }
   const radio = $("f-radio").value.trim().replace(/[^A-Za-z0-9_-]+/g, "-") || "radio";
   const day = new Date().toISOString().slice(0, 10);
-  download(new Blob([out.join("\n") + "\n"], { type: "text/plain" }), `${system().file}-${radio}-${day}.txt`);
-  status("st-save", "Saved. Send that file, thanks!", "ok");
+  const name = `${system().file}-${radio}-${day}`;
+  download(await zipOne(`${name}.txt`, out.join("\n") + "\n"), `${name}.zip`);
+  unsaved = false;
+  status("st-save", `Saved ${recordings.length} recording(s). Send that file, thanks! ` +
+         "Clear the recordings before the next set.", "ok");
+};
+
+// A new set: the recordings and the steps' state go, free recordings too
+$("b-clear").onclick = () => {
+  if (running) return;
+  if (unsaved && !confirm(`Drop the ${recordings.length} recording(s) not saved yet?`)) return;
+  recordings.length = 0;
+  unsaved = false;
+  showSteps();
+  status("st-save", "Cleared: ready for a new set.", "ok");
 };
 
 // ---------------------------------------------------------------------------
