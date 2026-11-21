@@ -23,6 +23,7 @@
 
 #include "board.h"
 #include "eeprom.h"
+#include "log.h"
 #include "mpm/mpm.h"
 #include "mpm/mpm_frame.h"
 #include "radio.h"
@@ -116,6 +117,9 @@ void mpm_port_init()
   uart_enable_irqs(UART0, &cb);
   uart_enable_rx_irq(UART0, _rx_buf, sizeof(_rx_buf));
   uart_enable_tx_irq(UART0, _tx_buf, sizeof(_tx_buf));
+#ifdef XJT_LOG
+  log_enable(LOG_FILE, true);
+#endif
 }
 
 bool mpm_port_read_frame(uint8_t* buf, uint8_t* len)
@@ -151,8 +155,34 @@ void mpm_port_reset_rf() { radio_off(); }
 // The chip's IEEE 802.15.4 address: its last 32 bits
 uint32_t mpm_port_module_id() { return HWREG(FCFG1_BASE + FCFG1_O_MAC_15_4_0); }
 
+#ifdef XJT_LOG
+// XJT_LOG (CMake option): the debug log on the telemetry output, no USB
+// here. MPM log frames as the other boards send on their USB link ('M' 'P'
+// 0x41, length, text; the radio skips them), up to LOG_FRAME bytes while
+// the protocol's telemetry keeps LOG_RESERVE bytes of room. Read with a tap
+// on the line (100000 baud 8E2, the telemetry's polarity)
+#define LOG_FRAME 32
+#define LOG_RESERVE 64
+static void _log_send()
+{
+  while (log_pending() && uart_tx_free(UART0) >= MPM_TELEM_HDR_LEN + LOG_FRAME + LOG_RESERVE) {
+    uint8_t frame[MPM_TELEM_HDR_LEN + LOG_FRAME];
+    uint8_t n = log_read((char*)frame + MPM_TELEM_HDR_LEN, LOG_FRAME);
+    if (n == 0) break;
+    frame[0] = 'M';
+    frame[1] = 'P';
+    frame[2] = MPM_TELEM_LOG;
+    frame[3] = n;
+    uart_tx_irq(UART0, frame, MPM_TELEM_HDR_LEN + n);
+  }
+}
+#endif
+
 // The EEPROM to its chip as soon as a protocol writes it (bind)
 void mpm_port_idle()
 {
   if (eeprom_dirty()) eeprom_flush();
+#ifdef XJT_LOG
+  if (log_on) _log_send();
+#endif
 }

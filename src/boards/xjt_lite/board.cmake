@@ -48,6 +48,11 @@ add_board_app(firmware ${board_dir}/xjt_lite.ld
 )
 target_mpm(firmware_elf)
 target_link_options(firmware_elf PRIVATE -Wl,--defsym=__app_start=${XJT_APP_START})
+# The debug log on the telemetry output (mpm_port.c), off by default
+option(XJT_LOG "XJT-Lite: the debug log on the telemetry output" OFF)
+if (XJT_LOG)
+    target_compile_definitions(firmware_elf PRIVATE XJT_LOG)
+endif()
 add_custom_target(firmware ALL DEPENDS ${CMAKE_BINARY_DIR}/firmware.bin)
 
 add_custom_target(flash-firmware
