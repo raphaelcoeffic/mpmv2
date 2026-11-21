@@ -409,9 +409,10 @@ def cmd_link(r: Radio, a):
 
 def cmd_drive(r: Radio, a):
     """A real receiver: with --bind the bind flag stays set until the
-    protocol ends its bind; --bind-time keeps binding that long, restarting
-    the bind (the flag cleared for a few frames) every --step seconds or when
-    the protocol ends it, with the next of --options if given. Then the first
+    protocol ends its bind, at most --bind-time seconds if given. With
+    --options, binding goes on for --bind-time, restarted (the flag cleared
+    for a few frames) with the next option every --step seconds or when the
+    protocol ends it. Then the first
     --sweep-ch channels from --sweep-from sweep (spread over the period), the others centred.
     Status flags, telemetry frame counts and link statistics each second, until --time (0: Ctrl-C).
     --run-options: after the bind, the option (the frequency offset of the FrSky
@@ -472,7 +473,7 @@ def cmd_drive(r: Radio, a):
                     print(f"{t:6.1f} s DSM bind response {d[:10].hex()}: sub {sub}, {ch} channels")
             if binding and t - bind_start > 1.0:
                 ended = "binding" not in flags
-                if t < a.bind_time and (ended or (a.options and t - bind_start >= a.step)):
+                if t < a.bind_time and a.options and (ended or t - bind_start >= a.step):
                     opt_idx = (opt_idx + 1) % len(options) if a.options else 0
                     r.set(bind=False)
                     time.sleep(0.03)
@@ -754,7 +755,7 @@ def main():
     ap.add_argument("--sweep-from", type=int, default=1, help="drive: first channel swept")
     ap.add_argument("--set", help="drive: channels held at a value, CH=VALUE[,CH=VALUE...] (204..1844)")
     ap.add_argument("--failsafe", help="drive: failsafe frames, CH=VALUE[,CH=VALUE...] (0 no pulses, 2047 hold), the others hold")
-    ap.add_argument("--bind-time", type=float, default=0.0, help="drive: keep binding, s")
+    ap.add_argument("--bind-time", type=float, default=0.0, help="drive: longest bind, s (with --options: bind that long)")
     ap.add_argument("--options", help="drive: option sweep while binding, lo:hi:step")
     ap.add_argument("--step", type=float, default=3.0, help="drive: seconds per --options / --run-options value")
     ap.add_argument("--run-options", help="drive: option sweep after the bind, lo:hi:step[,lo:hi:step...]")
