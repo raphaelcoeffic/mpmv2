@@ -29,11 +29,12 @@
 
 #if defined(MPM_REDUCED)
 // The reduced MPM (the XJT-Lite's board.cmake; CC2650, 20 KB of RAM): FrSky
-// D and X, and the WLtoys cars' V2x2 and XK
+// D and X, the WLtoys cars' V2x2 and XK, and MJXq
 #define NRF24L01_INSTALLED
 #define NRF24L01_ENABLE_LOW_POWER
 #define V2X2_NRF24L01_INO
 #define XK_CCNRF_INO
+#define MJXQ_CCNRF_INO
 
 #define CC2500_INSTALLED
 #define CC2500_ENABLE_LOW_POWER

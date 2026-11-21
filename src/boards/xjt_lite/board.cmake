@@ -27,7 +27,7 @@ include(platforms/cc26xx/platform.cmake)
 # The reduced MPM: its protocols (mpm/multi/mpm_config.h, xjt_chip_sources)
 list(APPEND board_definitions MPM_REDUCED)
 
-# The MPM port: FrSky D and X, V2x2, XK (mpm/multi/mpm_config.h), without
+# The MPM port: FrSky D and X, V2x2, XK, MJXq (mpm/multi/mpm_config.h), without
 # the A7105 and CYRF6936 emulations (RAM). firmware.elf and firmware.bin in
 # the build directory; flash-firmware: at XJT_APP_START, with the patched
 # OpenOCD
