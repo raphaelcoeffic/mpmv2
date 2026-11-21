@@ -53,9 +53,9 @@ void fasstest_run(const fasstest_cfg_t* cfg, fasst_print_t print);
 // hop it came on, the packet's first bytes (bits LSB first, as on air) and
 // per byte its worst bit correlation (0..b, b = all 11 chips right). shift:
 // bits from the RF core's sync word to the real one; sync=none instead if
-// not found. With follow, a 10ch packet with a good CRC locks on the hops
-// (fasst_unpack(): the next hop and its time); an unknown format stays
-// parked on k. FASSTest (CRC unchecked, the whitening needs the TX ID): a
+// not found. With follow, a 10ch / MULT or 7CH packet with a good CRC locks
+// on the hops (fasst_unpack(), fasst7_unpack(): the next hop and its time);
+// an unknown format stays parked on k. FASSTest (CRC unchecked, the whitening needs the TX ID): a
 // TX packet with clean chips and a known hop code locks, and the RX stays
 // on its channel until just before the next hop, for the receiver's reply
 typedef struct {
@@ -64,7 +64,7 @@ typedef struct {
   uint16_t bytes;          // packet bytes to print, 1..FASST_RX_BYTES_MAX
   uint8_t rx_bw;           // RF core RX bandwidth code
   uint8_t sync_threshold;  // 0 = default
-  bool follow;             // follow the hops (10ch, FASSTest)
+  bool follow;             // follow the hops (10ch / MULT, 7CH, FASSTest)
   bool fasstest;           // FASSTest: k = its channel 0..75 (FASSTEST_CHANNELS)
   uint8_t chips;           // chips per bit: FASST_BARKER_11, or _7 (FASSTest 12CH)
   bool (*stop)();          // true: end the run now (the host asked), or NULL

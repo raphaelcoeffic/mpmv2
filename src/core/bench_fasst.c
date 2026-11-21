@@ -351,12 +351,16 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
     return;
   }
 
-  // Locked: on hop k, the next packet's sync word at t_next. A packet with a
-  // good CRC (re)locks: its hop index and step give the next hop. A miss
-  // keeps the timing, one hop further; FASST_HOPS in a row: parked again
+  // Locked: on hop k, the next packet's sync word at t_next. A 10ch / MULT
+  // or 7CH packet with a good CRC (re)locks: its hop index and step give the
+  // next hop. A miss keeps the timing, one hop further; FASST_HOPS in a row:
+  // parked again. The frame time: the format's, then measured between good
+  // packets (7CH: 8.000 ms from a T14SG, 8.022 ms from a 12FG / TM-14 and
+  // a T6EX)
   uint8_t k = cfg->k, step = 0;
   bool locked = false, listening = true;
-  uint32_t t_next = 0, misses = 0, rx_us = BIT_US(cfg, _rx_bits(cfg));
+  uint32_t t_next = 0, t_sync = 0, frame_us = FASST_FRAME_US, misses = 0;
+  uint32_t rx_us = BIT_US(cfg, _rx_bits(cfg));
   uint32_t packets = 0, good = 0, missed = 0, locks = 0, restarts = 0;
   uint32_t t_end = micros() + cfg->secs * 1000000;
   while ((cfg->secs == 0 || micros_before(t_end)) && !(cfg->stop && cfg->stop())) {
@@ -364,15 +368,29 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
       packets++;
       int32_t shift = _despread(cfg);
       uint8_t plain[FASST_PACKET_LEN], pk, pstep, heard = k;
+      uint16_t ch7[FASST7_CHANNELS];
+      uint8_t code;
+      uint32_t nominal = FASST_FRAME_US;
       bool ok = shift >= 0 && cfg->bytes >= FASST_PACKET_LEN && fasst_unpack(_bytes, plain, &pk, &pstep);
+      if (!ok && shift >= 0 && cfg->bytes >= FASST7_PACKET_LEN &&
+          fasst7_unpack(_bytes, plain, &pk, &pstep, ch7, &code)) {
+        ok = true;
+        nominal = FASST7_FRAME_US;
+      }
       good += ok;
       if (cfg->follow && ok) {
+        // misses + 1 frames since the last good packet: within 1 % of the
+        // format's frame time, that is this TX's
+        uint32_t t = _pkt.timestamp_us + BIT_US(cfg, shift);
+        uint32_t measured = locked ? (t - t_sync) / (misses + 1) : 0;
+        frame_us = measured * 100 > nominal * 99 && measured * 100 < nominal * 101 ? measured : nominal;
+        t_sync = t;
         locks += !locked;
         locked = true;
         misses = 0;
         step = pstep;
         k = fasst_next_hop(pk, step);
-        t_next = _pkt.timestamp_us + BIT_US(cfg, shift) + FASST_FRAME_US;
+        t_next = t + frame_us;
         radio_set_frequency(fasst_freq_khz(k));
         listening = false;
       }
@@ -383,7 +401,7 @@ void fasst_rx_run(const fasst_rx_cfg_t* cfg, fasst_print_t print)
     } else if (locked && listening && !micros_before(t_next + rx_us + FASST_RX_LATE_US)) {
       missed++;
       k = fasst_next_hop(k, step);
-      t_next += FASST_FRAME_US;
+      t_next += frame_us;
       if (++misses >= FASST_HOPS) {
         locked = false;
         k = cfg->k;
