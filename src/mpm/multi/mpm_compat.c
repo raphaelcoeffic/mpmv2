@@ -126,7 +126,7 @@ void mpm_protocol_frame_data()
 #ifdef SPORT_SEND
 #define BYTE_STUFF 0x7D
 #define STUFF_MASK 0x20
-  if ((protocol == PROTO_FRSKYX || protocol == PROTO_FRSKYX2) && n == 8) {
+  if ((protocol == PROTO_FRSKYX || protocol == PROTO_FRSKYX2 || protocol == PROTO_FRSKYA) && n == 8) {
     // An S.Port frame for the receiver: physical id, then 7 bytes
     bool sport_valid = false;
     for (uint8_t i = 1; i < 8; i++)
@@ -159,6 +159,10 @@ void mpm_protocol_frame_data()
       }
     }
   }
+#endif
+#if defined(FRSKYA_CC2500_INO)
+  // A Lua / multiBuffer message (8 bytes = S.Port)
+  if (protocol == PROTO_FRSKYA && n > 1 && n < 8) FrSkyA_lua_in(d, n);
 #endif
 }
 

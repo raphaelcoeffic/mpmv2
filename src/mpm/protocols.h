@@ -69,6 +69,10 @@ uint16_t FRSKYV_callback();
 void FRSKYX_init();
 uint16_t FRSKYX_callback();
 #endif
+#ifdef FRSKYA_CC2500_INO
+void FRSKYA_init();
+uint16_t FRSKYA_callback();
+#endif
 #ifdef FLYSKY_A7105_INO
 void FLYSKY_init();
 uint16_t FLYSKY_callback();

@@ -6,3 +6,4 @@
 #include "FrSkyV_cc2500.c"
 #include "FrSkyX_cc2500.c"
 #include "FrSky_Rx_cc2500.c"
+#include "FrSky_ACCESS_cc2500.c"

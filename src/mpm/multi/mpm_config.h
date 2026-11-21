@@ -74,6 +74,7 @@
 #define FRSKYD_CC2500_INO
 #define FRSKYV_CC2500_INO
 #define FRSKYX_CC2500_INO
+#define FRSKYA_CC2500_INO  // FrSky ACCESS, on the FrSky X routines and telemetry
 #define FUTABA_CC2500_INO
 #define FUTABA_TFHSS  // T-FHSS sub protocols (Validate.h: 128KB STM32 only upstream)
 #define FUTABA_FW_TELEMETRY

@@ -265,6 +265,11 @@ extern uint8_t telemetry_link;
 #ifdef FUTABA_FW_TELEMETRY
 extern uint8_t futaba_telem[3 + 16], futaba_telem_len;
 #endif
+#ifdef FRSKYA_CC2500_INO
+// FrSkyA's Lua pipe (FrSky_ACCESS_cc2500): radio -> receiver, receiver -> radio
+void FrSkyA_lua_in(const uint8_t* d, uint8_t len);
+extern uint8_t FrSkyA_lua_out[2 + 15], FrSkyA_lua_out_len;
+#endif
 extern uint8_t telemetry_counter;
 extern uint8_t telemetry_lost;
 #ifdef SPORT_SEND

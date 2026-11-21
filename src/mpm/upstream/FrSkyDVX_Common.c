@@ -386,7 +386,7 @@ void Frsky_init_clone(void)
 	static bool __attribute__((unused)) FrSky_cc26xx_plan()
 	{
 		#ifdef FRSKY_CC26XX_PLAN
-			return protocol==PROTO_FRSKYX || protocol==PROTO_FRSKYX2;
+			return protocol==PROTO_FRSKYX || protocol==PROTO_FRSKYX2 || protocol==PROTO_FRSKYA;  // mpm-v2: ACCESS gear on 300 kHz steps too
 		#else
 			return false;
 		#endif

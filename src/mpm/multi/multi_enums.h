@@ -116,6 +116,7 @@ enum PROTOCOLS
 	PROTO_WPL		= 107,	// =>NRF24L01
 	PROTO_ARES		= 108,	// =>CC2500
 	PROTO_MOFLY		= 109,	// =>CC2500 & NRF24L01
+	PROTO_FRSKYA	= 112,	// =>CC2500
 	
 	PROTO_NANORF	= 126,	// =>NRF24L01
 	PROTO_TEST		= 127,	// =>CC2500
@@ -268,6 +269,13 @@ enum FRSKYD
 {
 	FRSKYD	= 0,
 	DCLONE	= 1,
+};
+enum FRSKYA
+{
+	A_16		= 0,
+	A_8		= 1,
+	A_EU16	= 2,
+	A_EU8	= 3,
 };
 enum FRSKYX
 {

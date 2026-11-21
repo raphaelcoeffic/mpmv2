@@ -1,6 +1,9 @@
 #include "protocols.h"
 
 // clang-format off
+#ifdef FRSKYA_CC2500_INO
+#define STR_SUBTYPE_FRSKYA "\x06" "16ch\0 " "8ch\0  " "EU16ch" "EU 8ch"
+#endif
 #ifdef FRSKYX_CC2500_INO
 #define STR_SUBTYPE_FRSKYX "\x07" "D16\0   " "D16 8ch" "LBT(EU)" "LBT 8ch" "Cloned\0" "Clo 8ch"
 #endif
@@ -87,6 +90,10 @@ const mpm_protocol_t mpm_protocols[] = {
 #endif
 #ifdef JETI_INO
   {PROTO_JETI, "Jeti", "\x04" "8ch " "12ch" "16ch", 3, MPM_OPTION_NONE, false, false, JETI_init, JETI_callback, 0},
+#endif
+#ifdef FRSKYA_CC2500_INO
+  {PROTO_FRSKYA, "FrSkyA", STR_SUBTYPE_FRSKYA, 4, MPM_OPTION_RFTUNE, true, false, FRSKYA_init,
+   FRSKYA_callback, 0},
 #endif
   {PROTO_TEST, "Test", "\x04" "1M  250k", 2, MPM_OPTION_RFCHAN, false, false, TEST_init, TEST_callback, 0},
 };
