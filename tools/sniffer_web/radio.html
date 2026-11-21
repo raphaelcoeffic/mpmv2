@@ -262,9 +262,11 @@ const SYSTEMS = {
   tfhssair: { name: "T-FHSS Air (R3008SB, R3006SB...)", proto: 21, sub: 3, telem: "air", chans: 16, bindMax: 20000,
            bind: "Press Bind, then put the receiver in its link mode (see its manual) close to the stick. " +
                  "Bind ends when the receiver answers (20 s at most)." },
-  sfhss: { name: "S-FHSS", proto: 21, sub: 0, telem: null, chans: 8,
-           bind: "Press Bind, then hold the receiver's Link button with the receiver on until its LED stays on. " +
-                 "The stick binds for a few seconds." },
+  // linkMs: no bind on the stick's side, the receiver links to what it hears:
+  // Bind = full power for linkMs (an R2008SB did not link at Low, only at Full < 50 cm)
+  sfhss: { name: "S-FHSS", proto: 21, sub: 0, telem: null, chans: 8, linkMs: 10000,
+           bind: "Press Bind (the stick sends at full power for 10 s), then hold the receiver's Link button " +
+                 "with the receiver on, within 50 cm of the stick, until its LED stays on." },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -739,10 +741,10 @@ function stopFrames() {
 
 function frameNow() {
   const sys = SYSTEMS[$("f-system").value];
-  const pw = $("f-power").value;
+  const pw = binding && sys.linkMs ? "full" : $("f-power").value;
   const base = {
     proto: idleFrames ? PROTO_IDLE : sys.proto, sub: idleFrames ? 0 : sys.sub,
-    rx: +$("f-rx").value, option: 0, bind: !idleFrames && binding,
+    rx: +$("f-rx").value, option: 0, bind: !idleFrames && binding && !sys.linkMs,
     range: pw === "range", low: pw !== "full", ch: channelValues(),
   };
   if (!idleFrames && frameCount % FS_EVERY === 0 && !binding)
@@ -1000,6 +1002,8 @@ function showRun() {
   if (running && !binding) {
     const s = SYSTEMS[$("f-system").value];
     status("st-run", `Sending ${s.name}, receiver number ${$("f-rx").value}.`, "ok");
+  } else if (binding && SYSTEMS[$("f-system").value].linkMs) {
+    status("st-run", "Linking: full power for 10 s, press the receiver's Link button now.", "warn");
   } else if (binding) {
     status("st-run", "Binding: switch the receiver on now (see above).", "warn");
   }
@@ -1009,11 +1013,19 @@ function showRun() {
 function checkBind(flags) {
   if (!binding) return;
   const t = performance.now() - bindStart;
+  const s = SYSTEMS[$("f-system").value];
+  if (s.linkMs) {  // the page's own window: the module has no bind to report
+    if (t > s.linkMs) {
+      binding = false;
+      showRun();
+      status("st-run", "Link window over, back to the selected power.", "ok");
+    }
+    return;
+  }
   if ((t > 1000 && !flags.includes("binding")) || t > 30000) {
     binding = false;
     showRun();
     // bindMax: the module's bind ends early only when the receiver answers
-    const s = SYSTEMS[$("f-system").value];
     const none = t > 30000 || (s.bindMax && t > s.bindMax - 500);
     status("st-run", none ? "Bind over: no receiver answered." :
       "Bind over" + (s.bindMax || ["ft18", "ft12"].includes(s.telem) ? ": the receiver answered." : "."),
