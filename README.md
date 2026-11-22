@@ -116,14 +116,16 @@ ninja -C build-lp flash-bench
 ```
 
 FrSky's XJT-Lite (CC2650, a reduced MPM): `firmware.bin` at 0x8000, behind
-FrSky's boot loader. `flash-firmware` writes it over cJTAG (`XJT_OPENOCD`:
-an OpenOCD with J-Link cJTAG support,
+FrSky's boot loader. `firmware.frk` is the same image for that boot loader:
+the radio flashes it over S.Port like FrSky's own XJT-Lite files (EdgeTX:
+flash an external module). On the bench, `flash-firmware` writes the
+binary over cJTAG (`XJT_OPENOCD`: an OpenOCD with J-Link cJTAG support,
 [raphaelcoeffic/openocd](https://github.com/raphaelcoeffic/openocd), branch
 jlink-cjtag):
 
 ```bash
 cmake -S . -B build-xjt -G Ninja -DBOARD=XJT_LITE
-ninja -C build-xjt                     # firmware.elf, firmware.bin
+ninja -C build-xjt                     # firmware.elf, firmware.bin, firmware.frk
 ninja -C build-xjt flash-firmware
 ```
 
