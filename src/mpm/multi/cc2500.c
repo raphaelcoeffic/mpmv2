@@ -172,26 +172,51 @@ static uint32_t _channel_khz()
 // The registers of the last _setup(), the frequency ones left out
 static uint8_t _setup_regs[NREGS];
 
-static bool _regs_changed()
+// The setup before it: a protocol switching between two register sets
+// (FrSkyA: its TX and RX sync words, each frame) swaps them back instead of
+// a new _setup() and frame_init(): 260 us on the CC2650, before each TX and
+// RX (the TX past its time slot, TX_AT_US)
+static uint8_t _alt_regs[NREGS];
+static frame_t _alt_frame;
+static radio_phy_t _alt_phy;
+static bool _alt_ok;
+
+static bool _regs_differ(const uint8_t* a, const uint8_t* b)
 {
   for (uint8_t i = 0; i < NREGS; i++) {
     if (i == CC2500_0A_CHANNR || i == CC2500_0C_FSCTRL0 ||
         (i >= CC2500_0D_FREQ2 && i <= CC2500_0F_FREQ0) ||
         (i >= CC2500_23_FSCAL3 && i <= CC2500_26_FSCAL0))
       continue;
-    if (_reg[i] != _setup_regs[i]) return true;
+    if (a[i] != b[i]) return true;
   }
   return false;
 }
+
+static bool _regs_changed() { return _regs_differ(_reg, _setup_regs); }
 
 // Radio set up for the registers: false if not supported (nothing sent).
 // _setup() and frame_init() (about 170 us) only after a register change
 static bool _prepare()
 {
-  if (!_phy_on || _regs_changed()) {
+  if (_phy_on && _regs_changed() && _alt_ok && !_regs_differ(_reg, _alt_regs) &&
+      !memcmp(&_alt_phy, &_phy, sizeof(_phy))) {
+    // Back to the setup before: swapped, the same PHY
+    frame_t f = _frame;
+    _frame = _alt_frame;
+    _alt_frame = f;
+    memcpy(_alt_regs, _setup_regs, NREGS);
+    memcpy(_setup_regs, _reg, NREGS);
+  } else if (!_phy_on || _regs_changed()) {
     radio_phy_t phy;
     frame_t f;
     if (!_setup(&phy, &f)) return false;
+    if (_phy_on) {
+      _alt_frame = _frame;
+      memcpy(_alt_regs, _setup_regs, NREGS);
+      _alt_phy = _phy;
+      _alt_ok = true;
+    }
     if (!_phy_on || memcmp(&phy, &_phy, sizeof(phy))) {
       _phy = phy;
       _freq_khz = 0;
@@ -460,6 +485,7 @@ uint8_t CC2500_Reset()
   _tx_len = _rx_len = 0;
   _lqi = 0;
   _phy_on = false;  // radio_init() at the next TX or RX
+  _alt_ok = false;
   return 1;
 }
 
