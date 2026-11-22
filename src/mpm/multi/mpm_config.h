@@ -28,8 +28,10 @@
 #endif
 
 #if defined(MPM_REDUCED)
-// The reduced MPM (the XJT-Lite's board.cmake; CC2650, 20 KB of RAM): FrSky
-// D and X, the WLtoys cars' V2x2 and XK, and MJXq
+// The reduced MPM (the XJT-Lite's board.cmake; CC2650, 20 KB of RAM): the
+// CC2500 protocols, and the WLtoys cars' V2x2 and XK, and MJXq. Not the
+// protocols that receive at 750 kbps and up (nothing received there: Bayang
+// telemetry and RX, CFlie, DSM), nor the A7105 and CYRF6936 emulations (RAM)
 #define NRF24L01_INSTALLED
 #define NRF24L01_ENABLE_LOW_POWER
 #define V2X2_NRF24L01_INO
@@ -39,7 +41,14 @@
 #define CC2500_INSTALLED
 #define CC2500_ENABLE_LOW_POWER
 #define FRSKYD_CC2500_INO
+#define FRSKYV_CC2500_INO
 #define FRSKYX_CC2500_INO
+#define FRSKYA_CC2500_INO
+#define FUTABA_CC2500_INO
+#define FUTABA_TFHSS
+#define FUTABA_FW_TELEMETRY
+#define FRSKY_RX_CC2500_INO
+#define FRSKY_RX_TELEMETRY
 #else
 // NRF24L01 / XN297 family: NRF24L01 and XN297 emulations on the CC2652
 // (nrf24l01.c, xn297.c)

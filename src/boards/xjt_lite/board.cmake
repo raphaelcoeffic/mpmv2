@@ -27,10 +27,10 @@ include(platforms/cc26xx/platform.cmake)
 # The reduced MPM: its protocols (mpm/multi/mpm_config.h, xjt_chip_sources)
 list(APPEND board_definitions MPM_REDUCED)
 
-# The MPM port: FrSky D and X, V2x2, XK, MJXq (mpm/multi/mpm_config.h), without
-# the A7105 and CYRF6936 emulations (RAM). firmware.elf and firmware.bin in
-# the build directory; flash-firmware: at XJT_APP_START, with the patched
-# OpenOCD
+# The MPM port: the CC2500 protocols, V2x2, XK, MJXq (mpm/multi/mpm_config.h),
+# without the A7105 and CYRF6936 emulations (RAM). firmware.elf and
+# firmware.bin in the build directory; flash-firmware: at XJT_APP_START, with
+# the patched OpenOCD
 set(xjt_chip_sources ${mpm_chip_sources})
 list(REMOVE_ITEM xjt_chip_sources mpm/multi/a7105.c mpm/multi/cyrf6936.c)
 add_board_app(firmware ${board_dir}/xjt_lite.ld
