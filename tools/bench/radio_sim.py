@@ -247,7 +247,12 @@ class Radio:
                     break
                 if buf[2] == 0x01 and buf[3]:
                     self.buf_low = bool(buf[4] & 0x80)
-                self.telem.put((time.monotonic(), buf[2], bytes(buf[4:4 + buf[3]])))
+                if buf[2] == 0x41:
+                    # The module's log on the link (XJT-Lite's XJT_LOG): printed as it comes
+                    sys.stdout.write(bytes(buf[4:4 + buf[3]]).decode(errors="replace"))
+                    sys.stdout.flush()
+                else:
+                    self.telem.put((time.monotonic(), buf[2], bytes(buf[4:4 + buf[3]])))
                 del buf[:4 + buf[3]]
 
     def wait(self, type_: int, timeout: float = 1.0):
