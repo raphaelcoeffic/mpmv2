@@ -1968,6 +1968,48 @@ static void _cmd_tfhss_air(uint32_t secs, uint32_t row, uint32_t period, uint32_
 // late: parked again
 #define TFHSS_BIND_PERIOD_US 3000
 #define TFHSS_BIND_LATE_US 600
+// fakerx = 1 (Surface, follow): a receiver in link mode then linked, to test
+// a TX with replies (doc/futaba.md, the MULTI bench's fake R334SBS): to a
+// plain bind packet the bind reply (type 24 / 25, the packet's ID, x and
+// channel byte, our ID TFHSS_FAKE_RX_ID, plain) on the next list channel;
+// a bind packet with byte 1 bit 7 after a reply = linked (no more bind
+// replies). Linked, each TX packet is checked with the full key 00 00 ID x
+// n RXID (data_ok / data_bad) and a good servo packet (type 0) gets the
+// telemetry reply (type 16, group << 4, 4 S.BUS2 slots: slot 0 = 5.0 V,
+// bytes 10 / 11 = 40 05 every other one, else 00 64 = link quality 100 %),
+// keyed 00 00 RXID x n ID, on the next channel of the row. Both replies go
+// out reply_us after the packet's sync word (R334SBS: 1906 us between the
+// sync words), TFHSS_TX_SYNC_US = the start-to-sync time of radio_tx_start_at()
+#define TFHSS_FAKE_RX_ID 231602546UL  // tegots123's R334SBS
+#define TFHSS_REPLY_US 1906
+#define TFHSS_TX_SYNC_US 227  // 102 us PA start + 4 preamble + 2 sync bytes at 384 kbps
+
+// A reply waiting for the next hop: sent on channel n before the RX starts
+static uint8_t _tf_reply[RADIO_MAX_PKT_LEN], _tf_reply_n;
+static uint16_t _tf_reply_len;
+static uint32_t _tf_reply_at, _tf_replies_sent, _tf_replies_late;
+
+static void _tfhss_reply(const uint8_t* plain, const uint8_t* key, uint8_t n, uint32_t at)
+{
+  uint8_t pkt[TFHSS_PACKET_LEN];
+  tfhss_packet(pkt, plain, key);
+  _tf_reply_len = frame_tx_data(&_frame, pkt, sizeof(pkt), _tf_reply);
+  _tf_reply_n = n;
+  _tf_reply_at = at;
+}
+
+// RX on channel n (the reply first if one waits for n)
+static void _tfhss_hop(uint8_t n, uint16_t rx_len)
+{
+  _radio_rx_stop();
+  _tfhss_channel(n);
+  if (_tf_reply_len && _tf_reply_n == n) {
+    if (!micros_before(_tf_reply_at - 150)) _tf_replies_late++;
+    if (radio_tx_start_at(_tf_reply, _tf_reply_len, _tf_reply_at) == RADIO_OK) _tf_replies_sent++;
+  }
+  _tf_reply_len = 0;
+  _radio_rx_start(rx_len);
+}
 
 // A packet's sender: TX (*row, *syn = its key syndrome on channel c) or not
 static bool _tfhss_tx(const uint8_t* p, bool air, bool list, uint8_t c, uint8_t* row,
@@ -1993,8 +2035,10 @@ static void _cmd_tfhssrx(char* args)
 {
   uint32_t secs = _number_or(&args, 10), park = _number_or(&args, 10);
   uint32_t follow = _number_or(&args, 1), air = _number_or(&args, 0);
-  if (secs > 3600 || park == 0 || park > TFHSS_CHANNELS || follow > 1 || air > 1) {
-    _print("@err usage: tfhssrx [secs] [n] [follow] [air]\r\n");
+  uint32_t fakerx = _number_or(&args, 0), reply_us = _number_or(&args, TFHSS_REPLY_US);
+  if (secs > 3600 || park == 0 || park > TFHSS_CHANNELS || follow > 1 || air > 1 || fakerx > 1 ||
+      (fakerx && (air || !follow)) || reply_us < 600 || reply_us > 2600) {
+    _print("@err usage: tfhssrx [secs] [n] [follow] [air] [fakerx] [reply_us]\r\n");
     return;
   }
   if (!_load_preset(air ? "tfhssair" : "tfhss")) return;
@@ -2007,7 +2051,16 @@ static void _cmd_tfhssrx(char* args)
     _report_radio_error("tfhssrx");
     return;
   }
-  _printf("@ok tfhssrx secs=%lu n=%lu follow=%lu air=%lu\r\n", secs, park, follow, air);
+  _printf("@ok tfhssrx secs=%lu n=%lu follow=%lu air=%lu fakerx=%lu\r\n", secs, park, follow, air,
+          fakerx);
+  // fakerx: our ID, the TX's ID and x from its bind packets, linked
+  const uint8_t rx_id[4] = {(uint8_t)TFHSS_FAKE_RX_ID, (uint8_t)(TFHSS_FAKE_RX_ID >> 8),
+                            (uint8_t)(TFHSS_FAKE_RX_ID >> 16), (uint8_t)(TFHSS_FAKE_RX_ID >> 24)};
+  uint8_t tx_id[4] = {0}, tx_x = 0;
+  bool replied = false, linked = false;
+  uint32_t bind_replies = 0, data_ok = 0, data_bad = 0, telem = 0;
+  _tf_reply_len = 0;
+  _tf_replies_sent = _tf_replies_late = 0;
 
   // Locked on a TX: its key syndrome, the row (or TFHSS_ROW_LIST); the
   // channel hop_c first heard at t_hop; misses hops since. Air before
@@ -2045,14 +2098,54 @@ static void _cmd_tfhssrx(char* args)
           t_bind = pkt.timestamp_us;
           locked = cand = false;
           c = tfhss_next(TFHSS_ROW_LIST, c);
-          _radio_rx_stop();
-          _tfhss_channel(c);
-          _radio_rx_start(rx_len);
+          if (fakerx && (p[1] & 0x80) && replied) linked = true;
+          if (fakerx && !linked && !(replied && (p[1] & 0x80))) {
+            uint8_t r[TFHSS_DATA_LEN], zero[TFHSS_DATA_LEN] = {0};
+            memcpy(tx_id, p + 2, 4);
+            tx_x = p[6];
+            r[0] = tfhss_type(p) == 9 ? 25 : 24;
+            r[1] = ((p[1] >> 4 & 7) == 1) << 4;
+            memcpy(r + 2, p + 2, 5);
+            r[7] = p[7] & 0x1F;
+            memcpy(r + 8, rx_id, 4);
+            _tfhss_reply(r, zero, c, pkt.timestamp_us + reply_us - TFHSS_TX_SYNC_US);
+            replied = true;
+            bind_replies++;
+          }
+          _tfhss_hop(c, rx_len);
           _report_packet_on(&pkt, rx_channel);
           continue;
         }
         bool is_tx = _tfhss_tx(p, air, try_list, c, &prow, &syn);
         bool mine = is_tx && (!locked || syn == key_syn);
+        if (fakerx && linked && is_tx && (tfhss_type(p) & 0x1E) == 0) {
+          // Servo packet: the full key; type 0 -> the telemetry reply on the next channel
+          uint8_t key[TFHSS_DATA_LEN] = {0, 0, tx_id[0], tx_id[1], tx_id[2], tx_id[3], tx_x, c,
+                                         rx_id[0], rx_id[1], rx_id[2], rx_id[3]};
+          uint8_t pl[TFHSS_DATA_LEN];
+          for (int i = 0; i < TFHSS_DATA_LEN; i++) pl[i] = p[i] ^ key[i];
+          bool ok = tfhss_crc(pl, TFHSS_DATA_LEN, 0xFFFF) == (p[12] | p[13] << 8);
+          ok ? data_ok++ : data_bad++;
+          if (ok && tfhss_type(p) == 0) {
+            uint8_t n = tfhss_next(prow, c), g = telem & 7, r[TFHSS_DATA_LEN] = {0};
+            uint8_t rkey[TFHSS_DATA_LEN] = {0, 0, rx_id[0], rx_id[1], rx_id[2], rx_id[3], tx_x, n,
+                                            tx_id[0], tx_id[1], tx_id[2], tx_id[3]};
+            r[0] = TFHSS_TYPE_REPLY;
+            r[1] = g << 4;
+            if (g == 0) {
+              r[2] = 0xC0;
+              r[3] = 50;
+            }
+            if (telem & 1) {
+              r[10] = 0x40;
+              r[11] = 5;
+            } else {
+              r[11] = 100;
+            }
+            _tfhss_reply(r, rkey, n, pkt.timestamp_us + reply_us - TFHSS_TX_SYNC_US);
+            telem++;
+          }
+        }
         tx += is_tx && (!air || mine);
         replies += air ? locked && !mine : tfhss_type(p) >= TFHSS_TYPE_REPLY;
         move = follow && mine;
@@ -2094,9 +2187,7 @@ static void _cmd_tfhssrx(char* args)
         if (!lock) {
           row = prow;
           c = tfhss_next(row, c);
-          _radio_rx_stop();
-          _tfhss_channel(c);
-          _radio_rx_start(rx_len);
+          _tfhss_hop(c, rx_len);
           t_deadline = period ? t_hop + period + (period - period_min) + late_us
                               : micros() + TFHSS_WAIT_US;
         }
@@ -2106,9 +2197,7 @@ static void _cmd_tfhssrx(char* args)
       bind = false;
       bind_lost++;
       c = park;
-      _radio_rx_stop();
-      _tfhss_channel(c);
-      _radio_rx_start(rx_len);
+      _tfhss_hop(c, rx_len);
     } else if (cand && !micros_before(t_cand + TFHSS_AIR_SETTLE_US)) {
       lock = true;
       prow = cand_row;
@@ -2125,9 +2214,7 @@ static void _cmd_tfhssrx(char* args)
         c = tfhss_next(row, c);
         t_deadline = t_hop + (misses + 1) * period + (period - period_min) + late_us;
       }
-      _radio_rx_stop();
-      _tfhss_channel(c);
-      _radio_rx_start(rx_len);
+      _tfhss_hop(c, rx_len);
     } else if (!radio_rx_active()) {
       restarts++;
       _radio_rx_start(rx_len);
@@ -2143,9 +2230,7 @@ static void _cmd_tfhssrx(char* args)
       misses = 0;
       row = prow;
       c = tfhss_next(row, c);
-      _radio_rx_stop();
-      _tfhss_channel(c);
-      _radio_rx_start(rx_len);
+      _tfhss_hop(c, rx_len);
       t_deadline = micros() + TFHSS_WAIT_US;
     }
   }
@@ -2154,6 +2239,10 @@ static void _cmd_tfhssrx(char* args)
           "period_min=%lu restarts=%lu binds=%lu bind_hops=%lu bind_lost=%lu\r\n",
           packets, tx, replies, missed, locks, tries, period, period_min, restarts, binds, bind_hops,
           bind_lost);
+  if (fakerx)
+    _printf("@ev fakerx bind_replies=%lu linked=%u data_ok=%lu data_bad=%lu telem=%lu sent=%lu "
+            "late=%lu\r\n",
+            bind_replies, linked, data_ok, data_bad, telem, _tf_replies_sent, _tf_replies_late);
   _tfhss_channel(park);
 }
 
