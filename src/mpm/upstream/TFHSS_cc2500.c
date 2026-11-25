@@ -40,7 +40,7 @@
 // telemetry); then TFHSS_BIND_ACKED more with byte 1 bit 7 and its ID,
 // which make the receiver store the bind (R334SBS firmware). Failsafe: every 5 s a group of 4 frames, one
 // per channel: its F/S position, or hold (the 4PM Plus' default).
-// The per channel "high speed" flags (3 ms output frames) are left off.
+// In SR, the per channel "high speed"="narrow-band" flags in byte 9 (3 ms output frames) are driven by CH5..CH8
 //
 // Air (TFHSS_AIR): 128 kbps 2-FSK (the S-FHSS modem), 17 bytes, a frame
 // every 15.04 ms; 16 channels in 9 slots of 11 bits (us - 880), a slot's
@@ -70,9 +70,14 @@
 #define TFHSS_PERIOD			3000
 #define TFHSS_SR_PERIOD			1200
 #define TFHSS_RX_ON				1000	// from the TX packet's start: RX on the next channel
-// The reply (1.9 ms after the TX packet's start, 0.4 ms long) is read in the
-// next frame's callback, before its TX packet: the TX packet goes on air 0.4 ms
-// after the callback on the MPM v2, a read 2.5 ms after the callback missed it
+// The reply (its sync word 1.9 ms after the TX packet's, 14 bytes = 0.3 ms) is
+// read, and the RX turned off, TFHSS_RX_READ after the callback that sent the
+// TX packet: well before the receiver turns its own RX back on there (~2.6 ms
+// after the TX packet, R334SBS), where a CC2500 left in RX until our next
+// packet broke the link once the TX was ~60 kHz off (MT12, MPM #507)
+#ifndef TFHSS_RX_READ
+	#define TFHSS_RX_READ			2750	// STM32: the TX packet on air ~0.1 ms after the callback
+#endif
 #define TFHSS_LEN				14
 #define TFHSS_FS_EVERY			1667	// frames, 5 s
 #define TFHSS_SR_FS_EVERY		4167
@@ -128,7 +133,7 @@ static bool TFHSS_rx_known;
 static uint8_t TFHSS_misses;
 static uint8_t TFHSS_row;
 static bool TFHSS_list_mode;	// bind (link): hopping on the list
-static bool TFHSS_rx_pending;	// Surface: RX on for a reply, read at the next frame
+static bool TFHSS_rx_pending;	// Surface: RX on for a reply, read at TFHSS_RX_READ
 static uint8_t TFHSS_ch;		// the channel of the next TX packet
 static uint16_t TFHSS_frame;
 static uint16_t TFHSS_link;		// link frames left (after the reply) or sent
@@ -294,7 +299,7 @@ static void __attribute__((unused)) TFHSS_telemetry(uint8_t first, const uint8_t
 // Surface: the 12-bit value of a channel, 1020..2020 us at +-100 %
 static uint16_t __attribute__((unused)) TFHSS_value(uint8_t num, bool failsafe)
 {
-	int16_t v = convert_channel_16b_nolimit(CH_AETR[num], 448, 3648, failsafe);
+	int16_t v = convert_channel_16b_nolimit(num, 448, 3648, failsafe);
 	return v < 0 ? 0 : v > 4095 ? 4095 : v;
 }
 
@@ -332,16 +337,15 @@ static void __attribute__((unused)) TFHSS_surface_packet()
 		f = ch_code[k];
 		fs = 0x10;
 		#ifdef FAILSAFE_ENABLE
-			uint16_t v = Failsafe_data[CH_AETR[c]];
+			uint16_t v = Failsafe_data[c];
 			if(IS_FAILSAFE_VALUES_on && v != FAILSAFE_CHANNEL_HOLD && v != FAILSAFE_CHANNEL_NOPULSES)
-			{
+			{ // Failsafe without the hold flag (4PM Plus)
 				f |= 0x04;
+				fs = 0x00;
 				ch[c] = TFHSS_value(c, true);
 			}
 		#endif
 	}
-	uint8_t slot = TFHSS_frame & 3;
-	uint16_t e = TFHSS_value(4 + slot, false);
 	packet[0] = (sr ? 1 : 0) | (TFHSS_row & 7) << 5;
 	packet[1] = TFHSS_row >> 3 | (sr ? 0 : 0x10) | (f & 3) << 6;
 	packet[2] = (f >> 2) | (ch[0] & 0x0F) << 4;
@@ -351,7 +355,12 @@ static void __attribute__((unused)) TFHSS_surface_packet()
 	packet[6] = ch[2] >> 4;
 	packet[7] = ch[3];
 	packet[8] = (ch[3] >> 8) | 0x10;
-	packet[9] = fs;		// bits 0..3: the high speed flags
+	// packet[9] bits 0..3: high speed flags of CH1..4 . In SR, the narrow-band outputs ("SR channels" of Futaba radios) are set by CH5..CH8
+	uint8_t nb = sr ? Channel_AUX & 0x0F : 0;
+	packet[9] = fs | nb;
+	// One extra channel CH5..CH8 per frame but none in SR mode (4PM Plus)
+	uint8_t slot = sr ? 0 : TFHSS_frame & 3;
+	uint16_t e = sr ? 0 : TFHSS_value(4 + slot, false);
 	packet[10] = e;
 	packet[11] = (e >> 8) | slot << 4;
 	TFHSS_build(TFHSS_LEN, true);
@@ -603,13 +612,10 @@ static uint16_t __attribute__((unused)) TFHSS_callback()
 				TFHSS_surface_read(true);
 				return TFHSS_PERIOD;
 			}
-			// The packet built first, then the reply read (on this frame's
-			// channel), as late as possible, then the packet sent
 			if(TFHSS_list_mode)
 				TFHSS_surface_bind_packet();
 			else
 				TFHSS_surface_packet();
-			TFHSS_surface_read(TFHSS_list_mode);
 			CC2500_SetFreqOffset();
 			TFHSS_SetPower();
 			TFHSS_tune(TFHSS_ch);
@@ -628,8 +634,13 @@ static uint16_t __attribute__((unused)) TFHSS_callback()
 		case TFHSS_RX:
 			TFHSS_rx_on(TFHSS_LEN);
 			TFHSS_rx_pending = true;
+			phase = TFHSS_READ;
+			return TFHSS_RX_READ - TFHSS_RX_ON;
+		case TFHSS_READ:
+			// The reply (on the channel of the next TX packet), RX off
+			TFHSS_surface_read(TFHSS_list_mode);
 			phase = TFHSS_DATA;
-			return TFHSS_PERIOD - TFHSS_RX_ON;
+			return TFHSS_PERIOD - TFHSS_RX_READ;
 	}
 	return TFHSS_PERIOD;
 	#endif

@@ -56,6 +56,11 @@ function(target_mpm target)
     if (FRSKY_CC26XX_PLAN)
         target_compile_definitions(${target} PRIVATE FRSKY_CC26XX_PLAN)
     endif()
+    # T-FHSS Surface: the reply read later than on the STM32 (2750 us): the
+    # CC2500 emulation puts the TX packet on air ~0.4 ms after the callback
+    # (STM32 ~0.1 ms). ZBDongle-P against the 4-in-1 fake receiver: the
+    # R334SBS reply timing is taken at 2950, lost at 2750
+    target_compile_definitions(${target} PRIVATE TFHSS_RX_READ=2950)
 endfunction()
 
 # cmake --build <dir> --target flash: the board's MPM firmware, by
