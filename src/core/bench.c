@@ -114,6 +114,12 @@
 //                                the maximum length instead
 //   rxraw <len>                  receive continuously, len air bytes after the
 //                                sync word, no framing: @raw
+//   rssiscan [first] [last] [ms] [dbm]  RSSI survey on the current PHY and channel
+//                                plan, channels first..last (default 0..83), ms
+//                                each (default 200): @rssi <ch> <MHz>
+//                                busy=<windows at or above -dbm (default 70)>/<128
+//                                us windows> max=<dBm>, then @end rssiscan (systems
+//                                not known yet: which channels, how busy)
 //   stop                         stop the current job
 //   sched <period_us> [n]        alarm chain on absolute deadlines (previous +
 //                                period, timer_set_alarm()), n alarms (default
@@ -670,8 +676,8 @@ static void _print_chip()
 // Raised when the sniffer page needs the new behaviour of a command (its
 // "sniffer=" check): 2 = tfhssrx retunes before printing (SR's 1.2 ms frames),
 // 3 = tfhssrx air (T-FHSS Air), 4 = tfhssrx follows a Surface bind, 5 = and
-// hears its reply on the next list channel
-#define BENCH_SNIFFER_VERSION 5
+// hears its reply on the next list channel, 6 = rssiscan (Sanwa survey)
+#define BENCH_SNIFFER_VERSION 6
 
 static void _cmd_info()
 {
@@ -2349,6 +2355,49 @@ static void _cmd_edscan(char* args)
   if (_phy_ok && !_apply_phy()) _report_radio_error("radio init");
 }
 
+// RSSI survey on the current PHY (edscan's loop for any channel plan), blocking
+static void _cmd_rssiscan(char* args)
+{
+  uint32_t first = _number_or(&args, 0), last = _number_or(&args, 83);
+  uint32_t ms = _number_or(&args, 200);
+  int dbm = -(int)_number_or(&args, 70);
+  if (last < first || last > 255 || _ch_khz(last) > FREQ_MAX_KHZ || ms == 0 || ms > 10000) {
+    _print("@err usage: rssiscan [first] [last] [ms per channel] [-dBm threshold, e.g. 70]\r\n");
+    return;
+  }
+  if (_sx) {
+    _print("@err rssiscan: CC26xx radio only\r\n");
+    return;
+  }
+  if (!_need_phy()) return;
+  _job_stop();
+  _printf("@ok rssiscan first=%lu last=%lu ms=%lu dbm=%d\r\n", first, last, ms, dbm);
+  for (uint32_t n = first; n <= last && !_host_stop(); n++) {
+    uint32_t khz = _ch_khz(n);
+    radio_set_frequency(khz + _trim_khz);
+    radio_rx_start(RADIO_MAX_PKT_LEN);
+    uint32_t t0 = micros(), windows = 0, busy = 0;
+    int8_t top = RADIO_RSSI_NONE;
+    while (micros() - t0 < ms * 1000) {
+      uint32_t w0 = micros();
+      int8_t max = RADIO_RSSI_NONE;
+      while (micros() - w0 < 128) {
+        int8_t r = radio_rssi();
+        if (r > max) max = r;
+      }
+      if (max == RADIO_RSSI_NONE) continue;
+      windows++;
+      busy += max >= dbm;
+      if (max > top) top = max;
+      if (!radio_rx_active()) radio_rx_start(RADIO_MAX_PKT_LEN);  // ended by a packet
+    }
+    radio_rx_stop();
+    _printf("@rssi %lu %lu busy=%lu/%lu max=%d\r\n", n, khz / 1000, busy, windows, top);
+  }
+  _print("@end rssiscan\r\n");
+  if (!_apply_phy()) _report_radio_error("radio init");
+}
+
 // FASSTest receiver emulator (bench_fasst.c), blocking
 static void _cmd_ftrx(char* args)
 {
@@ -2737,6 +2786,7 @@ static void _process_line(char* line)
   else if (!strcmp(cmd, "fasstrx")) _cmd_fasstrx(args);
   else if (!strcmp(cmd, "jetirx")) _cmd_jetirx(args);
   else if (!strcmp(cmd, "edscan")) _cmd_edscan(args);
+  else if (!strcmp(cmd, "rssiscan")) _cmd_rssiscan(args);
   else if (!strcmp(cmd, "fasstest")) _cmd_fasstest(args);
   else if (!strcmp(cmd, "ftrx")) _cmd_ftrx(args);
   else if (!bench_port_command(cmd, args)) _printf("@err unknown command %s\r\n", cmd);

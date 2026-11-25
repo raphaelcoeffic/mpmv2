@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Futaba Sniffer</title>
-<meta name="description" content="Record Futaba FASST, T-FHSS (Surface and Air), S-FHSS and Mini-Z packets with a Sonoff ZBDongle-P, in the browser">
+<meta name="description" content="Record Futaba FASST, T-FHSS (Surface and Air), S-FHSS, Mini-Z and Sanwa / Airtronics FHSS packets with a Sonoff ZBDongle-P, in the browser">
 <!--
   FASST / T-FHSS sniffer for helpers: flashes the radio bench (build-zbp
   zbdongle-p-bench.bin, published next to this page as FIRMWARE) on a Sonoff
@@ -16,18 +16,23 @@
   list too), the others on one channel per
   recording: S-FHSS (preset sfhss, rx 13: a known protocol, checks the helper's setup) and
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
-  Mini-Z Evo that protocol?). Web Serial: Chrome, Edge, Firefox 151+ (desktop).
+  Mini-Z Evo that protocol?). Sanwa / Airtronics FHSS (Cypress CYRF6936 DSSS,
+  protocol unknown): rssiscan surveys with the transmitter off and on, then
+  rxraw 250 after a sync word on the CYRF preamble (preset dsm, sync cccccc)
+  on the channels the transmitter added, for doc/sanwa/tools/cyrf_blind.py.
+  Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
   Saved as a .zip holding the capture file (deflate with CompressionStream,
   stored without it); "Clear the recordings" starts a new set.
   Capture file: "# " header lines (key: value), then per recording
-  "@step <n> <title>", "@system <FASST|T-FHSS|T-FHSS Air|S-FHSS|Mini-Z> [ch=<n>]",
+  "@step <n> <title>", "@system <FASST|T-FHSS|T-FHSS Air|S-FHSS|Mini-Z|Sanwa> [ch=<n>]",
   "@note <text>", "@time <ISO date>" and the bench's lines. FASST: "@ok fasstrx
   ...", its "@fasst ..." lines and "@end fasstrx ...". T-FHSS: "@ok tfhssrx
   ...", its "@rx ...", "@lock ...", "@period ..." lines and "@end tfhssrx ...".
   Others: the "@ok" answers to preset, ch and rx, the "@rx ..." lines and
   "@ok stop ...". T-FHSS ch is the channel n = 1..31 it starts on (follow=0:
-  stays on), the others the bench ch.
+  stays on), the others the bench ch. Sanwa: "@rssi ..." lines (surveys) or
+  "@raw ..." lines.
 -->
 <style>
 :root {
@@ -150,6 +155,7 @@ first:</p>
   <option value="tfhssair">T-FHSS Air</option>
   <option value="sfhss">S-FHSS (reference)</option>
   <option value="miniz">Mini-Z (4PM Plus)</option>
+  <option value="sanwa">Sanwa / Airtronics FHSS (experimental)</option>
 </select>
 <label for="f-mode">Mode it is set to</label>
 <select id="f-mode"></select>
@@ -221,6 +227,36 @@ const SFHSS_CH = 100, SFHSS_CH2 = 190;
 // Kyosho FHSS bind (MPM Kyosho sub 0): ID 5475C52A, A7105 ch 0x0D and 0x8C in
 // turn. The data packets use the TX's own ID: only bind is heard
 const KYOSHO_BIND_CH = 13, KYOSHO_BIND_CH2 = 140;
+// Sanwa / Airtronics FHSS: CYRF6936 (DSSS, 1 Mchip/s), bench ch n at 2401 + n
+// MHz (preset dsm). Surveyed with the transmitter off, then on: the raw
+// recordings go on the channels it adds (busiest first, 3 MHz apart), else
+// on SANWA_CH. Raw: 250 bytes (2000 chips) after a 24 chip sync word on the
+// preamble (rig, 4-in-1 CYRF6936 8DR at 7 ms: 22 % of the packets, 32 chips 21 %,
+// 16 chips 27 % with more noise captures)
+const SANWA_SCAN = "rssiscan 0 82 150", SANWA_CH = [20, 45, 70];
+const SANWA_RAW = (ch) => ["preset dsm", "sync cccccc", `ch ${ch}`, "rxraw 250"];
+let sanwaSurvey = { off: null, on: null };
+function rssiBusy(lines) {
+  const busy = new Map();
+  for (const l of lines) {
+    const m = l.match(/^@rssi (\d+) \d+ busy=(\d+)\/(\d+)/);
+    if (m && Number(m[3])) busy.set(Number(m[1]), Number(m[2]) / Number(m[3]));
+  }
+  return busy;
+}
+// The k-th channel the transmitter added (on minus off), SANWA_CH[k] without
+// the surveys
+function sanwaCh(k) {
+  const on = sanwaSurvey.on, off = sanwaSurvey.off || new Map();
+  if (!on) return SANWA_CH[k];
+  const picked = [];
+  for (const [ch, b] of [...on].map(([c, b]) => [c, b - (off.get(c) || 0)]).sort((x, y) => y[1] - x[1])) {
+    if (b <= 0.002) break;
+    if (picked.every((p) => Math.abs(p - ch) >= 3)) picked.push(ch);
+    if (picked.length > k) return picked[k];
+  }
+  return SANWA_CH[k];
+}
 const SYSTEMS = {
   fasst: {
     name: "FASST", file: "fasst",
@@ -282,6 +318,29 @@ const SYSTEMS = {
         what: "The same: link (bind) once more. This one listens on a second channel." },
       { title: "Transmitter on, not linking", secs: 20, ch: KYOSHO_BIND_CH, maybeEmpty: true,
         what: "Stop linking, transmitter on, sticks centred. This one may record nothing: that's expected." },
+    ],
+  },
+  sanwa: {
+    name: "Sanwa", file: "sanwa",
+    cmds: (step) => step.survey ? ["preset dsm", "sync cccccc", SANWA_SCAN] : SANWA_RAW(step.ch),
+    packet: "@raw ", count: "none",
+    modes: ["FHSS-1", "FHSS-2", "FHSS-3", "FHSS-4T", "FH4 / FH4T", "FH5", "Other (write it in the note)",
+            "Don't know"],
+    steps: [
+      { title: "Survey, transmitter OFF", secs: 20, survey: "off", packet: "@rssi ",
+        what: "Switch the transmitter off. The stick listens to every channel to see what else is on the air (Wi-Fi...). Keep phones and other radios away." },
+      { title: "Survey, transmitter ON", secs: 20, survey: "on", packet: "@rssi ",
+        what: "Switch the transmitter on, sticks centred, 30 cm to 1 m from the stick. The stick listens to every channel again: the difference shows the channels it uses." },
+      { title: "Transmitter on, sticks centred", secs: 30, ch: () => sanwaCh(0),
+        what: "Transmitter on, sticks centred, nothing to do. This one listens on the busiest channel of the survey." },
+      { title: "Sticks moving", secs: 30, ch: () => sanwaCh(0),
+        what: "Move all sticks slowly from end to end, one after the other." },
+      { title: "Another channel", secs: 30, ch: () => sanwaCh(1),
+        what: "Sticks centred again, nothing to do: this one listens on another channel." },
+      { title: "Link (bind) a receiver (optional)", secs: 40, ch: () => sanwaCh(0),
+        what: "Only if you have a receiver: link (bind) it as its manual says, close to the transmitter. Skip this step if you have none." },
+      { title: "Third channel", secs: 30, ch: () => sanwaCh(2),
+        what: "Sticks centred, nothing to do: one more channel." },
     ],
   },
 };
@@ -666,8 +725,8 @@ async function afterConnect() {
 // kyosho presets are older), and the bench's "sniffer=" at least
 // SNIFFER_VERSION (2: tfhssrx keeps up with SR's 1.2 ms frames, 3: tfhssrx
 // air for T-FHSS Air, 4: tfhssrx follows a Surface bind over the list, 5:
-// and hears the receiver's reply on the next list channel)
-const SNIFFER_VERSION = 5;
+// and hears the receiver's reply on the next list channel, 6: rssiscan)
+const SNIFFER_VERSION = 6;
 async function sniffingWorks() {
   if (Number((bench.info.match(/sniffer=(\d+)/) || [])[1] || 0) < SNIFFER_VERSION) return false;
   try {
@@ -875,8 +934,12 @@ async function record(step, index, li) {
   if (running) return;
   const go = li.querySelector(".go"), live = li.querySelector(".live");
   const sys = system(), oneCh = !sys.run;
+  // Sanwa: the channel from the surveys recorded so far
+  if (typeof step.ch === "function") step = { ...step, ch: step.ch() };
+  const pfx = step.packet || sys.packet;
   const rec = { step: index + 1, title: step.title,
-                system: sys.name + (step.ch ? ` ch=${step.ch}` : "") +
+                system: sys.name + (step.survey ? ` survey=${step.survey}` : "") +
+                        (step.ch ? ` ch=${step.ch}` : "") +
                         (sys.run && step.ch ? ` follow=${step.follow ? 1 : 0}` : ""),
                 note: li.querySelector(".note").value.trim(),
                 time: new Date().toISOString(), lines: [], packets: 0, good: 0 };
@@ -901,7 +964,7 @@ async function record(step, index, li) {
   };
   bench.onEvent = (line) => {
     rec.lines.push(line);
-    if (line.startsWith(sys.packet)) {
+    if (line.startsWith(pfx)) {
       rec.packets++;
       const parts = line.split(" ");
       if (sys.count === "crc") {
@@ -912,7 +975,7 @@ async function record(step, index, li) {
         if (s >= 0) syndromes.set(s, (syndromes.get(s) || 0) + 1);
         const top = Math.max(0, ...syndromes.values());
         rec.good = top >= 3 ? top : 0;
-      } else {
+      } else if (sys.count !== "none") {
         const hex = parts.find((p, i) => i > 3 && !p.includes("="));
         if (hex && crc10ch(hex)) rec.good++;
       }
@@ -953,6 +1016,11 @@ async function record(step, index, li) {
       recordings.sort((a, b) => a.step - b.step);
       unsaved = true;
       show();
+      if (step.survey) {
+        sanwaSurvey[step.survey] = rssiBusy(rec.lines);
+        if (step.survey === "on")
+          live.textContent += ` · channels to record: ${[0, 1, 2].map(sanwaCh).join(", ")}`;
+      }
       live.textContent += rec.packets ? "  ✓ saved"
         : step.maybeEmpty ? "  ✓ saved (nothing received, as expected)"
         : `  — nothing received: is the transmitter on and in ${sys.name} mode?`;
