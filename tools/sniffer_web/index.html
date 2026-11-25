@@ -18,7 +18,7 @@
   Mini-Z (preset kyosho, rx 38 on the Kyosho FHSS bind channels: is the 4PM+'s
   Mini-Z Evo that protocol?). Sanwa / Airtronics FHSS (Cypress CYRF6936 DSSS,
   protocol unknown): rssiscan surveys with the transmitter off and on, then
-  rxraw 250 after a sync word on the CYRF preamble (preset dsm, sync cccccc)
+  rxraw 500 after a sync word on the CYRF preamble (preset dsm, sync cccccc)
   on the channels the transmitter added, for doc/sanwa/tools/cyrf_blind.py.
   Web Serial: Chrome, Edge, Firefox 151+ (desktop).
 
@@ -230,11 +230,11 @@ const KYOSHO_BIND_CH = 13, KYOSHO_BIND_CH2 = 140;
 // Sanwa / Airtronics FHSS: CYRF6936 (DSSS, 1 Mchip/s), bench ch n at 2401 + n
 // MHz (preset dsm). Surveyed with the transmitter off, then on: the raw
 // recordings go on the channels it adds (busiest first, 3 MHz apart), else
-// on SANWA_CH. Raw: 250 bytes (2000 chips) after a 24 chip sync word on the
-// preamble (rig, 4-in-1 CYRF6936 8DR at 7 ms: 22 % of the packets, 32 chips 21 %,
-// 16 chips 27 % with more noise captures)
+// on SANWA_CH. Raw: 500 bytes (4000 chips: DDR at 62.5 kbps takes 128 chips a
+// byte) after a 24 chip sync word on the preamble (rig, 4-in-1 CYRF6936 8DR at
+// 7 ms: 22 % of the packets, 32 chips 21 %, 16 chips 27 % with more noise)
 const SANWA_SCAN = "rssiscan 0 82 150", SANWA_CH = [20, 45, 70];
-const SANWA_RAW = (ch) => ["preset dsm", "sync cccccc", `ch ${ch}`, "rxraw 250"];
+const SANWA_RAW = (ch) => ["preset dsm", "sync cccccc", `ch ${ch}`, "rxraw 500"];
 let sanwaSurvey = { off: null, on: null };
 function rssiBusy(lines) {
   const busy = new Map();
