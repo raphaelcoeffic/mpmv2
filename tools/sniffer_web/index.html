@@ -818,8 +818,8 @@ $("b-backup").onclick = async () => {
     }
     if ((await bl.crc32(0, flashSize)) !== crc32(out)) throw new Error("the copy doesn't match: try again");
     await bl.leave();
-    download(new Blob([out], { type: "application/octet-stream" }), "zbdongle-p-backup.bin");
-    status("st-flash", "Saved zbdongle-p-backup.bin (the stick still has its firmware).", "ok");
+    download(new Blob([intelHex(out)], { type: "text/plain" }), "zbdongle-p-backup.hex");
+    status("st-flash", "Saved zbdongle-p-backup.hex (the stick still has its firmware): Sonoff's flasher takes it back.", "ok");
   } catch (e) {
     status("st-flash", "Failed: " + e.message, "bad");
   }
@@ -1087,6 +1087,29 @@ async function zipOne(name, text) {
   end.setUint32(12, cent.length + fname.length, true);
   end.setUint32(16, local.length + fname.length + body.length, true);
   return new Blob([local, fname, body, cent, fname, end], { type: "application/zip" });
+}
+
+// Intel HEX of a flash image from address 0: 16-byte records, erased (all
+// 0xFF) lines left out, a type 04 record at each 64 KB boundary used
+function intelHex(data) {
+  const lines = [];
+  const rec = (type, addr, bytes) => {
+    const b = [bytes.length, (addr >> 8) & 0xff, addr & 0xff, type, ...bytes];
+    const sum = (0x100 - (b.reduce((x, y) => x + y, 0) & 0xff)) & 0xff;
+    lines.push(":" + [...b, sum].map((x) => x.toString(16).padStart(2, "0")).join("").toUpperCase());
+  };
+  let upper = -1;
+  for (let a = 0; a < data.length; a += 16) {
+    const line = data.subarray(a, Math.min(a + 16, data.length));
+    if (line.every((x) => x === 0xff)) continue;
+    if (a >> 16 !== upper) {
+      upper = a >> 16;
+      rec(4, 0, [upper >> 8, upper & 0xff]);
+    }
+    rec(0, a & 0xffff, [...line]);
+  }
+  rec(1, 0, []);
+  return lines.join("\r\n") + "\r\n";
 }
 
 function download(blob, name) {
