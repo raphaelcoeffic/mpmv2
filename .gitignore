@@ -7,5 +7,6 @@ doc
 *.bin
 *.o
 build-*/
+build_*/
 __pycache__/
 .wrangler/
