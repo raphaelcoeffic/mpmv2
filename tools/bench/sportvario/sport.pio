@@ -1,0 +1,28 @@
+; S.Port half duplex on one pin, 8N1, 8 PIO cycles per bit. The line is
+; inverted in the GPIO block (inover / outover), so the programs see UART
+; levels: idle (mark) = 1.
+
+; RX: a byte per start bit, sampled mid bit; autopush at 8 bits, shifted
+; right (LSB first). No stop bit check.
+.program sport_rx
+.wrap_target
+    wait 0 pin 0
+    set x, 7        [10]    ; to the middle of bit 0
+bitloop:
+    in pins, 1
+    jmp x-- bitloop [6]
+.wrap
+
+; TX: drives the pin only while sending (pindirs by side set), released
+; after the stop bit, the receiver's pull holding the idle level.
+.program sport_tx
+.side_set 1 opt pindirs
+.wrap_target
+    pull block          side 0  ; released while idle
+    set pins, 0         side 1 [6]  ; drive: start bit (8 cycles with the set below)
+    set x, 7
+bitloop:
+    out pins, 1
+    jmp x-- bitloop     [6]
+    set pins, 1         [7]     ; stop bit
+.wrap
